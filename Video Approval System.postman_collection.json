@@ -1,0 +1,717 @@
+{
+	"info": {
+		"_postman_id": "67dd07a9-d568-4cfc-acef-23a5628f789d",
+		"name": "Video Approval System",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "32342062"
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Admin Login",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"email\": \"admin@talynk.com\",\r\n    \"password\": \"admin123\",\r\n    \"role\": \"admin\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Login",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"username\": \"ihirwe\",\r\n    \"email\": \"ihirwe12@gmail.com\",\r\n    \"password\": \"user123\",\r\n    \"role\": \"user\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"login"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Register",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"username\": \"ihirwe\",\r\n    \"email\": \"ihirwe12@gmail.com\",\r\n    \"password\": \"user123\",\r\n    \"role\": \"user\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/register",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"auth": {
+							"type": "jwt",
+							"jwt": [
+								{
+									"key": "header",
+									"value": "{\"eeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImlhdCI6MTc0MDU2MjQxMiwiZXhwIjoxNzQxMTY3MjEyfQ.UZsvfXMBFJyBoCcrPsPlxUvdXc5zCWhqFfCtQN5F8os\"}",
+									"type": "string"
+								},
+								{
+									"key": "algorithm",
+									"value": "HS256",
+									"type": "string"
+								},
+								{
+									"key": "isSecretBase64Encoded",
+									"value": false,
+									"type": "boolean"
+								},
+								{
+									"key": "payload",
+									"value": "{}",
+									"type": "string"
+								},
+								{
+									"key": "addTokenTo",
+									"value": "header",
+									"type": "string"
+								},
+								{
+									"key": "headerPrefix",
+									"value": "Bearer",
+									"type": "string"
+								},
+								{
+									"key": "queryParamKey",
+									"value": "token",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/refresh-token",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"refresh-token"
+							]
+						}
+					},
+					"response": []
+				}
+			],
+			"description": "All the Authentication procedures"
+		},
+		{
+			"name": "Admin",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/users",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"users"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Manage Account",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/accounts/manage",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"accounts",
+								"manage"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Register Approver",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"username\": \"approver1\",\r\n    \"password\": \"approver123\",\r\n    \"email\": \"app3@talynk.com\"\r\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/approvers",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"approvers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Approvers",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+								"type": "text"
+							},
+							{
+								"key": "",
+								"value": "",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/approvers",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"approvers"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Approver By Id",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "id",
+								"value": "735aadb8-ef64-4905-86d0-2712f7613780",
+								"type": "text",
+								"disabled": true
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/approvers/52085568-6945-4aca-a1a3-00cdf727e85b",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"approvers",
+								"52085568-6945-4aca-a1a3-00cdf727e85b"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Approver By Username",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjI2MDgxYTRkLTEzNDktNGI2MS1iNThhLTAwN2Q0YjZiMzMzYiIsImVtYWlsIjoiYWRtaW5AdGFseW5rLmNvbSIsInVzZXJuYW1lIjoiYWRtaW4iLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3NDA3NjIwNjMsImV4cCI6MTc0MDkzNDg2M30.Zr7ix1fRyW286ae3kxflCc_cCaPvX-fHD28cYKI_bvM",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/admin/approvers/approver1?Authorization =",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"admin",
+								"approvers",
+								"approver1"
+							],
+							"query": [
+								{
+									"key": "Authorization ",
+									"value": ""
+								},
+								{
+									"key": "username",
+									"value": "approver1",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Approver",
+			"item": [
+				{
+					"name": "Get Pending Posts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{approverToken}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/approver/posts/pending",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"approver",
+								"posts",
+								"pending"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Approve Post",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{approverToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/approver/posts/{{postId}}/approve",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"approver",
+								"posts",
+								"{{postId}}",
+								"approve"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Generate Report",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{approverToken}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/approver/reports",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"approver",
+								"reports"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "user",
+			"item": [
+				{
+					"name": "Create Post",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/C:/Users/ihirwe/Pictures/Pins/! 𝑴𝒐𝒓𝒆𝒏𝒐 🖤.jpg"
+								},
+								{
+									"key": "title",
+									"value": "This is the title for the post ",
+									"type": "text"
+								},
+								{
+									"key": "caption",
+									"value": "Caption is this text",
+									"type": "text"
+								},
+								{
+									"key": "post_category",
+									"value": "Category of the post",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/posts",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"posts"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Post",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+								"type": "text",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/posts/ed801cb6-a400-4c84-8313-8013cd74d563:?Authorization=",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"posts",
+								"ed801cb6-a400-4c84-8313-8013cd74d563:"
+							],
+							"query": [
+								{
+									"key": "Authorization",
+									"value": ""
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "View Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"profile"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"phone1\": \"0786564924\",\r\n    \"phone2\": \"0786564924\",\r\n    \"username\": \"admin3\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/profile",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"profile"
+							],
+							"query": [
+								{
+									"key": "Authorization",
+									"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "View Posts",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": []
+					},
+					"response": []
+				},
+				{
+					"name": "Retrieve Recent Searches",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api//user/searches?A",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"",
+								"user",
+								"searches"
+							],
+							"query": [
+								{
+									"key": "A",
+									"value": null
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Post Recent Search",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjkwZGNlNDk1LWJmODMtNGY5Yi05NTlkLWQ0NTEzM2MzNjE0MCIsImVtYWlsIjoiaWhpcndlMTJAZ21haWwuY29tIiwidXNlcm5hbWUiOiJpaGlyd2UiLCJyb2xlIjoidXNlciIsImlhdCI6MTc0MDc2MjI0OSwiZXhwIjoxNzQwOTM1MDQ5fQ.7BzYxOMA4zAE-P4EG4shFQMGYLqzVTjyQ3RJDmJMVtw",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n    \"searchTerm\" : \"Sports\"\r\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api//user/searches",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"",
+								"user",
+								"searches"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
