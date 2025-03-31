@@ -208,7 +208,7 @@ exports.deletePost = async (req, res) => {
 
         const post = await Post.findOne({
             where: {
-                unique_traceability_id: postId,
+                id: postId,
                 user_id: userID
             }
         });
@@ -224,7 +224,7 @@ exports.deletePost = async (req, res) => {
 
         // Update user's post count
         await User.decrement('posts_count', {
-            where: { username }
+            where: { id: userID }
         });
 
         res.json({
