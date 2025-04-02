@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Admin = require('../models/Admin');
 const Approver = require('../models/Approver');
 const { Op } = require('sequelize');
+const { TIME } = require('@sequelize/core/_non-semver-use-at-your-own-risk_/data-types.js');
 
 exports.register = async (req, res) => {
     try {
@@ -29,7 +30,9 @@ exports.register = async (req, res) => {
         const user = await User.create({
             username,
             email,
-            password: hashedPassword
+            password: hashedPassword,
+            createdAt: new Date(),
+            updatedAt: new Date()
         });
    
         res.status(201).json({

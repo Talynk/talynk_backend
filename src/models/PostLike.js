@@ -25,7 +25,8 @@ const PostLike = sequelize.define('PostLike', {
   }
 }, {
   tableName: 'post_likes',
-  timestamps: false
+  timestamps: false,
+
 });
 
 // Define associations in a separate function to be called after all models are loaded

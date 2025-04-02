@@ -6,8 +6,11 @@ const PostLike = require('../models/PostLike.js');
 const { v4: uuidv4 } = require('uuid');
 const { Op } = require('sequelize');
 const path = require('path');
-const db = require('../config/db');
-const Sequelize = require('sequelize');
+const db = require('../config/database');
+const { sql}  =  require("@sequelize/core")
+const { QueryTypes } = require('sequelize');
+const Notification = require('../models/Notification.js');
+
 exports.createPost = async (req, res) => {
     try {
         const { title, caption, post_category } = req.body;
@@ -442,10 +445,12 @@ exports.getUserPosts = async (req, res) => {
             if (postData.video_url) {
                 postData.fullUrl = `${req.protocol}://${req.get('host')}${postData.video_url}`;
             }
+            console.log(` Posts: ${JSON.stringify(postData)}`)
             return postData;
         });
-
+        console.log(` Posts: ${JSON.stringify(postsWithUrls)}`)
         res.json({
+          
             status: 'success',
             data: { posts: postsWithUrls }
         });
@@ -769,42 +774,53 @@ exports.getPost = async (req, res) => {
 exports.likePost = async (req, res) => {
     try {
         const { postId } = req.params;
-        const username = req.user.username;
+        const userID = req.user.id;
+        console.log("user id ----->", userID);
 
-        const [like, created] = await PostLike.findOrCreate({
+        // Check if like exists using Sequelize model
+        const existingLike = await PostLike.findOne({
             where: {
-                postID: postId,
-                userID: username
-            },
-            defaults: {
-                like_date: new Date()
+                post_id: postId,
+                user_id: userID
             }
         });
 
-        if (!created) {
-            // Unlike
-            await like.destroy();
+        if (existingLike) {
+            // Unlike - Delete the like and decrement count
+            await existingLike.destroy();
+            
             await Post.decrement('likes', {
-                where: { uniqueTraceability_id: postId }
+                where: { id: postId }
             });
         } else {
-            // Like
+            // Like - Create new like and increment count
+            await PostLike.create({
+                post_id: postId,
+                user_id: userID,
+                like_date: new Date()
+            });
+
             await Post.increment('likes', {
-                where: { uniqueTraceability_id: postId }
+                where: { id: postId }
             });
 
             // Notify post owner
-            const post = await Post.findByPk(postId);
-            await Notification.create({
-                userID: post.uploaderID,
-                notification_text: `${username} liked your post`,
-                notification_date: new Date()
+            const post = await Post.findByPk(postId, {
+                attributes: ['user_id']
             });
+
+            if (post) {
+                await Notification.create({
+                    userID: post.user_id,
+                    notification_text: `${req.user.username} liked your post`,
+                    notification_date: new Date()
+                });
+            }
         }
 
         res.json({
             status: 'success',
-            message: created ? 'Post liked successfully' : 'Post unliked successfully'
+            message: existingLike ? 'Post unliked successfully' : 'Post liked successfully'
         });
     } catch (error) {
         console.error('Like/Unlike error:', error);
