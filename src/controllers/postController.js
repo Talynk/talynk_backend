@@ -104,11 +104,12 @@ exports.getAllPosts = async (req, res) => {
             include: [
                 {
                     model: User,
-                    as: 'uploader',
+                    as: 'user',
                     attributes: ['id', 'username']
                 },
                 {
                     model: Category,
+                    as: 'category',
                     attributes: ['id', 'name']
                 }
             ]
@@ -118,20 +119,20 @@ exports.getAllPosts = async (req, res) => {
         const postsWithUrls = posts.map(post => {
             const postData = post.toJSON();
             if (postData.url) {
-                postData.fullUrl = `${req.protocol}://${req.get('host')}${postData.url}`;
+                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.url}`;
             }
             return postData;
         });
 
         res.json({
             status: 'success',
-            data: { posts: postsWithUrls }
+            data: postsWithUrls
         });
     } catch (error) {
         console.error('Error getting posts:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching posts',
+            message: 'Error getting posts',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

@@ -43,6 +43,7 @@ router.post('/posts', authenticate, upload.single('file'), postController.create
 router.get('/posts/user', authenticate, postController.getUserPosts);
 router.delete('/posts/:postId', authenticate, postController.deletePost);
 router.post('/posts/:postId/like', authenticate, postController.likePost);
+router.get('/posts/all', authenticate,postController.getAllPosts);
 
 // Comment routes
 router.post('/posts/:postId/comments', authenticate, commentController.addComment);

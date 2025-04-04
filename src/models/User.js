@@ -108,7 +108,7 @@ User.associate = (models) => {
   });
   
   User.hasMany(models.PostLike, {
-    foreignKey: 'userID',
+    foreignKey: 'user_id',
     sourceKey: 'username'
   });
   

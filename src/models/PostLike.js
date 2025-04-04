@@ -25,9 +25,10 @@ const PostLike = sequelize.define('PostLike', {
   }
 }, {
   tableName: 'post_likes',
-  timestamps: false,
-
+  timestamps: false,  // Keep this if you don't need `createdAt` and `updatedAt`
 });
+
+
 
 // Define associations in a separate function to be called after all models are loaded
 PostLike.associate = (models) => {
