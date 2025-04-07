@@ -83,15 +83,15 @@ exports.getPendingPosts = async (req, res) => {
 exports.getApprovedPosts = async (req, res) => {
     try {
         const { date, search, page = 1, limit = 10 } = req.query;
-        const approverUsername = req.user.username;
+        const approverUsername = req.user.id;
         const whereClause = {
-            post_status: 'approved',
-            approverID: approverUsername
+            status: 'approved',
+            approver_id: approverUsername
         };
 
         if (date) {
             const searchDate = new Date(date);
-            whereClause.approvedDate = {
+            whereClause.approved_at = {
                 [Op.gte]: searchDate,
                 [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
             };
@@ -109,7 +109,7 @@ exports.getApprovedPosts = async (req, res) => {
                 model: User,
                 attributes: ['username', 'email']
             }],
-            order: [['approvedDate', 'DESC']],
+            order: [['approved_at', 'DESC']],
             limit: parseInt(limit),
             offset: (page - 1) * limit
         });

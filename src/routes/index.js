@@ -60,6 +60,8 @@ router.post('/admin/accounts/manage', authenticate, isAdmin, adminController.man
 router.post('/admin/approvers', authenticate, isAdmin, adminController.registerApprover);
 router.delete('/admin/approvers/:username', authenticate, adminController.removeApprover);
 router.get('/admin/videos', authenticate, isAdmin, adminController.getAllVideos);
+router.put('/admin/approve', authenticate, isAdmin, adminController.updatePostStatus);
+router.get('/admin/approved/posts', authenticate, isAdmin, adminController.getApprovedPosts);
 
 // Approver routes
 router.get('/approver/stats', authenticate, isApprover, approverController.getApproverStats);

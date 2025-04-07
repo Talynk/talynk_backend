@@ -1,8 +1,8 @@
-const { Approver } = require('../models');
+const Approver = require('../models/Approver');
 
 exports.isApprover = async (req, res, next) => {
     try {
-        const approver = await Approver.findByPk(req.user.username);
+        const approver = await Approver.findByPk(req.user.id);
         
         if (!approver) {
             return res.status(403).json({

@@ -151,7 +151,7 @@ exports.getPendingPosts = async (req, res) => {
             include: [
                 {
                     model: User,
-                    as: 'uploader',
+                    as: 'user',
                     attributes: ['id', 'username']
                 },
                 {
@@ -179,8 +179,11 @@ exports.getPendingPosts = async (req, res) => {
 // Update post status (approve/reject)
 exports.updatePostStatus = async (req, res) => {
     try {
+        console.log(req.body)
         const { status, rejectionReason } = req.body;
-        const post = await Post.findByPk(req.params.id);
+        console.log("Post: --------> " + req.body)
+        const post = await Post.findByPk(req.body.id);
+        
 
         if (!post) {
             return res.status(404).json({
@@ -279,6 +282,58 @@ exports.manageUserAccount = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error managing account'
+        });
+    }
+};
+exports.getApprovedPosts = async (req, res) => {
+    try {
+        const { date, search, page = 1, limit = 10 } = req.query;
+        const approverUsername = req.user.id;
+        const whereClause = {
+            status: 'approved',
+            // approver_id: approverUsername
+        };
+
+        if (date) {
+            const searchDate = new Date(date);
+            whereClause.approved_at = {
+                [Op.gte]: searchDate,
+                [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+            };
+        }
+
+        if (search) {
+            whereClause.title = {
+                [Op.like]: `%${search}%`
+            };
+        }
+
+        const posts = await Post.findAndCountAll({
+            where: whereClause,
+            include: [{
+                model: User,
+                as: 'user',
+                attributes: ['username', 'email']
+            }],
+            order: [['approved_at', 'DESC']],
+            limit: parseInt(limit),
+            offset: (page - 1) * limit
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                posts: posts.rows,
+                total: posts.count,
+                pages: Math.ceil(posts.count / limit),
+                currentPage: parseInt(page)
+            }
+        });
+    } catch (error) {
+        console.error('Approved posts fetch error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching approved posts'
         });
     }
 };
