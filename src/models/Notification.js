@@ -3,17 +3,18 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 const Notification = sequelize.define('Notification', {
-  notificationID: {
+  notification_id: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     autoIncrement: true
   },
-  userID: {
-    type: DataTypes.STRING(255),
+  user_id: {
+    type: DataTypes.UUID,
     allowNull: false,
+    field:'user_id',
     references: {
       model: 'users',
-      key: 'username'
+      key: 'id'
     }
   },
   notification_text: {
@@ -28,6 +29,7 @@ const Notification = sequelize.define('Notification', {
     defaultValue: false
   }
 }, {
+  // underscored: true,
   tableName: 'notifications',
   timestamps: false
 });
@@ -35,9 +37,10 @@ const Notification = sequelize.define('Notification', {
 // Define associations in a separate function to be called after all models are loaded
 Notification.associate = (models) => {
   Notification.belongsTo(models.User, {
-    foreignKey: 'userID',
-    targetKey: 'username'
+    foreignKey: 'user_id',
+    targetKey: 'id'
   });
 };
 
 module.exports = Notification; 
+

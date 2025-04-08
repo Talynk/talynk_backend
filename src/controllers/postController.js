@@ -10,6 +10,7 @@ const db = require('../config/database');
 const { sql}  =  require("@sequelize/core")
 const { QueryTypes } = require('sequelize');
 const Notification = require('../models/Notification.js');
+const sequelize = require('../config/database');
 
 exports.createPost = async (req, res) => {
     try {
@@ -775,47 +776,84 @@ exports.getPost = async (req, res) => {
 exports.likePost = async (req, res) => {
     try {
         const { postId } = req.params;
-        const userID = req.user.id;
-        console.log("user id ----->", userID);
+        const userID = req.user.id; // Using username instead of ID since PostLike uses username
+        console.log("username ----->", userID);
 
-        // Check if like exists using Sequelize model
-        const existingLike = await PostLike.findOne({
-            where: {
-                post_id: postId,
-                user_id: userID
+        // Check if like exists using raw SQL
+        const [existingLike] = await sequelize.query(
+            `SELECT * FROM post_likes 
+             WHERE post_id = $1 AND user_id = $2`,
+            {
+                bind: [postId, userID],
+                type: sequelize.QueryTypes.SELECT
             }
-        });
+        );
 
         if (existingLike) {
             // Unlike - Delete the like and decrement count
-            await existingLike.destroy();
+            await sequelize.query(
+                `DELETE FROM post_likes 
+                 WHERE post_id = $1 AND user_id = $2`,
+                {
+                    bind: [postId, userID],
+                    type: sequelize.QueryTypes.DELETE
+                }
+            );
             
-            await Post.decrement('likes', {
-                where: { id: postId }
-            });
+            await sequelize.query(
+                `UPDATE posts 
+                 SET likes = likes - 1 
+                 WHERE id = $1`,
+                {
+                    bind: [postId],
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
         } else {
             // Like - Create new like and increment count
-            await PostLike.create({
-                post_id: postId,
-                user_id: userID,
-                like_date: new Date()
-            });
+            await sequelize.query(
+                `INSERT INTO post_likes (post_id, user_id, like_date)
+                 VALUES ($1, $2, $3)`,
+                {
+                    bind: [postId, userID, new Date()],
+                    type: sequelize.QueryTypes.INSERT
+                }
+            );
 
-            await Post.increment('likes', {
-                where: { id: postId }
-            });
+            await sequelize.query(
+                `UPDATE posts 
+                 SET likes = likes + 1 
+                 WHERE id = $1`,
+                {
+                    bind: [postId],
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
 
-            // Notify post owner
-            const post = await Post.findByPk(postId, {
-                attributes: ['user_id']
-            });
+            // Get post owner's ID for notification
+            const [post] = await sequelize.query(
+                `SELECT user_id FROM posts WHERE id = $1`,
+                {
+                    bind: [postId],
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
 
             if (post) {
-                await Notification.create({
-                    userID: post.user_id,
-                    notification_text: `${req.user.username} liked your post`,
-                    notification_date: new Date()
-                });
+                // Create notification using raw SQL
+                await sequelize.query(
+                    `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+                     VALUES ($1, $2, $3, $4)`,
+                    {
+                        bind: [
+                            post.user_id,
+                            `${userID} liked your post`,
+                            new Date(),
+                            false
+                        ],
+                        type: sequelize.QueryTypes.INSERT
+                    }
+                );
             }
         }
 

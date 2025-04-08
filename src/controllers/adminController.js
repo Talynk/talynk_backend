@@ -363,17 +363,51 @@ exports.getAllVideos = async (req, res) => {
 exports.registerApprover = async (req, res) => {
     try {
         const { username, email, password } = req.body;
+        const adminUsername = req.user.username;
+
+        // Check if approver exists with the same email or username
+        const existingApprover = await Approver.findOne({
+            where: {
+                [Op.or]: [
+                    { email: email },
+                    { username: username }
+                ]
+            }
+        });
+
+        if (existingApprover) {
+            return res.status(409).json({
+                status: 'error',
+                message: 'Approver already exists',
+                data: {
+                    exists: true,
+                    field: existingApprover.email === email ? 'email' : 'username'
+                }
+            });
+        }
+
+        // Hash password before storing
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create new approver using Sequelize model
         await Approver.create({
             username,
             email,
-            password // Assume password is hashed in a pre-save hook
+            password: hashedPassword,
+            registeredBy: adminUsername,
+            role: 'approver',
+            status: 'active',
+            can_view_approved: true,
+            can_view_pending: true,
+            can_view_all_accounts: true
         });
-        res.json({
+
+        res.status(201).json({
             status: 'success',
             message: 'Approver registered successfully'
         });
     } catch (error) {
-        console.log(error);
+        console.error('Error registering approver:', error);
         res.status(500).json({
             status: 'error',
             message: 'Error registering approver'

@@ -3,6 +3,8 @@ const Post = require('../models/Post.js');
 const User = require('../models/User.js');
 const Notification = require('../models/Notification.js');
 const { Op } = require('sequelize');
+const {validate, parse} = require('uuid');
+const sequelize = require('../config/database');
 
 exports.getApproverStats = async (req, res) => {
     try {
@@ -52,12 +54,13 @@ exports.getPendingPosts = async (req, res) => {
         const offset = (page - 1) * limit;
 
         const posts = await Post.findAndCountAll({
-            where: { post_status: 'pending' },
+            where: { status: 'pending' },
             include: [{
                 model: User,
+                as: "user",
                 attributes: ['username', 'email']
             }],
-            order: [['uploadDate', 'DESC']],
+            order: [['updated_at', 'DESC']],
             limit: parseInt(limit),
             offset: parseInt(offset)
         });
@@ -107,6 +110,7 @@ exports.getApprovedPosts = async (req, res) => {
             where: whereClause,
             include: [{
                 model: User,
+                as: "user",
                 attributes: ['username', 'email']
             }],
             order: [['approved_at', 'DESC']],
@@ -168,13 +172,19 @@ exports.approvePost = async (req, res) => {
     try {
         const { postId } = req.params;
         const { notes } = req.body;
-        const approverUsername = req.user.username;
+        const approverUsername = req.user.id;
+        console.log("Got id ----->" + postId + "Type of it is : ----->" + typeof postId)
 
         const post = await Post.findOne({
             where: { 
-                uniqueTraceability_id: postId,
-                post_status: 'pending'
-            }
+                id: postId,
+                status: 'pending'
+            },
+            include: [{
+                model: User,
+                as: "user",
+                attributes: ['username',"id"]
+            }]
         });
 
         if (!post) {
@@ -185,18 +195,26 @@ exports.approvePost = async (req, res) => {
         }
 
         await post.update({
-            post_status: 'approved',
-            approverID: approverUsername,
-            approvedDate: new Date(),
+            status: 'approved',
+            approver_id: approverUsername,
+            aproved_at: new Date(),
             review_notes: notes
         });
 
-        // Notify post owner
-        await Notification.create({
-            userID: post.uploaderID,
-            notification_text: 'Your post has been approved',
-            notification_date: new Date()
-        });
+        // Create notification using raw SQL
+        await sequelize.query(
+            `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+             VALUES ($1, $2, $3, $4)`,
+            {
+                bind: [
+                    post.user?.id,
+                    'Your post has been approved',
+                    new Date(),
+                    false
+                ],
+                type: sequelize.QueryTypes.INSERT
+            }
+        );
 
         res.json({
             status: 'success',
@@ -219,9 +237,14 @@ exports.rejectPost = async (req, res) => {
 
         const post = await Post.findOne({
             where: { 
-                uniqueTraceability_id: postId,
-                post_status: 'pending'
-            }
+                id: postId,
+                status: 'pending'
+            },
+            include: [{
+                model: User,
+                as: "user",
+                attributes: ['username', 'id']
+            }]
         });
 
         if (!post) {
@@ -232,18 +255,26 @@ exports.rejectPost = async (req, res) => {
         }
 
         await post.update({
-            post_status: 'rejected',
-            approverID: approverUsername,
-            rejectedDate: new Date(),
+            status: 'rejected',
+            approver_id: approverUsername,
+            rejected_at: new Date(),
             review_notes: notes
         });
 
-        // Notify post owner
-        await Notification.create({
-            userID: post.uploaderID,
-            notification_text: `Your post has been rejected. Reason: ${notes}`,
-            notification_date: new Date()
-        });
+        // Create notification using raw SQL
+        await sequelize.query(
+            `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+             VALUES ($1, $2, $3, $4)`,
+            {
+                bind: [
+                    post.user.id,
+                    `Your post has been rejected. Reason: ${notes}`,
+                    new Date(),
+                    false
+                ],
+                type: sequelize.QueryTypes.INSERT
+            }
+        );
 
         res.json({
             status: 'success',
@@ -262,11 +293,17 @@ exports.getApproverNotifications = async (req, res) => {
     try {
         const approverUsername = req.user.username;
 
-        const notifications = await Notification.findAll({
-            where: { userID: approverUsername },
-            order: [['notification_date', 'DESC']],
-            limit: 50
-        });
+        // Get notifications using raw SQL
+        const [notifications] = await sequelize.query(
+            `SELECT * FROM notifications 
+             WHERE user_id = $1 
+             ORDER BY notification_date DESC 
+             LIMIT 50`,
+            {
+                bind: [approverUsername],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
 
         res.json({
             status: 'success',
