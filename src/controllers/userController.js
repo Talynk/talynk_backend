@@ -8,13 +8,25 @@ const PostLike = require('../models/PostLike.js');
 const RecentSearch = require('../models/RecentSearch.js');
 const { Op } = require('sequelize');
 const db = require('../config/db');
+const sequelize = require('../config/database');
 
 // Get user profile
 exports.getProfile = async (req, res) => {
     try {
-        const user = await User.findByPk(req.user.username, {
-            attributes: { exclude: ['password'] }
-        });
+        const userId = req.user.id;
+        
+        // Get user using raw SQL to avoid field naming issues
+        const [user] = await sequelize.query(
+            `SELECT id, username, email, phone1, phone2, selected_category, 
+                    total_profile_views, likes, subscribers, recent_searches, 
+                    profile_picture, bio, status, role, last_login
+             FROM users 
+             WHERE id = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
 
         if (!user) {
             return res.status(404).json({
@@ -31,7 +43,8 @@ exports.getProfile = async (req, res) => {
         console.error('Profile fetch error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching profile'
+            message: 'Error fetching profile',
+            details: error.message
         });
     }
 };
@@ -40,9 +53,17 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
     try {
         const { phone1, phone2, selected_category } = req.body;
-        const username = req.user.username;
+        const user_id = req.user.id;
 
-        const user = await User.findByPk(username);
+        // Get user using raw SQL to avoid field naming issues
+        const [user] = await sequelize.query(
+            `SELECT * FROM users WHERE id = $1`,
+            {
+                bind: [user_id],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
         if (!user) {
             return res.status(404).json({
                 status: 'error',
@@ -50,32 +71,95 @@ exports.updateProfile = async (req, res) => {
             });
         }
 
-        // Update user
-        await user.update({
+        // Handle facial image upload
+        let facialImageBuffer = null;
+        if (req.file) {
+            console.log("File received:", req.file.originalname, req.file.mimetype, req.file.size);
+            
+            // Validate file type
+            const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+            if (!allowedMimeTypes.includes(req.file.mimetype)) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid file type. Only JPEG, PNG, and JPG images are allowed.'
+                });
+            }
+
+            // Validate file size (max 5MB)
+            const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+            if (req.file.size > maxSize) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'File size too large. Maximum size is 5MB.'
+                });
+            }
+
+            // Read the file from disk
+            try {
+                const fs = require('fs');
+                facialImageBuffer = fs.readFileSync(req.file.path);
+                
+                // Clean up the temporary file
+                fs.unlinkSync(req.file.path);
+            } catch (err) {
+                console.error('Error reading file:', err);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Error processing uploaded file',
+                    details: err.message
+                });
+            }
+        }
+
+        // Prepare update data
+        const updateData = {
             phone1: phone1 || user.phone1,
             phone2: phone2 || user.phone2,
-            selected_category: selected_category || user.selected_category,
-            user_facial_image: req.file ? req.file.buffer : user.user_facial_image
-        });
+            selected_category: selected_category || user.selected_category
+        };
+
+        // Only update facial image if a new one was uploaded
+        if (facialImageBuffer) {
+            updateData.user_facial_image = facialImageBuffer;
+        }
+
+        // Update user using raw SQL
+        await sequelize.query(
+            `UPDATE users 
+             SET phone1 = $1, phone2 = $2, selected_category = $3${facialImageBuffer ? ', user_facial_image = $4' : ''}
+             WHERE id = $${facialImageBuffer ? '5' : '4'}`,
+            {
+                bind: facialImageBuffer 
+                    ? [updateData.phone1, updateData.phone2, updateData.selected_category, facialImageBuffer, user_id]
+                    : [updateData.phone1, updateData.phone2, updateData.selected_category, user_id],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
+
+        // Get updated user data
+        const [updatedUser] = await sequelize.query(
+            `SELECT id, username, email, phone1, phone2, selected_category FROM users WHERE id = $1`,
+            {
+                bind: [user_id],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+        
+        console.log("Updated data -------->", updatedUser);
 
         res.json({
             status: 'success',
             message: 'Profile updated successfully',
             data: {
-                user: {
-                    username: user.username,
-                    email: user.email,
-                    phone1: user.phone1,
-                    phone2: user.phone2,
-                    selected_category: user.selected_category
-                }
+                user: updatedUser
             }
         });
     } catch (error) {
         console.error('Profile update error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error updating profile'
+            message: 'Error updating profile',
+            details: error.message
         });
     }
 };
@@ -83,25 +167,55 @@ exports.updateProfile = async (req, res) => {
 // Get user statistics
 exports.getStatistics = async (req, res) => {
     try {
+        const userId = req.user.id;
         const username = req.user.username;
 
-        const [user, posts, comments, likes] = await Promise.all([
-            User.findByPk(username),
-            Post.count({ where: { uploaderID: username } }),
-            Comment.count({ where: { commentorID: username } }),
-            PostLike.count({ where: { userID: username } })
-        ]);
+        // Get user data
+        const [user] = await sequelize.query(
+            `SELECT * FROM users WHERE id = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        // Get post count
+        const [postCount] = await sequelize.query(
+            `SELECT COUNT(*) as count FROM posts WHERE user_id = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        // Get comment count
+        const [commentCount] = await sequelize.query(
+            `SELECT COUNT(*) as count FROM comments WHERE commentor_id = $1`,
+            {
+                bind: [username],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        // Get like count
+        const [likeCount] = await sequelize.query(
+            `SELECT COUNT(*) as count FROM post_likes WHERE user_id = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
 
         res.json({
             status: 'success',
             data: {
                 statistics: {
-                    posts_count: posts,
+                    posts_count: parseInt(postCount.count),
                     total_profile_views: user.total_profile_views,
                     total_likes: user.likes,
                     total_subscribers: user.subscribers,
-                    total_comments: comments,
-                    total_likes_given: likes
+                    total_comments: parseInt(commentCount.count),
+                    total_likes_given: parseInt(likeCount.count)
                 }
             }
         });
@@ -148,15 +262,24 @@ exports.addSearchTerm = async (req, res) => {
         const username = req.user.username;
         const { searchTerm } = req.body;
         
-        // Create a new search record using Sequelize
-        await RecentSearch.create({
-            user_id: username,
-            search_term: searchTerm,
-            search_date: new Date()
-        });
+        // Create a new search record using raw SQL
+        await sequelize.query(
+            `INSERT INTO recent_searches (user_id, search_term, search_date)
+             VALUES ($1, $2, $3)`,
+            {
+                bind: [username, searchTerm, new Date()],
+                type: sequelize.QueryTypes.INSERT
+            }
+        );
 
-        // Update user's recent_searches array using Sequelize
-        const user = await User.findByPk(username);
+        // Update user's recent_searches array using raw SQL
+        const [user] = await sequelize.query(
+            `SELECT recent_searches FROM users WHERE username = $1`,
+            {
+                bind: [username],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
         
         if (user) {
             // Get current recent searches or initialize empty array
@@ -175,8 +298,14 @@ exports.addSearchTerm = async (req, res) => {
             // Add new search term
             recentSearches.push(searchTerm);
             
-            // Update the user
-            await user.update({ recent_searches: recentSearches });
+            // Update the user with raw SQL
+            await sequelize.query(
+                `UPDATE users SET recent_searches = $1 WHERE username = $2`,
+                {
+                    bind: [recentSearches, username],
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
         }
 
         res.json({
@@ -215,11 +344,16 @@ exports.toggleNotifications = async (req, res) => {
 // Get user notifications
 exports.getNotifications = async (req, res) => {
     try {
-        const notifications = await Notification.findAll({
-            where: { userID: req.user.username },
-            order: [['notification_date', 'DESC']]
-        });
-
+        const notifications = await sequelize.query(
+            `SELECT * FROM notifications 
+             WHERE user_id = :userId 
+             ORDER BY notification_date DESC`,
+            {
+                replacements: { userId: req.user.id },
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+console.log("User id -------> " + req.user.id);
         res.json({
             status: 'success',
             data: { notifications }

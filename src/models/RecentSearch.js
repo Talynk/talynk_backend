@@ -12,7 +12,7 @@ const RecentSearch = sequelize.define('RecentSearch', {
     type: DataTypes.STRING(255),
     references: {
       model: 'users',
-      key: 'username'
+      key: 'id'
     }
   },
   search_term: {
@@ -30,8 +30,8 @@ const RecentSearch = sequelize.define('RecentSearch', {
 // Define associations in a separate function to be called after all models are loaded
 RecentSearch.associate = (models) => {
   RecentSearch.belongsTo(models.User, {
-    foreignKey: 'userID',
-    targetKey: 'username'
+    foreignKey: 'user_id',
+    targetKey: 'id'
   });
 };
 

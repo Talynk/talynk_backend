@@ -9,7 +9,7 @@ const Comment = sequelize.define('Comment', {
     autoIncrement: true
   },
   commentor_id: {
-    type: DataTypes.STRING(255),
+    type: DataTypes.UUID,
     allowNull: false,
     references: {
       model: 'users',
@@ -21,7 +21,7 @@ const Comment = sequelize.define('Comment', {
     defaultValue: DataTypes.NOW
   },
   post_id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.UUID,
     allowNull: false,
     references: {
       model: 'posts',
@@ -44,7 +44,7 @@ const Comment = sequelize.define('Comment', {
 Comment.associate = (models) => {
   Comment.belongsTo(models.User, {
     foreignKey: 'commentor_id',
-    targetKey: 'username'
+    targetKey: 'id'
   });
   Comment.belongsTo(models.Post, {
     foreignKey: 'post_id',

@@ -1,34 +1,62 @@
-
 const Post = require('../models/Post.js');
 const User = require('../models/User.js');
 const Notification = require('../models/Notification.js');
 const Comment = require('../models/Comment.js');
+const sequelize = require('../config/database');
 
 exports.addComment = async (req, res) => {
     try {
         const { postId } = req.params;
-        const { commentText } = req.body;
-        const username = req.user.username;
+        const { comment_text } = req.body;
+        const username = req.user.id;
 
-        const comment = await Comment.create({
-            commentorID: username,
-            postID: postId,
-            commentText,
-            commentDate: new Date()
-        });
+        // Create comment using raw SQL with all required fields
+        const [comment] = await sequelize.query(
+            `INSERT INTO comments (commentor_id, post_id, comment_text, comment_date)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            {
+                bind: [username, postId, comment_text, new Date()],
+                type: sequelize.QueryTypes.INSERT
+            }
+        );
 
-        // Increment post's comment count
-        await Post.increment('comments', {
-            where: { uniqueTraceability_id: postId }
-        });
+        // Increment post's comment count using raw SQL
+        // await sequelize.query(
+        //     `UPDATE posts SET comments = comments + 1 WHERE id = $1`,
+        //     {
+        //         bind: [postId],
+        //         type: sequelize.QueryTypes.UPDATE
+        //     }
+        // );
 
-        // Notify post owner
-        const post = await Post.findByPk(postId);
-        await Notification.create({
-            userID: post.uploaderID,
-            notification_text: `${username} commented on your post`,
-            notification_date: new Date()
-        });
+        // Get post owner's username for notification
+        const [post] = await sequelize.query(
+            `SELECT u.id FROM posts p 
+             JOIN users u ON p.user_id = u.id 
+             WHERE p.id = $1`,
+            {
+                bind: [postId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (post) {
+            // Create notification using raw SQL
+            await sequelize.query(
+                `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+                 VALUES ($1, $2, $3, $4)`,
+                {
+                    bind: [
+                        post.id,
+                        `${username} commented on your post`,
+                        new Date(),
+                        false
+                    ],
+                    type: sequelize.QueryTypes.INSERT
+                }
+            );
+        }
 
         res.status(201).json({
             status: 'success',
@@ -38,7 +66,8 @@ exports.addComment = async (req, res) => {
         console.error('Comment creation error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error adding comment'
+            message: 'Error adding comment',
+            details: error.message
         });
     }
 };
