@@ -28,6 +28,14 @@ const authenticate = (req, res, next) => {
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
+            // Check if account is frozen
+            if (decoded.status === 'frozen') {
+                return res.status(403).json({
+                    status: 'error',
+                    message: 'Your account has been frozen. Please contact support for assistance.'
+                });
+            }
+            
             // Add user info to request
             req.user = decoded;
             

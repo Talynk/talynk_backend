@@ -102,6 +102,9 @@ exports.createPost = async (req, res) => {
 exports.getAllPosts = async (req, res) => {
     try {
         const posts = await Post.findAll({
+            where: {
+                status: 'approved'
+            },
             include: [
                 {
                     model: User,
@@ -113,14 +116,15 @@ exports.getAllPosts = async (req, res) => {
                     as: 'category',
                     attributes: ['id', 'name']
                 }
-            ]
+            ],
+            order: [['createdAt', 'DESC']]
         });
 
         // Add full URLs for files
         const postsWithUrls = posts.map(post => {
             const postData = post.toJSON();
-            if (postData.url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.url}`;
+            if (postData.video_url) {
+                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
             }
             return postData;
         });

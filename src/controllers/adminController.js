@@ -269,22 +269,70 @@ exports.getDashboardStats = async (req, res) => {
 // Account Management
 exports.manageUserAccount = async (req, res) => {
     try {
-        const { username, action } = req.body;
+        const { id, action } = req.body;
+
+        // First, get the current user status
+        const user = await User.findByPk(id);
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Determine the new status based on current status and action
+        let newStatus;
+        if (action === 'freeze') {
+            if (user.status === 'active') {
+                newStatus = 'frozen';
+            } else {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'User is not active and cannot be frozen'
+                });
+            }
+        } else if (action === 'reactivate') {
+            if (user.status === 'frozen') {
+                newStatus = 'active';
+            } else {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'User is not frozen and cannot be reactivated'
+                });
+            }
+        } else {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid action. Use "freeze" or "reactivate"'
+            });
+        }
+
+        // Update the user status
         await User.update(
-            { status: action },
-            { where: { username } }
+            { status: newStatus },
+            { where: { id } }
         );
+
         res.json({
             status: 'success',
-            message: `Account ${action} successfully`
+            message: `Account ${action}d successfully`,
+            data: {
+                userId: id,
+                previousStatus: user.status,
+                newStatus: newStatus
+            }
         });
     } catch (error) {
+        console.error('Error managing account:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error managing account'
+            message: 'Error managing account',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
+
 exports.getApprovedPosts = async (req, res) => {
     try {
         const { date, search, page = 1, limit = 10 } = req.query;

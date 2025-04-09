@@ -70,8 +70,16 @@ exports.login = async (req, res) => {
                     email,
                     role
                 },
-                attributes: ['id', 'email', 'username', 'password', 'role']
+                attributes: ['id', 'email', 'username', 'password', 'role', 'status']
             });
+
+            // Check if account is frozen
+            if (user && user.status === 'frozen') {
+                return res.status(403).json({
+                    status: 'error',
+                    message: 'Your account has been frozen. Please contact support for assistance.'
+                });
+            }
         } else if (role === 'admin') {
             user = await Admin.findOne({ 
                 where: { 
@@ -157,7 +165,8 @@ exports.login = async (req, res) => {
                 id: user.id, 
                 email: user.email,
                 username: user.username, 
-                role: user.role 
+                role: user.role,
+                status: user.status // Include status in token
             },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
@@ -176,7 +185,8 @@ exports.login = async (req, res) => {
                     id: user.id,
                     email: user.email,
                     username: user.username,
-                    role: user.role
+                    role: user.role,
+                    status: user.status
                 },
                 accessToken,
                 refreshToken

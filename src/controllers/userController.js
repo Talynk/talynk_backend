@@ -192,7 +192,7 @@ exports.getStatistics = async (req, res) => {
         const [commentCount] = await sequelize.query(
             `SELECT COUNT(*) as count FROM comments WHERE commentor_id = $1`,
             {
-                bind: [username],
+                bind: [req.user.id],
                 type: sequelize.QueryTypes.SELECT
             }
         );
