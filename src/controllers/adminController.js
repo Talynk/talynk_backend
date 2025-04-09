@@ -160,7 +160,7 @@ exports.getPendingPosts = async (req, res) => {
                     attributes: ['id', 'name']
                 }
             ],
-            order: [['createdAt', 'DESC']]
+            order: [['created_at', 'DESC']]
         });
 
         res.json({
@@ -465,9 +465,9 @@ exports.registerApprover = async (req, res) => {
 
 exports.removeApprover = async (req, res) => {
     try {
-        const { username } = req.params;
+        const { id } = req.params;
         await Approver.destroy({
-            where: { username }
+            where: { id }
         });
         res.json({
             status: 'success',
@@ -1089,6 +1089,50 @@ exports.searchByTraceId = async (req, res) => {
         res.status(500).json({ 
             status: 'error', 
             message: 'Failed to search by ID' 
+        });
+    }
+};
+
+exports.getRejectedPosts = async (req, res) => {
+    try {
+        const posts = await Post.findAll({
+            where: {
+                status: 'rejected'
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'username', 'email']
+                },
+                {
+                    model: Category,
+                    as: 'category',
+                    attributes: ['id', 'name']
+                }
+            ],
+            order: [['createdAt', 'DESC']]
+        });
+
+        // Add full URLs for files
+        const postsWithUrls = posts.map(post => {
+            const postData = post.toJSON();
+            if (postData.video_url) {
+                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+            }
+            return postData;
+        });
+
+        res.json({
+            status: 'success',
+            data: postsWithUrls
+        });
+    } catch (error) {
+        console.error('Error getting rejected posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error getting rejected posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

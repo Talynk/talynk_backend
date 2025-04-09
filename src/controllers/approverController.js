@@ -8,23 +8,23 @@ const sequelize = require('../config/database');
 
 exports.getApproverStats = async (req, res) => {
     try {
-        const approverUsername = req.user.username;
+        const approverUsername = req.user.id;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         const [pendingCount, approvedCount, todayCount] = await Promise.all([
-            Post.count({ where: { post_status: 'pending' } }),
+            Post.count({ where: { status: 'pending' } }),
             Post.count({ 
                 where: { 
-                    post_status: 'approved',
-                    approverID: approverUsername 
+                    status: 'approved',
+                    approver_id: approverUsername 
                 } 
             }),
             Post.count({
                 where: {
-                    post_status: 'approved',
-                    approverID: approverUsername,
-                    approvedDate: {
+                    status: 'approved',
+                    approver_id: approverUsername,
+                    updated_at: {
                         [Op.gte]: today
                     }
                 }
@@ -233,7 +233,7 @@ exports.rejectPost = async (req, res) => {
     try {
         const { postId } = req.params;
         const { notes } = req.body;
-        const approverUsername = req.user.username;
+        const approverUsername = req.user.id;
 
         const post = await Post.findOne({
             where: { 
@@ -258,7 +258,8 @@ exports.rejectPost = async (req, res) => {
             status: 'rejected',
             approver_id: approverUsername,
             rejected_at: new Date(),
-            review_notes: notes
+            review_notes: notes,
+            approved_at: new Date(),
         });
 
         // Create notification using raw SQL

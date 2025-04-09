@@ -58,10 +58,15 @@ router.get('/categories', categoryController.getAllCategories);
 router.get('/admin/users', authenticate, isAdmin, adminController.getAllUsers);
 router.post('/admin/accounts/manage', authenticate, isAdmin, adminController.manageUserAccount);
 router.post('/admin/approvers', authenticate, isAdmin, adminController.registerApprover);
-router.delete('/admin/approvers/:username', authenticate, adminController.removeApprover);
+router.delete('/admin/approvers/:id', authenticate, adminController.removeApprover);
 router.get('/admin/videos', authenticate, isAdmin, adminController.getAllVideos);
 router.put('/admin/approve', authenticate, isAdmin, adminController.updatePostStatus);
 router.get('/admin/approved/posts', authenticate, isAdmin, adminController.getApprovedPosts);
+router.get('/admin/posts/pending', authenticate, isAdmin, adminController.getPendingPosts);
+router.get('/admin/posts/rejected', authenticate, isAdmin, adminController.getRejectedPosts);
+
+
+
 
 // Approver routes
 router.get('/approver/stats', authenticate, isApprover, approverController.getApproverStats);
