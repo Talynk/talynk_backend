@@ -3,20 +3,20 @@ const { DataTypes } = require('sequelize');
 const sequelize = require('../config/database');
 
 const Subscription = sequelize.define('Subscription', {
-  subscriberID: {
-    type: DataTypes.STRING(255),
+  subscriber_id: {
+    type: DataTypes.UUID,
     primaryKey: true,
     references: {
       model: 'users',
-      key: 'username'
+      key: 'id'
     }
   },
   subscribed_to: {
-    type: DataTypes.STRING(255),
+    type: DataTypes.UUID,
     primaryKey: true,
     references: {
       model: 'users',
-      key: 'username'
+      key: 'id'
     }
   },
   subscription_date: {
@@ -31,7 +31,7 @@ const Subscription = sequelize.define('Subscription', {
 // Define associations in a separate function to be called after all models are loaded
 Subscription.associate = (models) => {
   Subscription.belongsTo(models.User, {
-    foreignKey: 'subscriberID',
+    foreignKey: 'subscriber_id',
     as: 'subscriber'
   });
   Subscription.belongsTo(models.User, {

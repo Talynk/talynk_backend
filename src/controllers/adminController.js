@@ -242,10 +242,22 @@ exports.getDashboardStats = async (req, res) => {
             Post ? Post.count({ where: { status: 'approved' } }).catch(err => {
                 console.error('Error counting approved posts:', err);
                 return 0;
+            }) : 0,
+            Post ? Post.count({ where: { status: 'rejected' } }).catch(err => {
+                console.error('Error counting rejected posts:', err);
+                return 0;
+            }) : 0,
+            User ? User.count({ where: { status: 'active' } }).catch(err => {
+                console.error('Error counting active users:', err);
+                return 0;
+            }) : 0,
+            User ? User.count({ where: { status: 'frozen' } }).catch(err => {
+                console.error('Error counting frozen users:', err);
+                return 0;
             }) : 0
         ]);
 
-        const [totalUsers, totalApprovers, pendingVideos, approvedVideos] = stats;
+        const [totalUsers, totalApprovers, pendingVideos, approvedVideos, rejectedVideos, activeUsers, frozenUsers] = stats;
 
         res.json({
             status: 'success',
@@ -253,7 +265,10 @@ exports.getDashboardStats = async (req, res) => {
                 totalUsers,
                 totalApprovers,
                 pendingVideos,
-                approvedVideos
+                approvedVideos,
+                rejectedVideos,
+                activeUsers,
+                frozenUsers
             }
         });
     } catch (error) {
@@ -609,12 +624,53 @@ exports.uploadAd = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
     try {
+        // Get users with basic information
         const users = await User.findAll({
-            attributes: ['username', 'email', 'createdAt']
+            attributes: ['id', 'username', 'email', 'createdAt', 'status', 'posts_count', 'phone1', 'phone2']
         });
+
+        // Get approved and pending post counts for all users
+        const approvedCounts = await Post.findAll({
+            attributes: [
+                'user_id',
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            where: { status: 'approved' },
+            group: ['user_id']
+        });
+
+        const pendingCounts = await Post.findAll({
+            attributes: [
+                'user_id',
+                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
+            ],
+            where: { status: 'pending' },
+            group: ['user_id']
+        });
+
+        // Create lookup maps for quick access
+        const approvedCountMap = {};
+        const pendingCountMap = {};
+            
+        approvedCounts.forEach(count => {
+            approvedCountMap[count.user_id] = parseInt(count.dataValues.count, 10);
+        });
+            
+        pendingCounts.forEach(count => {
+            pendingCountMap[count.user_id] = parseInt(count.dataValues.count, 10);
+        });
+
+        // Enhance user objects with post counts
+        const enhancedUsers = users.map(user => {
+            const userData = user.toJSON();
+            userData.postsApproved = approvedCountMap[userData.id] || 0;
+            userData.postsPending = pendingCountMap[userData.id] || 0;
+            return userData;
+        });
+
         res.json({
             status: 'success',
-            data: { users }
+            data: { users: enhancedUsers }
         });
     } catch (error) {
         console.log(error);
@@ -1133,6 +1189,153 @@ exports.getRejectedPosts = async (req, res) => {
             status: 'error',
             message: 'Error getting rejected posts',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.getAllApprovedPostsByApprover = async (req, res) => {
+    try {
+        const { approverId } = req.params;
+
+        // Check if the approver exists
+        const approver = await Approver.findByPk(approverId);
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Get all approved and rejected posts by this approver
+        const posts = await Post.findAll({
+            where: {
+                status: {
+                    [Op.in]: ['approved', 'rejected']
+                },
+                approver_id: approverId
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'username', 'email']
+                },
+                {
+                    model: Category,
+                    as: 'category',
+                    attributes: ['id', 'name']
+                }
+            ],
+            order: [['updated_at', 'DESC']]
+        });
+
+        // Get the counts for both approved and rejected posts
+        const [approvedCount, rejectedCount] = await Promise.all([
+            Post.count({
+                where: {
+                    status: 'approved',
+                    approver_id: approverId
+                }
+            }),
+            Post.count({
+                where: {
+                    status: 'rejected',
+                    approver_id: approverId
+                }
+            })
+        ]);
+
+        // Add full URLs for files
+        const postsWithUrls = posts.map(post => {
+            const postData = post.toJSON();
+            if (postData.video_url) {
+                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+            }
+            return postData;
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                approver: {
+                    id: approver.id,
+                    username: approver.username,
+                    email: approver.email
+                },
+                posts: postsWithUrls,
+                statistics: {
+                    totalApproved: approvedCount,
+                    totalRejected: rejectedCount,
+                    totalProcessed: approvedCount + rejectedCount
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error getting posts by approver:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error getting posts by approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.getUsersStats = async (req, res) => {
+    try {
+        // Get total number of users
+        const totalUsers = await User.count();
+
+        // Get number of active users
+        const activeUsers = await User.count({
+            where: {
+                status: 'active'
+            }
+        });
+
+        // Get number of frozen users
+        const frozenUsers = await User.count({
+            where: {
+                status: 'frozen'
+            }
+        });
+
+        // Get total number of posts
+        const totalPosts = await Post.count();
+
+        // Get number of approved posts
+        const approvedPosts = await Post.count({
+            where: {
+                status: 'approved'
+            }
+        });
+
+        // Get number of pending posts
+        const pendingPosts = await Post.count({
+            where: {
+                status: 'pending'
+            }
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                users: {
+                    total: totalUsers,
+                    active: activeUsers,
+                    frozen: frozenUsers
+                },
+                posts: {
+                    total: totalPosts,
+                    approved: approvedPosts,
+                    pending: pendingPosts
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching user stats:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user statistics'
         });
     }
 };

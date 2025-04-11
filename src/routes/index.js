@@ -64,9 +64,9 @@ router.put('/admin/approve', authenticate, isAdmin, adminController.updatePostSt
 router.get('/admin/approved/posts', authenticate, isAdmin, adminController.getApprovedPosts);
 router.get('/admin/posts/pending', authenticate, isAdmin, adminController.getPendingPosts);
 router.get('/admin/posts/rejected', authenticate, isAdmin, adminController.getRejectedPosts);
-
-
-
+router.get('/admin/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
+router.get('/admin/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
+// router.get('/admin/users/stats', authenticate, isAdmin, adminController.getUsersStats);
 
 // Approver routes
 router.get('/approver/stats', authenticate, isApprover, approverController.getApproverStats);
@@ -77,8 +77,8 @@ router.put('/approver/posts/:postId/reject', authenticate, isApprover, approverC
 router.get('/approver/notifications', authenticate, isApprover, approverController.getApproverNotifications);
 
 // Subscription routes
-router.post('/subscriptions/:username', authenticate, subscriptionController.subscribe);
-router.delete('/subscriptions/:username', authenticate, subscriptionController.unsubscribe);
+router.post('/subscriptions/:userID', authenticate, subscriptionController.subscribe);
+router.delete('/subscriptions/:userId', authenticate, subscriptionController.unsubscribe);
 router.get('/subscriptions/subscribers', authenticate, subscriptionController.getSubscribers);
 
 // Ad routes
