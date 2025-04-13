@@ -327,7 +327,7 @@ exports.toggleNotifications = async (req, res) => {
     try {
         const user = await User.findByPk(req.user.username);
         await user.update({ notification: !user.notification });
-
+e
         res.json({
             status: 'success',
             message: `Notifications ${user.notification ? 'enabled' : 'disabled'} successfully`

@@ -12,11 +12,17 @@ exports.getApproverStats = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const [pendingCount, approvedCount, todayCount] = await Promise.all([
+        const [pendingCount, approvedCount, rejectedCount, todayCount] = await Promise.all([
             Post.count({ where: { status: 'pending' } }),
             Post.count({ 
                 where: { 
                     status: 'approved',
+                    approver_id: approverUsername 
+                } 
+            }),
+            Post.count({ 
+                where: { 
+                    status: 'rejected',
                     approver_id: approverUsername 
                 } 
             }),
@@ -36,6 +42,7 @@ exports.getApproverStats = async (req, res) => {
             data: {
                 pendingCount,
                 approvedCount,
+                rejectedCount,
                 todayCount
             }
         });
