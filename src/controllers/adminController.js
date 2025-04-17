@@ -182,9 +182,16 @@ exports.updatePostStatus = async (req, res) => {
         console.log(req.body)
         const { status, rejectionReason } = req.body;
         console.log("Post: --------> " + req.body)
-        const post = await Post.findByPk(req.body.id);
         
-
+        // Find post with user information
+        const post = await Post.findByPk(req.body.id, {
+            include: [{
+                model: User,
+                as: 'user',
+                attributes: ['id', 'username']
+            }]
+        });
+        
         if (!post) {
             return res.status(404).json({
                 status: 'error',
@@ -205,6 +212,34 @@ exports.updatePostStatus = async (req, res) => {
             approverId: req.user.id,
             approvedAt: status === 'approved' ? new Date() : null
         });
+
+        // Create notification for post owner
+        if (post.user && post.user.id) {
+            // Create notification message based on status
+            let notificationText = '';
+            if (status === 'approved') {
+                notificationText = `Your post "${post.title}" has been approved.`;
+            } else if (status === 'rejected') {
+                notificationText = `Your post "${post.title}" has been rejected. Reason: ${rejectionReason}`;
+            }
+
+            // Insert notification
+            await sequelize.query(
+                `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+                 VALUES ($1, $2, $3, $4)`,
+                {
+                    bind: [
+                        post.user.id,
+                        notificationText,
+                        new Date(),
+                        false
+                    ],
+                    type: sequelize.QueryTypes.INSERT
+                }
+            );
+            
+            console.log(`Notification sent to user ${post.user.id} for post ${post.id} with status ${status}`);
+        }
 
         res.json({
             status: 'success',

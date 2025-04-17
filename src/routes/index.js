@@ -37,17 +37,22 @@ router.get('/user/searches', authenticate, userController.getRecentSearches);
 router.post('/user/searches', authenticate, userController.addSearchTerm);
 router.put('/user/notifications', authenticate, userController.toggleNotifications);
 router.get('/user/notifications', authenticate, userController.getNotifications);
+router.put('/user/notifications/read-all', authenticate, userController.markAllNotificationsAsRead);
 
 // Post routes (all protected)
 router.post('/posts', authenticate, upload.single('file'), postController.createPost);
 router.get('/posts/user', authenticate, postController.getUserPosts);
+router.get('/posts/liked', authenticate, postController.getLikedPosts);
 router.delete('/posts/:postId', authenticate, postController.deletePost);
 router.post('/posts/:postId/like', authenticate, postController.likePost);
-router.get('/posts/all', authenticate,postController.getAllPosts); // only approved
+router.get('/posts/:postId/like-status', authenticate, postController.checkLikeStatus);
+router.get('/posts/all',  postController.getAllPosts); // only approved
+router.get('/posts/search', postController.searchPosts);
+router.get('/posts/:postId', postController.getPostById);
 
 // Comment routes
 router.post('/posts/:postId/comments', authenticate, commentController.addComment);
-router.get('/posts/:postId/comments', authenticate, commentController.getPostComments);
+router.get('/posts/:postId/comments',commentController.getPostComments);
 router.delete('/comments/:commentId', authenticate, commentController.deleteComment);
 router.post('/comments/:commentId/report', authenticate, commentController.reportComment);
 
@@ -88,5 +93,11 @@ router.delete('/ads/:adId', authenticate, isAdmin, adController.deleteAd);
 // Protected routes
 router.get('/profile', authenticate, authController.getProfile);
 router.put('/profile', authenticate, authController.updateProfile);
+
+
+
+
+
+
 
 module.exports = router; 

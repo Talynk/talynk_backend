@@ -28,7 +28,7 @@ const Category = sequelize.define('Category', {
 // Define associations in a separate function to be called after all models are loaded
 Category.associate = (models) => {
   Category.hasMany(models.Post, {
-    foreignKey: 'categoryId',
+    foreignKey: 'category_id',
     as: 'posts'
   });
 };

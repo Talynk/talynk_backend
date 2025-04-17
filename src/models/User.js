@@ -103,8 +103,8 @@ User.associate = (models) => {
 
   
   User.hasMany(models.Comment, {
-    foreignKey: 'userID',
-    sourceKey: 'username'
+    foreignKey: 'commentor_id',
+    sourceKey: 'id'
   });
   
   User.hasMany(models.PostLike, {

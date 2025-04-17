@@ -258,9 +258,12 @@ exports.getRecentSearches = async (req, res) => {
 
 // Add a search term
 exports.addSearchTerm = async (req, res) => {
+    console.log(req.body);
     try {
+
         const username = req.user.username;
-        const { searchTerm } = req.body;
+        const searchTerm = req.body.search_term;
+        console.log(searchTerm);
         
         // Create a new search record using raw SQL
         await sequelize.query(
@@ -324,6 +327,7 @@ exports.addSearchTerm = async (req, res) => {
 
 // Toggle notifications
 exports.toggleNotifications = async (req, res) => {
+    console.log(req.body);
     try {
         const user = await User.findByPk(req.user.username);
         await user.update({ notification: !user.notification });
@@ -333,6 +337,7 @@ e
             message: `Notifications ${user.notification ? 'enabled' : 'disabled'} successfully`
         });
     } catch (error) {
+
         console.error('Notification toggle error:', error);
         res.status(500).json({
             status: 'error',
@@ -343,6 +348,7 @@ e
 
 // Get user notifications
 exports.getNotifications = async (req, res) => {
+    console.log("Hiitting User id -------> " + req.user.id);
     try {
         const notifications = await sequelize.query(
             `SELECT * FROM notifications 
@@ -499,6 +505,36 @@ exports.deleteUser = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error deleting user'
+        });
+    }
+};
+
+exports.markAllNotificationsAsRead = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        console.log(`Marking all notifications as read for user ID: ${userId}`);
+        
+        // Update all unread notifications for the user
+        const result = await sequelize.query(
+            `UPDATE notifications 
+             SET is_read = true 
+             WHERE user_id = $1 AND is_read = false`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
+        
+        res.json({
+            status: 'success',
+            message: 'All notifications marked as read'
+        });
+    } catch (error) {
+        console.error('Error marking notifications as read:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error marking notifications as read',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

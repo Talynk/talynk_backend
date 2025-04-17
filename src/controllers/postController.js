@@ -128,10 +128,12 @@ exports.getAllPosts = async (req, res) => {
             }
             return postData;
         });
+        // console.log("postsWithUrls ----->", postsWithUrls)
 
         res.json({
             status: 'success',
-            data: postsWithUrls
+            data: postsWithUrls,
+           
         });
     } catch (error) {
         console.error('Error getting posts:', error);
@@ -145,27 +147,90 @@ exports.getAllPosts = async (req, res) => {
 
 exports.getPostById = async (req, res) => {
     try {
-        const post = await Post.findByPk(req.params.id, {
+        const postId = req.params.postId;
+        console.log("postId ----->", postId);
+        console.log(`Attempting to find post with ID: ${postId}`);
+        
+        // First, try a simpler query without associations
+        const postExists = await Post.findByPk(postId);
+        
+        if (!postExists) {
+            console.log(`Post with ID ${postId} not found in database using Sequelize`);
+            
+            // Try with raw SQL as a fallback
+            const [rawPost] = await sequelize.query(
+                `SELECT * FROM posts WHERE id = :postId`,
+                {
+                    replacements: { postId },
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
+            
+            if (!rawPost) {
+                console.log(`Post with ID ${postId} not found with raw SQL either`);
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Post not found'
+                });
+            }
+            
+            console.log(`Post found with raw SQL: ${JSON.stringify(rawPost)}`);
+            
+            // Get user info with raw SQL
+            const [user] = await sequelize.query(
+                `SELECT id, username, email FROM users WHERE id = :userId`,
+                {
+                    replacements: { userId: rawPost.user_id },
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
+            
+            // Get category info with raw SQL
+            const [category] = await sequelize.query(
+                `SELECT id, name FROM categories WHERE id = :categoryId`,
+                {
+                    replacements: { categoryId: rawPost.category_id },
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
+            
+            // Combine the results
+            rawPost.user = user || null;
+            rawPost.category = category || null;
+            
+            return res.json({
+                status: 'success',
+                data: { post: rawPost }
+            });
+        }
+        
+        console.log(`Post exists in database: ${postExists.id}`);
+        
+        // Now try with associations
+        const post = await Post.findByPk(postId, {
             include: [
                 {
                     model: User,
-                    as: 'uploader',
-                    attributes: ['id', 'username']
+                    as: 'user',
+                    attributes: ['id', 'username', 'email']
                 },
                 {
                     model: Category,
+                    as: 'category',
                     attributes: ['id', 'name']
                 }
             ]
         });
 
         if (!post) {
+            console.log(`Post found but association query failed`);
             return res.status(404).json({
                 status: 'error',
-                message: 'Post not found'
+                message: 'Post found but association query failed'
             });
         }
 
+        console.log(`Post with associations retrieved successfully`);
         res.json({
             status: 'success',
             data: { post }
@@ -174,7 +239,8 @@ exports.getPostById = async (req, res) => {
         console.error('Error getting post:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching post'
+            message: 'Error fetching post',
+            details: error.message
         });
     }
 };
@@ -806,7 +872,7 @@ exports.likePost = async (req, res) => {
             
             await sequelize.query(
                 `UPDATE posts 
-                 SET likes = likes - 1 
+                 SET likes = GREATEST(likes - 1, 0)
                  WHERE id = $1`,
                 {
                     bind: [postId],
@@ -861,6 +927,24 @@ exports.likePost = async (req, res) => {
             }
         }
 
+        // Synchronize the likes count with the actual number of likes
+        const [{ count }] = await sequelize.query(
+            `SELECT COUNT(*) as count FROM post_likes WHERE post_id = $1`,
+            {
+                bind: [postId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+        
+        // Update the post with the correct count
+        await sequelize.query(
+            `UPDATE posts SET likes = $1 WHERE id = $2`,
+            {
+                bind: [count, postId],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
+
         res.json({
             status: 'success',
             message: existingLike ? 'Post unliked successfully' : 'Post liked successfully'
@@ -892,7 +976,7 @@ exports.addComment = async (req, res) => {
 
         // Update post's comment count
         await db.query(
-            'UPDATE posts SET comments = comments + 1 WHERE uniqueTraceability_id = $1',
+            'UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1',
             [postId]
         );
 
@@ -915,29 +999,193 @@ exports.getPostComments = async (req, res) => {
     try {
         const { postId } = req.params;
 
-      
-
-        const result = await Comment.findAll({
+        const comments = await Comment.findAll({
             where: { post_id: postId },
             include: [
-                { model: User, as: 'commentor', attributes: ['username'] }
+                { 
+                    model: User,
+                    attributes: ['id', 'username']
+                }
             ],
             order: [['comment_date', 'DESC']]
         });
 
-
-
         res.json({
             status: 'success',
             data: {
-                comments: result.rows
+                comments
             }
         });
     } catch (error) {
         console.error('Error fetching comments:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching comments'
+            message: 'Error fetching comments',
+            details: error.message
+        });
+    }
+};
+
+exports.checkLikeStatus = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const userId = req.user.id;
+
+        // Check if like exists using raw SQL
+        const [existingLike] = await sequelize.query(
+            `SELECT * FROM post_likes 
+             WHERE post_id = $1 AND user_id = $2 
+             LIMIT 1`,
+            {
+                bind: [postId, userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        res.json({
+            status: 'success',
+            data: {
+                hasLiked: !!existingLike,
+                likeDate: existingLike ? existingLike.like_date : null
+            }
+        });
+    } catch (error) {
+        console.error('Like status check error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error checking like status',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.searchPosts = async (req, res) => {
+    try {
+        const { q } = req.query;
+        
+        if (!q || q.trim() === '') {
+            return res.json({
+                status: 'success',
+                data: []
+            });
+        }
+
+        // Search posts by title or description, only return approved posts
+        const posts = await Post.findAll({
+            where: {
+                status: 'approved',
+                [Op.or]: [
+                    {
+                        title: {
+                            [Op.iLike]: `%${q}%`
+                        }
+                    },
+                    {
+                        description: {
+                            [Op.iLike]: `%${q}%`
+                        }
+                    }
+                ]
+            },
+            include: [
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['id', 'username', 'email']
+                },
+                {
+                    model: Category,
+                    as: 'category',
+                    attributes: ['id', 'name']
+                }
+            ],
+            order: [['createdAt', 'DESC']],
+            limit: 20
+        });
+
+        // Add full URLs for videos
+        const postsWithUrls = posts.map(post => {
+            const postData = post.toJSON();
+            if (postData.video_url) {
+                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+            }
+            return postData;
+        });
+
+        res.json({
+            status: 'success',
+            data: postsWithUrls
+        });
+    } catch (error) {
+        console.error('Error searching posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error searching posts',
+            data: []
+        });
+    }
+};
+
+exports.getLikedPosts = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        // Get posts liked by the authenticated user
+        const likedPosts = await sequelize.query(
+            `SELECT 
+                p.id, 
+                p.title, 
+                p.status, 
+                p.video_url as image,
+                p.video_url, 
+                u.id as user_id, 
+                u.username, 
+                u.profile_picture as avatar,
+                p.likes as likes_count, 
+                p.comment_count as comments_count, 
+                p.created_at
+            FROM posts p
+            JOIN post_likes pl ON p.id = pl.post_id
+            JOIN users u ON p.user_id = u.id
+            WHERE pl.user_id = $1 AND p.status = 'approved'
+            ORDER BY pl.like_date DESC`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        // Process the results to match the expected response format
+        const formattedPosts = likedPosts.map(post => ({
+            id: post.id,
+            title: post.title,
+            status: post.status,
+            image: post.image,
+            video_url: post.video_url,
+            fullUrl: post.video_url ? `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}` : null,
+            user: {
+                id: post.user_id,
+                username: post.username,
+                avatar: post.avatar
+            },
+            likes_count: parseInt(post.likes_count),
+            comments_count: parseInt(post.comments_count),
+            created_at: post.created_at
+        }));
+
+        res.json({
+            status: 'success',
+            message: 'Liked posts retrieved successfully',
+            data: {
+                posts: formattedPosts
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching liked posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching liked posts',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 }; 

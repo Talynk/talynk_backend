@@ -13,7 +13,7 @@ const Comment = sequelize.define('Comment', {
     allowNull: false,
     references: {
       model: 'users',
-      key: 'username'
+      key: 'id'
     }
   },
   comment_date: {

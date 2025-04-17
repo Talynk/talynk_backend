@@ -9,6 +9,7 @@ exports.addComment = async (req, res) => {
         const { postId } = req.params;
         const { comment_text } = req.body;
         const username = req.user.id;
+        const commentorName = req.user.username;
 
         // Create comment using raw SQL with all required fields
         const [comment] = await sequelize.query(
@@ -22,13 +23,13 @@ exports.addComment = async (req, res) => {
         );
 
         // Increment post's comment count using raw SQL
-        // await sequelize.query(
-        //     `UPDATE posts SET comments = comments + 1 WHERE id = $1`,
-        //     {
-        //         bind: [postId],
-        //         type: sequelize.QueryTypes.UPDATE
-        //     }
-        // );
+        await sequelize.query(
+            `UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1`,
+            {
+                bind: [postId],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
 
         // Get post owner's username for notification
         const [post] = await sequelize.query(
@@ -49,7 +50,7 @@ exports.addComment = async (req, res) => {
                 {
                     bind: [
                         post.id,
-                        `${username} commented on your post`,
+                        `${commentorName} commented on your post`,
                         new Date(),
                         false
                     ],
@@ -77,12 +78,14 @@ exports.getPostComments = async (req, res) => {
         const { postId } = req.params;
 
         const comments = await Comment.findAll({
-            where: { postID: postId },
+            attributes: ['comment_id', 'commentor_id', 'comment_date', 'post_id', 'comment_text', 'comment_reports'],
+            where: { post_id: postId },
             include: [{
                 model: User,
-                attributes: ['username', 'user_facial_image']
+                attributes: ['id', 'username'],
+                required: false
             }],
-            order: [['commentDate', 'DESC']]
+            order: [['comment_date', 'DESC']]
         });
 
         res.json({
@@ -93,7 +96,8 @@ exports.getPostComments = async (req, res) => {
         console.error('Comments fetch error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching comments'
+            message: 'Error fetching comments',
+            details: error.message
         });
     }
 };
@@ -103,10 +107,11 @@ exports.deleteComment = async (req, res) => {
         const { commentId } = req.params;
         const username = req.user.username;
 
+        // First get the comment to know which post it belongs to
         const comment = await Comment.findOne({
             where: {
-                commentID: commentId,
-                commentorID: username
+                comment_id: commentId,
+                commentor_id: username
             }
         });
 
@@ -117,12 +122,19 @@ exports.deleteComment = async (req, res) => {
             });
         }
 
+        const postId = comment.post_id;
+
+        // Delete the comment
         await comment.destroy();
 
         // Decrement post's comment count
-        await Post.decrement('comments', {
-            where: { uniqueTraceability_id: comment.postID }
-        });
+        await sequelize.query(
+            `UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = $1`,
+            {
+                bind: [postId],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
 
         res.json({
             status: 'success',

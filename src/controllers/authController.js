@@ -8,7 +8,16 @@ const { TIME } = require('@sequelize/core/_non-semver-use-at-your-own-risk_/data
 
 exports.register = async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { username, email, password, phone1, phone2 } = req.body;
+        
+        // Validate required fields
+        if (!username || !email || !password || !phone1) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Username, email, password, and primary phone number are required'
+            });
+        }
+        
         // Check if user exists
         const existingUser = await User.findOne({
             where: {
@@ -31,6 +40,8 @@ exports.register = async (req, res) => {
             username,
             email,
             password: hashedPassword,
+            phone1,
+            phone2: phone2 || null, // Optional second phone number
             createdAt: new Date(),
             updatedAt: new Date()
         });

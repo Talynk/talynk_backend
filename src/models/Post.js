@@ -69,6 +69,10 @@ const Post = sequelize.define('Post', {
     type: DataTypes.INTEGER,
     defaultValue: 0
   },
+  comment_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
   category_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
