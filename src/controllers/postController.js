@@ -47,14 +47,15 @@ exports.createPost = async (req, res) => {
         let fileType = 'text';
 
         if (req.file) {
-            // File was uploaded successfully using the fileUpload middleware
-            video_url = `/uploads/${req.file.filename}`;
+            // File was uploaded to Supabase
+            video_url = req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
-            console.log("File uploaded successfully:", {
+            console.log("File uploaded successfully to Supabase:", {
+                url: req.file.supabaseUrl,
                 filename: req.file.filename,
+                path: req.file.path,
                 mimetype: req.file.mimetype,
-                size: req.file.size,
-                path: req.file.path
+                size: req.file.size
             });
         } else {
             console.log("No file was uploaded. Check if the request is using multipart/form-data and the file field is named 'file'");
@@ -72,9 +73,6 @@ exports.createPost = async (req, res) => {
             content: caption
         });
 
-        // Add full URL in response
-        const fullUrl = video_url ? `${req.protocol}://${req.get('host')}${video_url}` : '';
-
         // Update user's post count
         await User.increment('posts_count', {
             where: { id: userId }
@@ -85,7 +83,7 @@ exports.createPost = async (req, res) => {
             data: { 
                 post: {
                     ...post.toJSON(),
-                    video_url: fullUrl
+                    video_url: video_url // Already the full Supabase URL
                 }
             }
         });

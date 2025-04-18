@@ -8,7 +8,7 @@ const upload = require('../middleware/fileUpload');
 router.get('/user', authenticate, postController.getUserPosts);
 // Get user's liked posts
 router.get('/liked', authenticate, postController.getLikedPosts);
-router.post('/', authenticate, upload.single('file'), postController.createPost);
+router.post('/', authenticate, ...upload.single('file'), postController.createPost);
 router.get('/:id', authenticate, postController.getPost);
 router.put('/:id', authenticate, postController.updatePost);
 router.delete('/:id', authenticate, postController.deletePost);

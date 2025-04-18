@@ -31,7 +31,7 @@ router.post('/auth/refresh-token', authController.refreshToken);
 
 // User routes (all protected)
 router.get('/user/profile', authenticate, userController.getProfile);
-router.put('/user/profile', authenticate, upload.single('user_facial_image'), userController.updateProfile);
+router.put('/user/profile', authenticate, ...upload.single('user_facial_image'), userController.updateProfile);
 router.get('/user/statistics', authenticate, userController.getStatistics);
 router.get('/user/searches', authenticate, userController.getRecentSearches);
 router.post('/user/searches', authenticate, userController.addSearchTerm);
@@ -40,7 +40,7 @@ router.get('/user/notifications', authenticate, userController.getNotifications)
 router.put('/user/notifications/read-all', authenticate, userController.markAllNotificationsAsRead);
 
 // Post routes (all protected)
-router.post('/posts', authenticate, upload.single('file'), postController.createPost);
+router.post('/posts', authenticate, ...upload.single('file'), postController.createPost);
 router.get('/posts/user', authenticate, postController.getUserPosts);
 router.get('/posts/liked', authenticate, postController.getLikedPosts);
 router.delete('/posts/:postId', authenticate, postController.deletePost);
@@ -93,11 +93,5 @@ router.delete('/ads/:adId', authenticate, isAdmin, adController.deleteAd);
 // Protected routes
 router.get('/profile', authenticate, authController.getProfile);
 router.put('/profile', authenticate, authController.updateProfile);
-
-
-
-
-
-
 
 module.exports = router; 

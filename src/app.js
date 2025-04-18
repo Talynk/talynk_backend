@@ -4,6 +4,12 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || 'https://putkiapvvlebelkafwbe.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB1dGtpYXB2dmxlYmVsa2Fmd2JlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ5OTI5MjQsImV4cCI6MjA2MDU2ODkyNH0.0lkWoaKuYpatk8yyGnFonBOK8qRa-nvspnBYQa0A2dQ';
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Import routes
 const routes = require('./routes');
@@ -13,6 +19,35 @@ const dbConnection = require('./config/database');
 require('./models/associations');
 
 const app = express();
+
+// Initialize Supabase bucket check
+async function checkSupabaseBucket() {
+  try {
+    const bucketName = process.env.SUPABASE_BUCKET_NAME || 'posts';
+    console.log(`Checking Supabase bucket: '${bucketName}'`);
+    
+    // Check if bucket exists
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    
+    if (error) {
+      console.error('Error checking Supabase buckets:', error.message);
+      return;
+    }
+    
+    const bucketExists = buckets.some(bucket => bucket.name === bucketName);
+    
+    if (bucketExists) {
+      console.log(`✅ Supabase bucket '${bucketName}' found and ready for use.`);
+    } else {
+      console.warn(`⚠️ Warning: Bucket '${bucketName}' not found. Please create it manually in the Supabase dashboard.`);
+    }
+  } catch (error) {
+    console.error('Error checking Supabase storage:', error.message);
+  }
+}
+
+// Check Supabase bucket on startup
+checkSupabaseBucket();
 
 // Basic middleware
 app.use(helmet({
@@ -50,6 +85,9 @@ app.use('/uploads', (req, res, next) => {
 
 // Routes
 app.use('/api', routes);
+
+// Export Supabase client for use in other files
+app.locals.supabase = supabase;
 
 // API Routes
 const authRoutes = require('./routes/auth.routes');
