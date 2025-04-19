@@ -844,6 +844,7 @@ exports.getPost = async (req, res) => {
 exports.likePost = async (req, res) => {
     try {
         const { postId } = req.params;
+        const liker_name = req.user.username;
         const userID = req.user.id; // Using username instead of ID since PostLike uses username
         console.log("username ----->", userID);
 
@@ -915,7 +916,7 @@ exports.likePost = async (req, res) => {
                     {
                         bind: [
                             post.user_id,
-                            `${userID} liked your post`,
+                            `${liker_name} liked your post`,
                             new Date(),
                             false
                         ],
