@@ -95,7 +95,7 @@ const User = sequelize.define('User', {
 });
 
 // Define associations in a separate function to be called after all models are loaded
-User.associate = (models) => {
+User.associate = function(models) {
   User.hasMany(models.Post, {
     foreignKey: 'user_id',
     as: 'posts'

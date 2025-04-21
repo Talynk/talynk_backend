@@ -15,8 +15,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const routes = require('./routes');
 
 // Import database and associations
-const dbConnection = require('./config/database');
-require('./models/associations');
+const db = require('./models');
+// No need to require associations separately since it's loaded by the models index
+// require('./models/associations');
 
 const app = express();
 

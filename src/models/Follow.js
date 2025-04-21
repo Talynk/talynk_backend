@@ -43,7 +43,7 @@ const Follow = sequelize.define('Follow', {
 });
 
 // Define associations in a separate function to be called after all models are loaded
-Follow.associate = (models) => {
+Follow.associate = function(models) {
   Follow.belongsTo(models.User, {
     foreignKey: 'followerId',
     as: 'follower'

@@ -1,4 +1,4 @@
-const { Follow, User } = require('../models');
+const db = require('../models');
 const { Op } = require('sequelize');
 
 // Follow a user
@@ -24,7 +24,7 @@ const followUser = async (req, res) => {
     }
 
     // Check if the user to follow exists
-    const userToFollow = await User.findByPk(followingId);
+    const userToFollow = await db.User.findByPk(followingId);
     if (!userToFollow) {
       return res.status(404).json({
         status: 'error',
@@ -33,7 +33,7 @@ const followUser = async (req, res) => {
     }
 
     // Check if already following
-    const existingFollow = await Follow.findOne({
+    const existingFollow = await db.Follow.findOne({
       where: {
         followerId,
         followingId
@@ -48,7 +48,7 @@ const followUser = async (req, res) => {
     }
 
     // Create new follow relationship
-    const follow = await Follow.create({
+    const follow = await db.Follow.create({
       followerId,
       followingId
     });
@@ -81,7 +81,7 @@ const unfollowUser = async (req, res) => {
     }
 
     // Check if the follow relationship exists
-    const follow = await Follow.findOne({
+    const follow = await db.Follow.findOne({
       where: {
         followerId,
         followingId
@@ -120,7 +120,7 @@ const getFollowers = async (req, res) => {
     const offset = (page - 1) * limit;
 
     // Check if user exists
-    const user = await User.findByPk(userId);
+    const user = await db.User.findByPk(userId);
     if (!user) {
       return res.status(404).json({
         status: 'error',
@@ -129,13 +129,13 @@ const getFollowers = async (req, res) => {
     }
 
     // Find followers
-    const { count, rows: follows } = await Follow.findAndCountAll({
+    const { count, rows: follows } = await db.Follow.findAndCountAll({
       where: { followingId: userId },
       limit,
       offset,
       include: [
         {
-          model: User,
+          model: db.User,
           as: 'follower',
           attributes: ['id', 'username', 'profile_picture', 'bio']
         }
@@ -170,7 +170,7 @@ const getFollowing = async (req, res) => {
     const offset = (page - 1) * limit;
 
     // Check if user exists
-    const user = await User.findByPk(userId);
+    const user = await db.User.findByPk(userId);
     if (!user) {
       return res.status(404).json({
         status: 'error',
@@ -179,13 +179,13 @@ const getFollowing = async (req, res) => {
     }
 
     // Find following
-    const { count, rows: follows } = await Follow.findAndCountAll({
+    const { count, rows: follows } = await db.Follow.findAndCountAll({
       where: { followerId: userId },
       limit,
       offset,
       include: [
         {
-          model: User,
+          model: db.User,
           as: 'following',
           attributes: ['id', 'username', 'profile_picture', 'bio']
         }
@@ -218,7 +218,7 @@ const checkFollowStatus = async (req, res) => {
     const { followingId } = req.params;
 
     // Find following relationship
-    const follow = await Follow.findOne({
+    const follow = await db.Follow.findOne({
       where: {
         followerId,
         followingId
