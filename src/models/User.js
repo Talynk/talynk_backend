@@ -121,6 +121,17 @@ User.associate = (models) => {
     foreignKey: 'userID',
     sourceKey: 'username'
   });
+
+  // New follow associations
+  User.hasMany(models.Follow, {
+    foreignKey: 'followerId',
+    as: 'following'
+  });
+
+  User.hasMany(models.Follow, {
+    foreignKey: 'followingId',
+    as: 'followers'
+  });
 };
 
 // sequelize.sync()
