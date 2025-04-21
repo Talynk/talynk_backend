@@ -17,6 +17,7 @@ const approverController = require('../controllers/approverController');
 const subscriptionController = require('../controllers/subscriptionController');
 const adController = require('../controllers/adController');
 const categoryController = require('../controllers/categoryController');
+const followController = require('../controllers/followController');
 const approverRoutes = require('./approverRoutes');
 
 // Test route
@@ -58,6 +59,13 @@ router.post('/comments/:commentId/report', authenticate, commentController.repor
 
 // Category routes
 router.get('/categories', categoryController.getAllCategories);
+
+// Follow routes
+router.post('/follows', authenticate, followController.followUser);
+router.delete('/follows/:followingId', authenticate, followController.unfollowUser);
+router.get('/users/:userId/followers', followController.getFollowers);
+router.get('/users/:userId/following', followController.getFollowing);
+router.get('/follows/check/:followingId', authenticate, followController.checkFollowStatus);
 
 // Admin routes
 router.get('/admin/users', authenticate, isAdmin, adminController.getAllUsers);

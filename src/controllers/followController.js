@@ -1,11 +1,8 @@
-const express = require('express');
-const router = express.Router();
 const { Follow, User } = require('../models');
-const auth = require('../middleware/auth');
 const { Op } = require('sequelize');
 
 // Follow a user
-router.post('/', auth, async (req, res) => {
+const followUser = async (req, res) => {
   try {
     const followerId = req.user.id;
     const { followingId } = req.body;
@@ -67,10 +64,10 @@ router.post('/', auth, async (req, res) => {
       message: 'Server error while processing follow request'
     });
   }
-});
+};
 
 // Unfollow a user
-router.delete('/:followingId', auth, async (req, res) => {
+const unfollowUser = async (req, res) => {
   try {
     const followerId = req.user.id;
     const { followingId } = req.params;
@@ -112,10 +109,10 @@ router.delete('/:followingId', auth, async (req, res) => {
       message: 'Server error while processing unfollow request'
     });
   }
-});
+};
 
 // Get followers list
-router.get('/users/:userId/followers', async (req, res) => {
+const getFollowers = async (req, res) => {
   try {
     const { userId } = req.params;
     const page = parseInt(req.query.page) || 1;
@@ -162,10 +159,10 @@ router.get('/users/:userId/followers', async (req, res) => {
       message: 'Server error while retrieving followers'
     });
   }
-});
+};
 
 // Get following list
-router.get('/users/:userId/following', async (req, res) => {
+const getFollowing = async (req, res) => {
   try {
     const { userId } = req.params;
     const page = parseInt(req.query.page) || 1;
@@ -212,10 +209,10 @@ router.get('/users/:userId/following', async (req, res) => {
       message: 'Server error while retrieving following users'
     });
   }
-});
+};
 
 // Check if following
-router.get('/check/:followingId', auth, async (req, res) => {
+const checkFollowStatus = async (req, res) => {
   try {
     const followerId = req.user.id;
     const { followingId } = req.params;
@@ -241,6 +238,12 @@ router.get('/check/:followingId', auth, async (req, res) => {
       message: 'Server error while checking follow status'
     });
   }
-});
+};
 
-module.exports = router; 
+module.exports = {
+  followUser,
+  unfollowUser,
+  getFollowers,
+  getFollowing,
+  checkFollowStatus
+}; 

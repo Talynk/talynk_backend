@@ -95,7 +95,6 @@ const adminRoutes = require('./routes/admin.routes');
 const approverRoutes = require('./routes/approver.routes');
 const postsRoutes = require('./routes/posts.routes');
 const postRoutes = require('./routes/post');
-const followsRoutes = require('./routes/follows.routes');
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
@@ -103,7 +102,6 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/approver', approverRoutes);
 app.use('/api/posts', postsRoutes);
 app.use('/api/post', postRoutes);
-app.use('/api/follows', followsRoutes);
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
