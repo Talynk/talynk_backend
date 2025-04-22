@@ -18,6 +18,7 @@ const subscriptionController = require('../controllers/subscriptionController');
 const adController = require('../controllers/adController');
 const categoryController = require('../controllers/categoryController');
 const followController = require('../controllers/followController');
+const suggestionController = require('../controllers/suggestionController');
 const approverRoutes = require('./approverRoutes');
 
 // Test route
@@ -33,6 +34,7 @@ router.post('/auth/refresh-token', authController.refreshToken);
 // User routes (all protected)
 router.get('/user/profile', authenticate, userController.getProfile);
 router.put('/user/profile', authenticate, ...upload.single('user_facial_image'), userController.updateProfile);
+router.put('/user/interests', authenticate, userController.updateUserInterests);
 router.get('/user/statistics', authenticate, userController.getStatistics);
 router.get('/user/searches', authenticate, userController.getRecentSearches);
 router.post('/user/searches', authenticate, userController.addSearchTerm);
@@ -66,6 +68,10 @@ router.delete('/follows/:followingId', authenticate, followController.unfollowUs
 router.get('/users/:userId/followers', followController.getFollowers);
 router.get('/users/:userId/following', followController.getFollowing);
 router.get('/follows/check/:followingId', authenticate, followController.checkFollowStatus);
+
+// User suggestion routes
+router.get('/users/suggestions/mutual', authenticate, suggestionController.getMutualSuggestions);
+router.get('/users/suggestions/discover', authenticate, suggestionController.getDiscoverSuggestions);
 
 // Admin routes
 router.get('/admin/users', authenticate, isAdmin, adminController.getAllUsers);

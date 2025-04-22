@@ -81,6 +81,19 @@ const User = sequelize.define('User', {
   last_login: {
     type: DataTypes.DATE
   },
+  // New relevance tracking fields
+  last_active_date: {
+    type: DataTypes.DATE,
+    defaultValue: DataTypes.NOW
+  },
+  follower_count: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0
+  },
+  interests: {
+    type: DataTypes.ARRAY(DataTypes.STRING),
+    defaultValue: []
+  },
   createdAt: {
     type: DataTypes.DATE
   },

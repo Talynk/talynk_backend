@@ -9,11 +9,15 @@ const RecentSearch = require('../models/RecentSearch.js');
 const { Op } = require('sequelize');
 const db = require('../config/db');
 const sequelize = require('../config/database');
+const { updateUserActivityMetrics } = require('./suggestionController');
 
 // Get user profile
 exports.getProfile = async (req, res) => {
     try {
         const userId = req.user.id;
+        
+        // Update user activity timestamp
+        await updateUserActivityMetrics(userId);
         
         // Get user using raw SQL to avoid field naming issues
         const [user] = await sequelize.query(
@@ -535,6 +539,48 @@ exports.markAllNotificationsAsRead = async (req, res) => {
             status: 'error',
             message: 'Error marking notifications as read',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Update user interests
+exports.updateUserInterests = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { interests } = req.body;
+
+        if (!interests || !Array.isArray(interests)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Interests must be provided as an array'
+            });
+        }
+
+        // Limit the number of interests to 10
+        const limitedInterests = interests.slice(0, 10);
+
+        // Update user interests using raw SQL
+        await sequelize.query(
+            `UPDATE users SET interests = $1, "updatedAt" = NOW(), last_active_date = NOW() WHERE id = $2`,
+            {
+                bind: [limitedInterests, userId],
+                type: sequelize.QueryTypes.UPDATE
+            }
+        );
+
+        res.json({
+            status: 'success',
+            message: 'Interests updated successfully',
+            data: {
+                interests: limitedInterests
+            }
+        });
+    } catch (error) {
+        console.error('Error updating interests:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error updating interests',
+            details: error.message
         });
     }
 };

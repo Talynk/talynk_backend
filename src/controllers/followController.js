@@ -1,5 +1,39 @@
 const db = require('../models');
 const { Op } = require('sequelize');
+const { updateFollowerCount } = require('./suggestionController');
+
+/**
+ * Create a notification for the followed user
+ */
+const createFollowNotification = async (followerId, followingId) => {
+  try {
+    // Get follower's username and profile picture for the notification
+    const follower = await db.User.findByPk(followerId, {
+      attributes: ['id', 'username', 'profile_picture']
+    });
+    
+    if (!follower) return;
+    
+    // Create notification for the followed user with additional context data
+    await db.Notification.create({
+      user_id: followingId,
+      notification_text: `${follower.username} started following you`,
+      notification_date: new Date(),
+      is_read: false,
+      // Store additional context data for frontend use
+      context_data: JSON.stringify({
+        type: 'follow',
+        follower_id: follower.id,
+        follower_username: follower.username,
+        follower_profile_picture: follower.profile_picture
+      })
+    });
+    
+    console.log(`Notification created: ${follower.username} followed user ${followingId}`);
+  } catch (error) {
+    console.error('Error creating follow notification:', error);
+  }
+};
 
 // Follow a user
 const followUser = async (req, res) => {
@@ -53,6 +87,12 @@ const followUser = async (req, res) => {
       followingId
     });
 
+    // Update follower count for the followed user
+    await updateFollowerCount(followingId);
+    
+    // Create a notification for the followed user
+    await createFollowNotification(followerId, followingId);
+
     res.status(200).json({
       status: 'success',
       data: { follow }
@@ -97,6 +137,9 @@ const unfollowUser = async (req, res) => {
 
     // Delete the follow relationship
     await follow.destroy();
+
+    // Update follower count for the unfollowed user
+    await updateFollowerCount(followingId);
 
     res.status(200).json({
       status: 'success',
