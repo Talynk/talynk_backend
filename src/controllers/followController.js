@@ -35,17 +35,17 @@ const createFollowNotification = async (followerId, followingId) => {
   }
 };
 
-// Follow a user
+// Follow a user with the userId in the request body
 const followUser = async (req, res) => {
   try {
     const followerId = req.user.id;
-    const { followingId } = req.body;
+    const { userId: followingId } = req.body;
 
     // Validate input
     if (!followingId) {
       return res.status(400).json({
         status: 'error',
-        message: 'Following ID is required'
+        message: 'User ID is required'
       });
     }
 
@@ -58,21 +58,30 @@ const followUser = async (req, res) => {
     }
 
     // Check if the user to follow exists
-    const userToFollow = await db.User.findByPk(followingId);
+    const [userToFollow] = await db.sequelize.query(
+      `SELECT id FROM users WHERE id = $1 AND status = 'active'`,
+      {
+        bind: [followingId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
     if (!userToFollow) {
       return res.status(404).json({
         status: 'error',
-        message: 'User to follow not found'
+        message: 'User to follow not found or account is inactive'
       });
     }
 
     // Check if already following
-    const existingFollow = await db.Follow.findOne({
-      where: {
-        followerId,
-        followingId
+    const [existingFollow] = await db.sequelize.query(
+      `SELECT id FROM follows 
+       WHERE "followerId" = $1 AND "followingId" = $2`,
+      {
+        bind: [followerId, followingId],
+        type: db.sequelize.QueryTypes.SELECT
       }
-    });
+    );
 
     if (existingFollow) {
       return res.status(400).json({
@@ -82,20 +91,54 @@ const followUser = async (req, res) => {
     }
 
     // Create new follow relationship
-    const follow = await db.Follow.create({
-      followerId,
-      followingId
-    });
+    await db.sequelize.query(
+      `INSERT INTO follows ("followerId", "followingId", "createdAt", "updatedAt")
+       VALUES ($1, $2, NOW(), NOW())`,
+      {
+        bind: [followerId, followingId],
+        type: db.sequelize.QueryTypes.INSERT
+      }
+    );
 
     // Update follower count for the followed user
-    await updateFollowerCount(followingId);
-    
+    await db.sequelize.query(
+      `UPDATE users 
+       SET follower_count = follower_count + 1
+       WHERE id = $1`,
+      {
+        bind: [followingId],
+        type: db.sequelize.QueryTypes.UPDATE
+      }
+    );
+
     // Create a notification for the followed user
-    await createFollowNotification(followerId, followingId);
+    const [follower] = await db.sequelize.query(
+      `SELECT username FROM users WHERE id = $1`,
+      {
+        bind: [followerId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    await db.sequelize.query(
+      `INSERT INTO notifications (user_id, notification_text, notification_date, is_read, context_data)
+       VALUES ($1, $2, NOW(), false, $3)`,
+      {
+        bind: [
+          followingId, 
+          `${follower.username} started following you`, 
+          JSON.stringify({
+            type: 'follow',
+            follower_id: followerId
+          })
+        ],
+        type: db.sequelize.QueryTypes.INSERT
+      }
+    );
 
     res.status(200).json({
       status: 'success',
-      data: { follow }
+      message: 'Successfully followed user'
     });
   } catch (error) {
     console.error('Error following user:', error);
@@ -106,27 +149,29 @@ const followUser = async (req, res) => {
   }
 };
 
-// Unfollow a user
+// Unfollow a user with the userId in the request body
 const unfollowUser = async (req, res) => {
   try {
     const followerId = req.user.id;
-    const { followingId } = req.params;
+    const { userId: followingId } = req.body;
 
     // Validate input
     if (!followingId) {
       return res.status(400).json({
         status: 'error',
-        message: 'Following ID is required'
+        message: 'User ID is required'
       });
     }
 
     // Check if the follow relationship exists
-    const follow = await db.Follow.findOne({
-      where: {
-        followerId,
-        followingId
+    const [follow] = await db.sequelize.query(
+      `SELECT id FROM follows 
+       WHERE "followerId" = $1 AND "followingId" = $2`,
+      {
+        bind: [followerId, followingId],
+        type: db.sequelize.QueryTypes.SELECT
       }
-    });
+    );
 
     if (!follow) {
       return res.status(404).json({
@@ -136,10 +181,25 @@ const unfollowUser = async (req, res) => {
     }
 
     // Delete the follow relationship
-    await follow.destroy();
+    await db.sequelize.query(
+      `DELETE FROM follows 
+       WHERE "followerId" = $1 AND "followingId" = $2`,
+      {
+        bind: [followerId, followingId],
+        type: db.sequelize.QueryTypes.DELETE
+      }
+    );
 
     // Update follower count for the unfollowed user
-    await updateFollowerCount(followingId);
+    await db.sequelize.query(
+      `UPDATE users 
+       SET follower_count = GREATEST(follower_count - 1, 0)
+       WHERE id = $1`,
+      {
+        bind: [followingId],
+        type: db.sequelize.QueryTypes.UPDATE
+      }
+    );
 
     res.status(200).json({
       status: 'success',
@@ -154,16 +214,24 @@ const unfollowUser = async (req, res) => {
   }
 };
 
-// Get followers list
+// Get followers list with more complete user data and isFollowing flag
 const getFollowers = async (req, res) => {
   try {
     const { userId } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
+    const currentUserId = req.user ? req.user.id : null;
 
     // Check if user exists
-    const user = await db.User.findByPk(userId);
+    const [user] = await db.sequelize.query(
+      `SELECT id FROM users WHERE id = $1`,
+      {
+        bind: [userId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
     if (!user) {
       return res.status(404).json({
         status: 'error',
@@ -171,28 +239,61 @@ const getFollowers = async (req, res) => {
       });
     }
 
-    // Find followers
-    const { count, rows: follows } = await db.Follow.findAndCountAll({
-      where: { followingId: userId },
-      limit,
-      offset,
-      include: [
-        {
-          model: db.User,
-          as: 'follower',
-          attributes: ['id', 'username', 'profile_picture', 'bio']
-        }
-      ]
-    });
+    // Get total count
+    const [countResult] = await db.sequelize.query(
+      `SELECT COUNT(*) as count
+       FROM follows
+       WHERE "followingId" = $1`,
+      {
+        bind: [userId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+    
+    const totalCount = parseInt(countResult.count);
 
-    // Extract follower information
-    const followers = follows.map(follow => follow.follower);
+    // Find followers with pagination
+    const followers = await db.sequelize.query(
+      `SELECT 
+          u.id, 
+          u.username, 
+          u.profile_picture, 
+          u.bio,
+          CASE 
+              WHEN u.role = 'admin' OR u.role = 'approver' THEN true
+              ELSE false
+          END AS "isVerified",
+          CASE 
+              WHEN EXISTS (
+                  SELECT 1 FROM follows 
+                  WHERE "followerId" = $1 AND "followingId" = u.id
+              ) THEN true
+              ELSE false
+          END AS "isFollowing"
+       FROM users u
+       JOIN follows f ON u.id = f."followerId"
+       WHERE f."followingId" = $2
+       ORDER BY f."createdAt" DESC
+       LIMIT $3 OFFSET $4`,
+      {
+        bind: [
+          currentUserId || '00000000-0000-0000-0000-000000000000', // Use a dummy ID if not logged in
+          userId,
+          limit,
+          offset
+        ],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const hasMore = offset + followers.length < totalCount;
 
     res.status(200).json({
       status: 'success',
-      data: { 
+      data: {
         followers,
-        totalCount: count
+        hasMore,
+        totalCount
       }
     });
   } catch (error) {
@@ -204,16 +305,24 @@ const getFollowers = async (req, res) => {
   }
 };
 
-// Get following list
+// Get following list with more complete user data and isFollowing flag
 const getFollowing = async (req, res) => {
   try {
     const { userId } = req.params;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
+    const currentUserId = req.user ? req.user.id : null;
 
     // Check if user exists
-    const user = await db.User.findByPk(userId);
+    const [user] = await db.sequelize.query(
+      `SELECT id FROM users WHERE id = $1`,
+      {
+        bind: [userId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
     if (!user) {
       return res.status(404).json({
         status: 'error',
@@ -221,28 +330,61 @@ const getFollowing = async (req, res) => {
       });
     }
 
-    // Find following
-    const { count, rows: follows } = await db.Follow.findAndCountAll({
-      where: { followerId: userId },
-      limit,
-      offset,
-      include: [
-        {
-          model: db.User,
-          as: 'following',
-          attributes: ['id', 'username', 'profile_picture', 'bio']
-        }
-      ]
-    });
+    // Get total count
+    const [countResult] = await db.sequelize.query(
+      `SELECT COUNT(*) as count
+       FROM follows
+       WHERE "followerId" = $1`,
+      {
+        bind: [userId],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+    
+    const totalCount = parseInt(countResult.count);
 
-    // Extract following information
-    const following = follows.map(follow => follow.following);
+    // Find following with pagination
+    const following = await db.sequelize.query(
+      `SELECT 
+          u.id, 
+          u.username, 
+          u.profile_picture, 
+          u.bio,
+          CASE 
+              WHEN u.role = 'admin' OR u.role = 'approver' THEN true
+              ELSE false
+          END AS "isVerified",
+          CASE 
+              WHEN EXISTS (
+                  SELECT 1 FROM follows 
+                  WHERE "followerId" = $1 AND "followingId" = u.id
+              ) THEN true
+              ELSE false
+          END AS "isFollowing"
+       FROM users u
+       JOIN follows f ON u.id = f."followingId"
+       WHERE f."followerId" = $2
+       ORDER BY f."createdAt" DESC
+       LIMIT $3 OFFSET $4`,
+      {
+        bind: [
+          currentUserId || '00000000-0000-0000-0000-000000000000', // Use a dummy ID if not logged in
+          userId,
+          limit,
+          offset
+        ],
+        type: db.sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const hasMore = offset + following.length < totalCount;
 
     res.status(200).json({
       status: 'success',
-      data: { 
+      data: {
         following,
-        totalCount: count
+        hasMore,
+        totalCount
       }
     });
   } catch (error) {
@@ -260,18 +402,22 @@ const checkFollowStatus = async (req, res) => {
     const followerId = req.user.id;
     const { followingId } = req.params;
 
-    // Find following relationship
-    const follow = await db.Follow.findOne({
-      where: {
-        followerId,
-        followingId
+    // Check follow status
+    const [result] = await db.sequelize.query(
+      `SELECT EXISTS(
+          SELECT 1 FROM follows 
+          WHERE "followerId" = $1 AND "followingId" = $2
+      ) as "isFollowing"`,
+      {
+        bind: [followerId, followingId],
+        type: db.sequelize.QueryTypes.SELECT
       }
-    });
+    );
 
     res.status(200).json({
       status: 'success',
       data: { 
-        isFollowing: !!follow
+        isFollowing: result.isFollowing
       }
     });
   } catch (error) {

@@ -584,3 +584,156 @@ exports.updateUserInterests = async (req, res) => {
         });
     }
 };
+
+// Get user profile by ID (for public profile viewing)
+exports.getUserProfileById = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const currentUserId = req.user ? req.user.id : null;
+
+        // Get basic user data
+        const [user] = await sequelize.query(
+            `SELECT 
+                id, 
+                username, 
+                bio, 
+                profile_picture as "profileImage",
+                status,
+                posts_count as "postsCount",
+                follower_count as "followersCount",
+                CASE 
+                    WHEN role = 'admin' OR role = 'approver' THEN true
+                    ELSE false
+                END AS "isVerified"
+             FROM users
+             WHERE id = $1 AND status = 'active'`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found or account is inactive'
+            });
+        }
+
+        // Get following count
+        const [followingCount] = await sequelize.query(
+            `SELECT COUNT(*) as count
+             FROM follows
+             WHERE "followerId" = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+        
+        user.followingCount = parseInt(followingCount.count);
+
+        // Check if current user is following this profile
+        let isFollowing = false;
+        if (currentUserId) {
+            const [followStatus] = await sequelize.query(
+                `SELECT EXISTS(
+                    SELECT 1 FROM follows 
+                    WHERE "followerId" = $1 AND "followingId" = $2
+                ) as "isFollowing"`,
+                {
+                    bind: [currentUserId, userId],
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
+            isFollowing = followStatus.isFollowing;
+        }
+
+        user.isFollowing = isFollowing;
+
+        // Update profile view count if not viewing own profile
+        if (currentUserId !== userId) {
+            await sequelize.query(
+                `UPDATE users 
+                 SET total_profile_views = total_profile_views + 1
+                 WHERE id = $1`,
+                {
+                    bind: [userId],
+                    type: sequelize.QueryTypes.UPDATE
+                }
+            );
+        }
+
+        res.json({
+            status: 'success',
+            data: user
+        });
+    } catch (error) {
+        console.error('Error fetching user profile:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user profile'
+        });
+    }
+};
+
+// Get user posts
+exports.getUserPostsById = async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // Get total count of user's public posts
+        const [countResult] = await sequelize.query(
+            `SELECT COUNT(*) as count
+             FROM posts
+             WHERE user_id = $1 AND status = 'approved'`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+        
+        const totalCount = parseInt(countResult.count);
+        
+        // Get posts with pagination
+        const posts = await sequelize.query(
+            `SELECT 
+                id,
+                title,
+                caption,
+                media_url as "media",
+                media_type as "mediaType",
+                created_at as "createdAt",
+                likes_count as "likesCount",
+                (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) as "commentsCount"
+             FROM posts
+             WHERE user_id = $1 AND status = 'approved'
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3`,
+            {
+                bind: [userId, limit, offset],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+
+        const hasMore = offset + posts.length < totalCount;
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                hasMore,
+                totalCount
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching user posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user posts'
+        });
+    }
+};
