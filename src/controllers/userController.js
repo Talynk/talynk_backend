@@ -622,7 +622,17 @@ exports.updateUserInterests = async (req, res) => {
 // Get user profile by ID (for public profile viewing)
 exports.getUserProfileById = async (req, res) => {
     try {
-        const userId = req.params.id;
+        let userId = req.params.id;
+        
+        // Validate UUID format - ensure it's a proper UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID format'
+            });
+        }
+        
         const currentUserId = req.user ? req.user.id : null;
 
         // Get basic user data
@@ -716,7 +726,17 @@ exports.getUserProfileById = async (req, res) => {
 // Get user posts
 exports.getUserPostsById = async (req, res) => {
     try {
-        const userId = req.params.id;
+        let userId = req.params.id;
+        
+        // Validate UUID format - ensure it's a proper UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID format'
+            });
+        }
+        
         const currentUserId = req.user ? req.user.id : null;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
