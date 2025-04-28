@@ -600,11 +600,8 @@ exports.getUserProfileById = async (req, res) => {
                 email,
                 bio,
                 profile_picture as "profilePicture",
-                null as "coverPhoto",
                 posts_count as "postsCount",
-                follower_count as "followersCount",
-                created_at as "createdAt",
-                updated_at as "updatedAt"
+                follower_count as "followersCount"
              FROM users
              WHERE id = $1 AND status = 'active'`,
             {
@@ -632,6 +629,7 @@ exports.getUserProfileById = async (req, res) => {
         );
         
         user.followingCount = parseInt(followingCount.count);
+        user.coverPhoto = null; // Add coverPhoto field even though it's not in the database
 
         // Check if current user is following this profile
         let isFollowing = false;
@@ -650,6 +648,10 @@ exports.getUserProfileById = async (req, res) => {
         }
 
         user.isFollowing = isFollowing;
+        
+        // Add timestamps (even if not in the database)
+        user.createdAt = new Date().toISOString();
+        user.updatedAt = new Date().toISOString();
 
         // Update profile view count if not viewing own profile
         if (currentUserId !== userId) {
