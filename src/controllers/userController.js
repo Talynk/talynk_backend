@@ -21,9 +21,25 @@ exports.getProfile = async (req, res) => {
         
         // Get user using raw SQL to avoid field naming issues
         const [user] = await sequelize.query(
-            `SELECT id, username, email, phone1, phone2, selected_category, 
-                    total_profile_views, likes, subscribers, recent_searches, 
-                    profile_picture, bio, status, role, last_login
+            `SELECT 
+                id, 
+                username,
+                username as "fullName", 
+                email,
+                bio,
+                profile_picture as "profilePicture",
+                posts_count as "postsCount",
+                follower_count as "followersCount",
+                total_profile_views, 
+                likes, 
+                subscribers, 
+                recent_searches, 
+                phone1,
+                phone2, 
+                selected_category,
+                status, 
+                role, 
+                last_login
              FROM users 
              WHERE id = $1`,
             {
@@ -39,9 +55,27 @@ exports.getProfile = async (req, res) => {
             });
         }
 
+        // Get following count
+        const [followingCount] = await sequelize.query(
+            `SELECT COUNT(*) as count
+             FROM follows
+             WHERE "followerId" = $1`,
+            {
+                bind: [userId],
+                type: sequelize.QueryTypes.SELECT
+            }
+        );
+        
+        user.followingCount = parseInt(followingCount.count);
+        user.coverPhoto = null; // Add coverPhoto field for consistency
+        
+        // Add timestamps
+        user.createdAt = new Date().toISOString();
+        user.updatedAt = new Date().toISOString();
+
         res.json({
             status: 'success',
-            data: { user }
+            data: user
         });
     } catch (error) {
         console.error('Profile fetch error:', error);
@@ -683,6 +717,7 @@ exports.getUserProfileById = async (req, res) => {
 exports.getUserPostsById = async (req, res) => {
     try {
         const userId = req.params.id;
+        const currentUserId = req.user ? req.user.id : null;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
@@ -703,23 +738,49 @@ exports.getUserPostsById = async (req, res) => {
         // Get posts with pagination
         const posts = await sequelize.query(
             `SELECT 
-                id,
-                title,
-                caption,
-                media_url as "media",
-                media_type as "mediaType",
-                created_at as "createdAt",
-                likes_count as "likesCount",
-                (SELECT COUNT(*) FROM comments WHERE post_id = posts.id) as "commentsCount"
-             FROM posts
-             WHERE user_id = $1 AND status = 'approved'
-             ORDER BY created_at DESC
+                p.id,
+                p.title,
+                p.caption,
+                p.media_url as "media",
+                p.media_type as "mediaType",
+                p.created_at as "createdAt",
+                p.likes_count as "likesCount",
+                p.category_id,
+                c.name as "categoryName",
+                (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as "commentsCount",
+                u.username as "authorName",
+                u.profile_picture as "authorProfilePicture"
+             FROM posts p
+             LEFT JOIN categories c ON p.category_id = c.id
+             JOIN users u ON p.user_id = u.id
+             WHERE p.user_id = $1 AND p.status = 'approved'
+             ORDER BY p.created_at DESC
              LIMIT $2 OFFSET $3`,
             {
                 bind: [userId, limit, offset],
                 type: sequelize.QueryTypes.SELECT
             }
         );
+
+        // If user is authenticated, check if they liked each post
+        if (currentUserId && posts.length > 0) {
+            const likedPostIds = await sequelize.query(
+                `SELECT post_id 
+                 FROM post_likes 
+                 WHERE user_id = $1 AND post_id IN (${posts.map((_, i) => `$${i + 2}`).join(',')})`,
+                {
+                    bind: [currentUserId, ...posts.map(post => post.id)],
+                    type: sequelize.QueryTypes.SELECT
+                }
+            );
+            
+            const likedPostIdSet = new Set(likedPostIds.map(item => item.post_id));
+            
+            // Add isLiked flag to each post
+            posts.forEach(post => {
+                post.isLiked = likedPostIdSet.has(post.id);
+            });
+        }
 
         const hasMore = offset + posts.length < totalCount;
 

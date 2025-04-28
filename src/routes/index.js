@@ -44,6 +44,8 @@ router.put('/user/notifications/read-all', authenticate, userController.markAllN
 
 // Public user profile route
 router.get('/users/:id', userController.getUserProfileById);
+// User posts route
+router.get('/users/:id/posts', userController.getUserPostsById);
 
 // Post routes (all protected)
 router.post('/posts', authenticate, ...upload.single('file'), postController.createPost);
