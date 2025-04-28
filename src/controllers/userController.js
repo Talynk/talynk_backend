@@ -595,16 +595,16 @@ exports.getUserProfileById = async (req, res) => {
         const [user] = await sequelize.query(
             `SELECT 
                 id, 
-                username, 
-                bio, 
-                profile_picture as "profileImage",
-                status,
+                username,
+                CONCAT(first_name, ' ', last_name) as "fullName",
+                email,
+                bio,
+                profile_picture as "profilePicture",
+                cover_photo as "coverPhoto",
                 posts_count as "postsCount",
                 follower_count as "followersCount",
-                CASE 
-                    WHEN role = 'admin' OR role = 'approver' THEN true
-                    ELSE false
-                END AS "isVerified"
+                created_at as "createdAt",
+                updated_at as "updatedAt"
              FROM users
              WHERE id = $1 AND status = 'active'`,
             {

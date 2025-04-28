@@ -13,6 +13,14 @@ const User = sequelize.define('User', {
     allowNull: false,
     unique: true
   },
+  first_name: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  last_name: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   email: {
     type: DataTypes.STRING(255),
     allowNull: false,
@@ -73,6 +81,9 @@ const User = sequelize.define('User', {
     defaultValue: 'user'
   },
   profile_picture: {
+    type: DataTypes.STRING(255)
+  },
+  cover_photo: {
     type: DataTypes.STRING(255)
   },
   bio: {

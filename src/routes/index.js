@@ -42,6 +42,9 @@ router.put('/user/notifications', authenticate, userController.toggleNotificatio
 router.get('/user/notifications', authenticate, userController.getNotifications);
 router.put('/user/notifications/read-all', authenticate, userController.markAllNotificationsAsRead);
 
+// Public user profile route
+router.get('/users/:id', userController.getUserProfileById);
+
 // Post routes (all protected)
 router.post('/posts', authenticate, ...upload.single('file'), postController.createPost);
 router.get('/posts/user', authenticate, postController.getUserPosts);
