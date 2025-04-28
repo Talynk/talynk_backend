@@ -760,11 +760,14 @@ exports.getUserPostsById = async (req, res) => {
             `SELECT 
                 p.id,
                 p.title,
-                p.caption,
-                p.media_url as "media",
-                p.media_type as "mediaType",
-                p.created_at as "createdAt",
-                p.likes_count as "likesCount",
+                p.description,
+                p.video_url as "videoUrl",
+                CASE 
+                    WHEN p.video_url IS NOT NULL THEN 'video'
+                    ELSE 'image'
+                END as "mediaType",
+                p.created_at,
+                p.likes as "likesCount",
                 p.category_id,
                 c.name as "categoryName",
                 (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as "commentsCount",
