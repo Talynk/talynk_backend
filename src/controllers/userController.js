@@ -10,6 +10,8 @@ const { Op } = require('sequelize');
 const db = require('../config/db');
 const sequelize = require('../config/database');
 const { updateUserActivityMetrics } = require('./suggestionController');
+const Category = require('../models/Category.js');
+const Follow = require('../models/Follow.js');
 
 // Get user profile
 exports.getProfile = async (req, res) => {
@@ -635,24 +637,22 @@ exports.getUserProfileById = async (req, res) => {
         
         const currentUserId = req.user ? req.user.id : null;
 
-        // Get basic user data
-        const [user] = await sequelize.query(
-            `SELECT 
-                id, 
-                username,
-                username as "fullName", 
-                email,
-                bio,
-                profile_picture as "profilePicture",
-                posts_count as "postsCount",
-                follower_count as "followersCount"
-             FROM users
-             WHERE id = $1 AND status = 'active'`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        // Get user with Sequelize models
+        const user = await User.findOne({
+            where: {
+                id: userId,
+                status: 'active'
+            },
+            attributes: [
+                'id',
+                'username',
+                'email',
+                'bio',
+                'profile_picture',
+                'posts_count',
+                'follower_count'
+            ]
+        });
 
         if (!user) {
             return res.status(404).json({
@@ -661,58 +661,59 @@ exports.getUserProfileById = async (req, res) => {
             });
         }
 
-        // Get following count
-        const [followingCount] = await sequelize.query(
-            `SELECT COUNT(*) as count
-             FROM follows
-             WHERE "followerId" = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        // Convert to plain object for easier manipulation
+        const userData = user.toJSON();
         
-        user.followingCount = parseInt(followingCount.count);
-        user.coverPhoto = null; // Add coverPhoto field even though it's not in the database
+        // Rename fields to match expected format
+        userData.fullName = userData.username;
+        userData.profilePicture = userData.profile_picture;
+        userData.postsCount = userData.posts_count;
+        userData.followersCount = userData.follower_count;
+        userData.coverPhoto = null;
+
+        // Get following count
+        const followingCount = await Follow.count({
+            where: {
+                followerId: userId
+            }
+        });
+        
+        userData.followingCount = followingCount;
 
         // Check if current user is following this profile
         let isFollowing = false;
         if (currentUserId) {
-            const [followStatus] = await sequelize.query(
-                `SELECT EXISTS(
-                    SELECT 1 FROM follows 
-                    WHERE "followerId" = $1 AND "followingId" = $2
-                ) as "isFollowing"`,
-                {
-                    bind: [currentUserId, userId],
-                    type: sequelize.QueryTypes.SELECT
+            const followExists = await Follow.findOne({
+                where: {
+                    followerId: currentUserId,
+                    followingId: userId
                 }
-            );
-            isFollowing = followStatus.isFollowing;
+            });
+            isFollowing = !!followExists;
         }
 
-        user.isFollowing = isFollowing;
+        userData.isFollowing = isFollowing;
         
-        // Add timestamps (even if not in the database)
-        user.createdAt = new Date().toISOString();
-        user.updatedAt = new Date().toISOString();
+        // Add timestamps
+        userData.createdAt = userData.createdAt || new Date().toISOString();
+        userData.updatedAt = userData.updatedAt || new Date().toISOString();
 
         // Update profile view count if not viewing own profile
         if (currentUserId !== userId) {
-            await sequelize.query(
-                `UPDATE users 
-                 SET total_profile_views = total_profile_views + 1
-                 WHERE id = $1`,
-                {
-                    bind: [userId],
-                    type: sequelize.QueryTypes.UPDATE
-                }
-            );
+            await User.increment('total_profile_views', {
+                by: 1,
+                where: { id: userId }
+            });
         }
+
+        // Remove underscore fields that were renamed
+        delete userData.profile_picture;
+        delete userData.posts_count;
+        delete userData.follower_count;
 
         res.json({
             status: 'success',
-            data: user
+            data: userData
         });
     } catch (error) {
         console.error('Error fetching user profile:', error);
@@ -742,75 +743,85 @@ exports.getUserPostsById = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // Get total count of user's public posts
-        const [countResult] = await sequelize.query(
-            `SELECT COUNT(*) as count
-             FROM posts
-             WHERE user_id = $1 AND status = 'approved'`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
+        // Use Sequelize model queries rather than raw SQL
+        // Find the count first
+        const { count: totalCount } = await Post.findAndCountAll({
+            where: { 
+                user_id: userId,
+                status: 'approved'
             }
-        );
-        
-        const totalCount = parseInt(countResult.count);
-        
-        // Get posts with pagination
-        const posts = await sequelize.query(
-            `SELECT 
-                p.id,
-                p.title,
-                p.description,
-                p.video_url as "videoUrl",
-                CASE 
-                    WHEN p.video_url IS NOT NULL THEN 'video'
-                    ELSE 'image'
-                END as "mediaType",
-                p.created_at,
-                p.likes as "likesCount",
-                p.category_id,
-                c.name as "categoryName",
-                (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as "commentsCount",
-                u.username as "authorName",
-                u.profile_picture as "authorProfilePicture"
-             FROM posts p
-             LEFT JOIN categories c ON p.category_id = c.id
-             JOIN users u ON p.user_id = u.id
-             WHERE p.user_id = $1 AND p.status = 'approved'
-             ORDER BY p.created_at DESC
-             LIMIT $2 OFFSET $3`,
-            {
-                bind: [userId, limit, offset],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        });
 
-        // If user is authenticated, check if they liked each post
-        if (currentUserId && posts.length > 0) {
-            const likedPostIds = await sequelize.query(
-                `SELECT post_id 
-                 FROM post_likes 
-                 WHERE user_id = $1 AND post_id IN (${posts.map((_, i) => `$${i + 2}`).join(',')})`,
+        // Get the posts with all needed data
+        const posts = await Post.findAll({
+            where: {
+                user_id: userId,
+                status: 'approved'
+            },
+            include: [
                 {
-                    bind: [currentUserId, ...posts.map(post => post.id)],
-                    type: sequelize.QueryTypes.SELECT
+                    model: Category,
+                    as: 'category',
+                    attributes: ['name']
+                },
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['username', 'profile_picture']
                 }
-            );
+            ],
+            order: [['created_at', 'DESC']],
+            limit: limit,
+            offset: offset
+        });
+
+        // Transform to match the expected format
+        const formattedPosts = posts.map(post => {
+            const postData = post.toJSON();
+            return {
+                id: postData.id,
+                title: postData.title,
+                description: postData.description,
+                videoUrl: postData.video_url,
+                mediaType: postData.video_url ? 'video' : 'image',
+                created_at: postData.created_at,
+                likesCount: postData.likes || 0,
+                category_id: postData.category_id,
+                categoryName: postData.category?.name,
+                commentsCount: postData.comment_count || 0,
+                authorName: postData.user?.username,
+                authorProfilePicture: postData.user?.profile_picture
+            };
+        });
+
+        // Check if user liked these posts
+        if (currentUserId && formattedPosts.length > 0) {
+            const postIds = formattedPosts.map(post => post.id);
             
-            const likedPostIdSet = new Set(likedPostIds.map(item => item.post_id));
+            const likedPosts = await PostLike.findAll({
+                where: {
+                    user_id: currentUserId,
+                    post_id: {
+                        [Op.in]: postIds
+                    }
+                },
+                attributes: ['post_id']
+            });
+            
+            const likedPostIdSet = new Set(likedPosts.map(like => like.post_id));
             
             // Add isLiked flag to each post
-            posts.forEach(post => {
+            formattedPosts.forEach(post => {
                 post.isLiked = likedPostIdSet.has(post.id);
             });
         }
 
-        const hasMore = offset + posts.length < totalCount;
+        const hasMore = offset + formattedPosts.length < totalCount;
 
         res.json({
             status: 'success',
             data: {
-                posts,
+                posts: formattedPosts,
                 hasMore,
                 totalCount
             }
