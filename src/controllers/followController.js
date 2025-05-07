@@ -121,16 +121,12 @@ const followUser = async (req, res) => {
     );
 
     await db.sequelize.query(
-      `INSERT INTO notifications (user_id, notification_text, notification_date, is_read, context_data)
-       VALUES ($1, $2, NOW(), false, $3)`,
+      `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
+       VALUES ($1, $2, NOW(), false)`,
       {
         bind: [
           followingId, 
           `${follower.username} started following you`, 
-          JSON.stringify({
-            type: 'follow',
-            follower_id: followerId
-          })
         ],
         type: db.sequelize.QueryTypes.INSERT
       }
