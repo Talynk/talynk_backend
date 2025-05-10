@@ -168,4 +168,86 @@ exports.reportComment = async (req, res) => {
             message: 'Error reporting comment'
         });
     }
+};
+
+/**
+ * Get all comments on the logged-in user's posts for the Inbox page
+ */
+exports.getUserPostComments = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Optional query parameters for pagination and filtering
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
+        const fromDate = req.query.from || null;
+
+        // Build the where clause for the date filter
+        let dateFilter = '';
+        if (fromDate) {
+            dateFilter = "AND c.comment_date >= :fromDate";
+        }
+
+        // Query to get comments on user's posts with post details and commenter information
+        const comments = await sequelize.query(
+            `SELECT 
+                c.comment_id as id,
+                c.post_id as "postId",
+                p.title as "postTitle",
+                p.video_url as "postThumbnail",
+                c.comment_text as content,
+                c.comment_date as "createdAt",
+                u.id as "user.id",
+                u.name as "user.name",
+                u.username as "user.username",
+                u.profile_picture as "user.avatar"
+            FROM comments c
+            JOIN posts p ON c.post_id = p.id
+            JOIN users u ON c.commentor_id = u.id
+            WHERE p.user_id = :userId
+            ${dateFilter}
+            ORDER BY c.comment_date DESC
+            LIMIT :limit OFFSET :offset`,
+            {
+                replacements: { 
+                    userId,
+                    limit,
+                    offset,
+                    fromDate: fromDate ? new Date(fromDate) : null
+                },
+                type: sequelize.QueryTypes.SELECT,
+                nest: true
+            }
+        );
+
+        // Format the comments to match the required response structure
+        const formattedComments = comments.map(comment => ({
+            id: comment.id.toString(),
+            postId: comment.postId,
+            postTitle: comment.postTitle,
+            postThumbnail: comment.postThumbnail,
+            content: comment.content,
+            createdAt: comment.createdAt.toISOString(),
+            user: {
+                id: comment.user.id,
+                name: comment.user.name,
+                username: comment.user.username,
+                avatar: comment.user.avatar
+            }
+        }));
+
+        res.json({
+            status: 'success',
+            data: {
+                comments: formattedComments
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching user post comments:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch comments'
+        });
+    }
 }; 

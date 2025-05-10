@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Post = require('../models/Post');
 const User = require('../models/User');
+const commentController = require('../controllers/commentController');
+const { authenticate } = require('../middleware/auth');
 
 // GET all posts
 router.get('/', async (req, res) => {
@@ -50,5 +52,8 @@ router.get('/', async (req, res) => {
     });
   }
 });
+
+// Get comments on the logged-in user's posts for the Inbox page
+router.get('/comments/user', authenticate, commentController.getUserPostComments);
 
 module.exports = router; 
