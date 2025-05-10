@@ -3,6 +3,7 @@ const User = require('../models/User.js');
 const Notification = require('../models/Notification.js');
 const Comment = require('../models/Comment.js');
 const sequelize = require('../config/database');
+const { Op } = require('sequelize');
 
 exports.addComment = async (req, res) => {
     try {
@@ -183,13 +184,17 @@ exports.getUserPostComments = async (req, res) => {
         const offset = (page - 1) * limit;
         const fromDate = req.query.from || null;
 
-        // Build the where clause for the date filter
-        let dateFilter = '';
+        // Prepare date condition for SQL
+        const dateCondition = fromDate ? `AND c.comment_date >= $3` : '';
+        
+        // Set up bind parameters
+        const bindParams = [userId, limit];
         if (fromDate) {
-            dateFilter = "AND c.comment_date >= :fromDate";
+            bindParams.push(fromDate);
         }
-
-        // Query to get comments on user's posts with post details and commenter information
+        bindParams.push(offset); // This will be $3 or $4 depending on dateCondition
+        
+        // Use raw SQL with explicit type casts to avoid type mismatch issues
         const comments = await sequelize.query(
             `SELECT 
                 c.comment_id as id,
@@ -199,41 +204,36 @@ exports.getUserPostComments = async (req, res) => {
                 c.comment_text as content,
                 c.comment_date as "createdAt",
                 u.id as "user.id",
-                u.name as "user.name",
+                u.username as "user.name",
                 u.username as "user.username",
                 u.profile_picture as "user.avatar"
             FROM comments c
-            JOIN posts p ON c.post_id = p.id
-            JOIN users u ON c.commentor_id = u.id
-            WHERE p.user_id = :userId
-            ${dateFilter}
+            JOIN posts p ON c.post_id::uuid = p.id::uuid
+            JOIN users u ON c.commentor_id::uuid = u.id::uuid
+            WHERE p.user_id::uuid = $1::uuid
+            ${dateCondition}
             ORDER BY c.comment_date DESC
-            LIMIT :limit OFFSET :offset`,
+            LIMIT $2 OFFSET $${fromDate ? '4' : '3'}`,
             {
-                replacements: { 
-                    userId,
-                    limit,
-                    offset,
-                    fromDate: fromDate ? new Date(fromDate) : null
-                },
+                bind: bindParams,
                 type: sequelize.QueryTypes.SELECT,
                 nest: true
             }
         );
 
-        // Format the comments to match the required response structure
+        // Format the response
         const formattedComments = comments.map(comment => ({
             id: comment.id.toString(),
             postId: comment.postId,
             postTitle: comment.postTitle,
             postThumbnail: comment.postThumbnail,
             content: comment.content,
-            createdAt: comment.createdAt.toISOString(),
+            createdAt: new Date(comment.createdAt).toISOString(),
             user: {
                 id: comment.user.id,
                 name: comment.user.name,
                 username: comment.user.username,
-                avatar: comment.user.avatar
+                avatar: comment.user.avatar || null
             }
         }));
 
