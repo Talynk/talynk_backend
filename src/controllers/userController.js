@@ -89,119 +89,104 @@ exports.getProfile = async (req, res) => {
     }
 };
 
-// Update user profile
+/**
+ * Update user profile - handles profile picture upload and phone number updates
+ * @route PUT /api/user/profile
+ * @access Private
+ */
 exports.updateProfile = async (req, res) => {
-    try {
-        const { phone1, phone2, selected_category } = req.body;
-        const user_id = req.user.id;
-
-        // Get user using raw SQL to avoid field naming issues
-        const [user] = await sequelize.query(
-            `SELECT * FROM users WHERE id = $1`,
-            {
-                bind: [user_id],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
-
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
-
-        // Handle facial image upload
-        let facialImageBuffer = null;
-        if (req.file) {
-            console.log("File received:", req.file.originalname, req.file.mimetype, req.file.size);
-            
-            // Validate file type
-            const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg'];
-            if (!allowedMimeTypes.includes(req.file.mimetype)) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'Invalid file type. Only JPEG, PNG, and JPG images are allowed.'
-                });
-            }
-
-            // Validate file size (max 5MB)
-            const maxSize = 5 * 1024 * 1024; // 5MB in bytes
-            if (req.file.size > maxSize) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'File size too large. Maximum size is 5MB.'
-                });
-            }
-
-            // Read the file from disk
-            try {
-                const fs = require('fs');
-                facialImageBuffer = fs.readFileSync(req.file.path);
-                
-                // Clean up the temporary file
-                fs.unlinkSync(req.file.path);
-            } catch (err) {
-                console.error('Error reading file:', err);
-                return res.status(500).json({
-                    status: 'error',
-                    message: 'Error processing uploaded file',
-                    details: err.message
-                });
-            }
-        }
-
-        // Prepare update data
-        const updateData = {
-            phone1: phone1 || user.phone1,
-            phone2: phone2 || user.phone2,
-            selected_category: selected_category || user.selected_category
-        };
-
-        // Only update facial image if a new one was uploaded
-        if (facialImageBuffer) {
-            updateData.user_facial_image = facialImageBuffer;
-        }
-
-        // Update user using raw SQL
-        await sequelize.query(
-            `UPDATE users 
-             SET phone1 = $1, phone2 = $2, selected_category = $3${facialImageBuffer ? ', user_facial_image = $4' : ''}
-             WHERE id = $${facialImageBuffer ? '5' : '4'}`,
-            {
-                bind: facialImageBuffer 
-                    ? [updateData.phone1, updateData.phone2, updateData.selected_category, facialImageBuffer, user_id]
-                    : [updateData.phone1, updateData.phone2, updateData.selected_category, user_id],
-                type: sequelize.QueryTypes.UPDATE
-            }
-        );
-
-        // Get updated user data
-        const [updatedUser] = await sequelize.query(
-            `SELECT id, username, email, phone1, phone2, selected_category FROM users WHERE id = $1`,
-            {
-                bind: [user_id],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+  try {
+    const userId = req.user.id;
+    const { phone1, phone2 } = req.body;
+    
+    // Create an update object with only allowed fields
+    const updateData = {};
+    if (phone1 !== undefined) updateData.phone1 = phone1;
+    if (phone2 !== undefined) updateData.phone2 = phone2;
+    
+    // Get Supabase instance from app locals
+    const supabase = req.app.locals.supabase;
+    
+    // Handle profile picture upload if it exists
+    if (req.file) {
+      try {
+        const file = req.file;
+        const fileExtension = file.originalname.split('.').pop();
+        const fileName = `profile/profile_${userId}_${Date.now()}.${fileExtension}`;
+        const bucketName = process.env.SUPABASE_BUCKET_NAME || 'profiles';
         
-        console.log("Updated data -------->", updatedUser);
-
-        res.json({
-            status: 'success',
-            message: 'Profile updated successfully',
-            data: {
-                user: updatedUser
-            }
+        // Upload to Supabase
+        const { data, error } = await supabase.storage
+          .from(bucketName)
+          .upload(fileName, file.buffer, {
+            contentType: file.mimetype,
+            upsert: true
+          });
+          
+        if (error) {
+          console.error('Error uploading to Supabase:', error);
+          throw new Error('Failed to upload profile picture');
+        }
+        
+        // Get the public URL
+        const { data: urlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(fileName);
+          
+        // Add profile picture URL to update data
+        updateData.profile_picture = urlData.publicUrl;
+        
+      } catch (uploadError) {
+        console.error('File upload error:', uploadError);
+        return res.status(500).json({
+          status: 'error',
+          message: 'Failed to upload profile picture',
+          error: process.env.NODE_ENV === 'development' ? uploadError.message : undefined
         });
-    } catch (error) {
-        console.error('Profile update error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error updating profile',
-            details: error.message
-        });
+      }
     }
+    
+    // Only proceed if there are fields to update
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'No valid fields provided for update'
+      });
+    }
+    
+    // Update the user with the restricted fields
+    const [updated, updatedUsers] = await User.update(updateData, {
+      where: { id: userId },
+      returning: true
+    });
+    
+    if (!updated) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+    
+    // Get the updated user object without sensitive fields
+    const updatedUser = updatedUsers[0].get({ plain: true });
+    delete updatedUser.password;
+    
+    res.status(200).json({
+      status: 'success',
+      message: 'Profile updated successfully',
+      data: {
+        user: updatedUser
+      }
+    });
+    
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Failed to update profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
 };
 
 // Get user statistics
