@@ -842,70 +842,97 @@ exports.getPost = async (req, res) => {
 };
 
 exports.likePost = async (req, res) => {
+    let t = await sequelize.transaction();
+    
     try {
         const { postId } = req.params;
         const userId = req.user.id;
-
-        // First, check if the user has already liked this post
-        const existingLike = await sequelize.query(
-            `SELECT * FROM post_likes WHERE post_id = $1 AND user_id = $2`,
-            {
-                bind: [postId, userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
-
-        // If the user has already liked the post, unlike it (toggle behavior)
-        if (existingLike && existingLike.length > 0) {
+        
+        try {
+            // Try to insert first - if it exists, it will throw a unique constraint error
             await sequelize.query(
-                `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`,
+                `INSERT INTO post_likes (post_id, user_id, like_date)
+                 VALUES ($1, $2, $3)`,
                 {
-                    bind: [postId, userId],
-                    type: sequelize.QueryTypes.DELETE
+                    bind: [postId, userId, new Date()],
+                    type: sequelize.QueryTypes.INSERT,
+                    transaction: t
                 }
             );
-
-            // Decrement post's like count
+            
+            // If we get here, the insert succeeded (post was not previously liked)
+            // Increment post's like count
             await sequelize.query(
-                `UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
+                `UPDATE posts SET likes = likes + 1 WHERE id = $1`,
                 {
                     bind: [postId],
-                    type: sequelize.QueryTypes.UPDATE
+                    type: sequelize.QueryTypes.UPDATE,
+                    transaction: t
                 }
             );
-
+            
+            await t.commit();
+            
             return res.json({
                 status: 'success',
-                message: 'Post unliked successfully',
-                action: 'unliked'
+                message: 'Post liked successfully',
+                action: 'liked'
             });
+            
+        } catch (insertError) {
+            // We need to rollback the current transaction since it's in an error state
+            await t.rollback();
+            
+            // Check if this is a unique constraint violation
+            if (insertError.name === 'SequelizeUniqueConstraintError' || 
+                (insertError.original && insertError.original.code === '23505')) {
+                
+                // Start a new transaction for the unlike operation
+                t = await sequelize.transaction();
+                
+                try {
+                    // This means the user already liked the post, so we should unlike it
+                    await sequelize.query(
+                        `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`,
+                        {
+                            bind: [postId, userId],
+                            type: sequelize.QueryTypes.DELETE,
+                            transaction: t
+                        }
+                    );
+                    
+                    // Decrement post's like count
+                    await sequelize.query(
+                        `UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
+                        {
+                            bind: [postId],
+                            type: sequelize.QueryTypes.UPDATE,
+                            transaction: t
+                        }
+                    );
+                    
+                    await t.commit();
+                    
+                    return res.json({
+                        status: 'success',
+                        message: 'Post unliked successfully',
+                        action: 'unliked'
+                    });
+                } catch (unlikeError) {
+                    await t.rollback();
+                    throw unlikeError;
+                }
+            } else {
+                // Some other error occurred, not related to unique constraint
+                throw insertError;
+            }
         }
-
-        // User hasn't liked the post yet, so insert a new like
-        await sequelize.query(
-            `INSERT INTO post_likes (post_id, user_id, like_date)
-             VALUES ($1, $2, $3)`,
-            {
-                bind: [postId, userId, new Date()],
-                type: sequelize.QueryTypes.INSERT
-            }
-        );
-
-        // Increment post's like count
-        await sequelize.query(
-            `UPDATE posts SET likes = likes + 1 WHERE id = $1`,
-            {
-                bind: [postId],
-                type: sequelize.QueryTypes.UPDATE
-            }
-        );
-
-        res.json({
-            status: 'success',
-            message: 'Post liked successfully',
-            action: 'liked'
-        });
+        
     } catch (error) {
+        // Make sure any active transaction is rolled back
+        if (t && !t.finished) {
+            await t.rollback();
+        }
         console.error('Like/Unlike error:', error);
         res.status(500).json({
             status: 'error',
