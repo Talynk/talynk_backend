@@ -107,7 +107,7 @@ exports.getAllPosts = async (req, res) => {
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'username']
+                    attributes: ['id', 'username', 'profile_picture']
                 },
                 {
                     model: Category,
@@ -844,115 +844,72 @@ exports.getPost = async (req, res) => {
 exports.likePost = async (req, res) => {
     try {
         const { postId } = req.params;
-        const liker_name = req.user.username;
-        const userID = req.user.id; // Using username instead of ID since PostLike uses username
-        console.log("username ----->", userID);
+        const userId = req.user.id;
 
-        // Check if like exists using raw SQL
-        const [existingLike] = await sequelize.query(
-            `SELECT * FROM post_likes 
-             WHERE post_id = $1 AND user_id = $2`,
+        // First, check if the user has already liked this post
+        const existingLike = await sequelize.query(
+            `SELECT * FROM post_likes WHERE post_id = $1 AND user_id = $2`,
             {
-                bind: [postId, userID],
+                bind: [postId, userId],
                 type: sequelize.QueryTypes.SELECT
             }
         );
 
-        if (existingLike) {
-            // Unlike - Delete the like and decrement count
+        // If the user has already liked the post, unlike it (toggle behavior)
+        if (existingLike && existingLike.length > 0) {
             await sequelize.query(
-                `DELETE FROM post_likes 
-                 WHERE post_id = $1 AND user_id = $2`,
+                `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`,
                 {
-                    bind: [postId, userID],
+                    bind: [postId, userId],
                     type: sequelize.QueryTypes.DELETE
                 }
             );
-            
-            await sequelize.query(
-                `UPDATE posts 
-                 SET likes = GREATEST(likes - 1, 0)
-                 WHERE id = $1`,
-                {
-                    bind: [postId],
-                    type: sequelize.QueryTypes.UPDATE
-                }
-            );
-        } else {
-            // Like - Create new like and increment count
-            await sequelize.query(
-                `INSERT INTO post_likes (post_id, user_id, like_date)
-                 VALUES ($1, $2, $3)`,
-                {
-                    bind: [postId, userID, new Date()],
-                    type: sequelize.QueryTypes.INSERT
-                }
-            );
 
+            // Decrement post's like count
             await sequelize.query(
-                `UPDATE posts 
-                 SET likes = likes + 1 
-                 WHERE id = $1`,
+                `UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
                 {
                     bind: [postId],
                     type: sequelize.QueryTypes.UPDATE
                 }
             );
 
-            // Get post owner's ID for notification
-            const [post] = await sequelize.query(
-                `SELECT user_id FROM posts WHERE id = $1`,
-                {
-                    bind: [postId],
-                    type: sequelize.QueryTypes.SELECT
-                }
-            );
-
-            if (post) {
-                // Create notification using raw SQL
-                await sequelize.query(
-                    `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-                     VALUES ($1, $2, $3, $4)`,
-                    {
-                        bind: [
-                            post.user_id,
-                            `${liker_name} liked your post`,
-                            new Date(),
-                            false
-                        ],
-                        type: sequelize.QueryTypes.INSERT
-                    }
-                );
-            }
+            return res.json({
+                status: 'success',
+                message: 'Post unliked successfully',
+                action: 'unliked'
+            });
         }
 
-        // Synchronize the likes count with the actual number of likes
-        const [{ count }] = await sequelize.query(
-            `SELECT COUNT(*) as count FROM post_likes WHERE post_id = $1`,
+        // User hasn't liked the post yet, so insert a new like
+        await sequelize.query(
+            `INSERT INTO post_likes (post_id, user_id, like_date)
+             VALUES ($1, $2, $3)`,
             {
-                bind: [postId],
-                type: sequelize.QueryTypes.SELECT
+                bind: [postId, userId, new Date()],
+                type: sequelize.QueryTypes.INSERT
             }
         );
-        
-        // Update the post with the correct count
+
+        // Increment post's like count
         await sequelize.query(
-            `UPDATE posts SET likes = $1 WHERE id = $2`,
+            `UPDATE posts SET likes = likes + 1 WHERE id = $1`,
             {
-                bind: [count, postId],
+                bind: [postId],
                 type: sequelize.QueryTypes.UPDATE
             }
         );
 
         res.json({
             status: 'success',
-            message: existingLike ? 'Post unliked successfully' : 'Post liked successfully'
+            message: 'Post liked successfully',
+            action: 'liked'
         });
     } catch (error) {
         console.error('Like/Unlike error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error processing like/unlike'
+            message: 'Error liking/unliking post'
         });
     }
 };
