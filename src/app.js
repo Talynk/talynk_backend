@@ -54,12 +54,27 @@ checkSupabaseBucket();
 app.use(helmet({
     contentSecurityPolicy: false // For development only
 }));
+
+// Apply CORS before any route definitions
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://192.168.56.1:3001', 'https://talynk-user-frontend-git-main-ihirwepatricks-projects.vercel.app', 'http://localhost:3000', 'https://talynk-test.vercel.app', 'https://talynk-management.vercel.app', 'https://talynk-user-frontend-production.up.railway.app'],
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3001', 
+           'http://127.0.0.1:3001', 'http://192.168.56.1:3001', 
+           'https://talynk-user-frontend-git-main-ihirwepatricks-projects.vercel.app', 
+           'http://localhost:3000', 'https://talynk-test.vercel.app', 
+           'https://talynk-management.vercel.app', 
+           'https://talynk-user-frontend-production.up.railway.app', 
+           'https://talynk.vercel.app'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers']
 }));
+
+// Add a preflight handler for all routes
+app.options('*', cors());
+
+// Add specific CORS handling for problematic routes
+app.use('/api/posts/all', cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
