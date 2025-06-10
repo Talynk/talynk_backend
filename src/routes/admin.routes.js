@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Post, User } = require('../models');  // Import models directly
 const adminController = require('../controllers/adminController');
+const adminSearchController = require('../controllers/adminSearchController');
 const auth = require('../middleware/auth');
 const authController = require('../controllers/authController');
 const { Op } = require('sequelize');
@@ -229,5 +230,8 @@ router.post('/ads/upload', isAdmin, adminController.uploadAd);
 router.get('/profile', isAdmin, adminController.getProfile);
 router.put('/profile', isAdmin, adminController.updateProfile);
 router.put('/change-password', isAdmin, adminController.changePassword);
+
+// Search posts route
+router.get('/posts/search', isAdmin, adminSearchController.searchPosts);
 
 module.exports = router; 
