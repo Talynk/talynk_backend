@@ -859,7 +859,7 @@ exports.likePost = async (req, res) => {
                     transaction: t
                 }
             );
-            
+
             // If we get here, the insert succeeded (post was not previously liked)
             // Increment post's like count
             await sequelize.query(
@@ -870,7 +870,7 @@ exports.likePost = async (req, res) => {
                     transaction: t
                 }
             );
-            
+
             await t.commit();
             
             return res.json({
@@ -892,32 +892,32 @@ exports.likePost = async (req, res) => {
                 
                 try {
                     // This means the user already liked the post, so we should unlike it
-                    await sequelize.query(
+                await sequelize.query(
                         `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`,
-                        {
+                    {
                             bind: [postId, userId],
                             type: sequelize.QueryTypes.DELETE,
                             transaction: t
-                        }
-                    );
-                    
+                    }
+                );
+
                     // Decrement post's like count
                     await sequelize.query(
                         `UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
-                        {
-                            bind: [postId],
+            {
+                bind: [postId],
                             type: sequelize.QueryTypes.UPDATE,
                             transaction: t
-                        }
-                    );
-                    
+            }
+        );
+
                     await t.commit();
                     
                     return res.json({
-                        status: 'success',
+            status: 'success',
                         message: 'Post unliked successfully',
                         action: 'unliked'
-                    });
+        });
                 } catch (unlikeError) {
                     await t.rollback();
                     throw unlikeError;

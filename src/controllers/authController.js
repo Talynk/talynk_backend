@@ -333,7 +333,7 @@ exports.verifyToken = async (req, res) => {
 exports.refreshToken = async (req, res) => {
     try {
         // Get the refresh token from the request header
-        const refreshToken = req.headers.authorization?.split(' ')[1];
+        const refreshToken = req.headers.authorization?.split('Bearer ')[1];
 
         if (!refreshToken) {
             return res.status(401).json({
