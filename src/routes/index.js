@@ -91,6 +91,8 @@ router.get('/admin/posts/rejected', authenticate, isAdmin, adminController.getRe
 router.get('/admin/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
 router.get('/admin/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
 // router.get('/admin/users/stats', authenticate, isAdmin, adminController.getUsersStats);
+// Search posts API for admin
+router.get('/admin/posts/search', authenticate, isAdmin, adminController.searchPosts);
 
 // Approver routes
 router.get('/approver/stats', authenticate, isApprover, approverController.getApproverStats);
@@ -99,6 +101,8 @@ router.get('/approver/posts/approved', authenticate, isApprover, approverControl
 router.put('/approver/posts/:postId/approve', authenticate, isApprover, approverController.approvePost);
 router.put('/approver/posts/:postId/reject', authenticate, isApprover, approverController.rejectPost);
 router.get('/approver/notifications', authenticate, isApprover, approverController.getApproverNotifications);
+// Search posts API for approver
+router.get('/approver/posts/search', authenticate, isApprover, approverController.searchPosts);
 
 // Subscription routes
 router.post('/subscriptions/:userID', authenticate, subscriptionController.subscribe);

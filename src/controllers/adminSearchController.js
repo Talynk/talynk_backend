@@ -5,68 +5,135 @@ const { Op } = require('sequelize');
 
 exports.searchPosts = async (req, res) => {
     try {
-        const { q } = req.query;
+        const { query, type, page = 1, limit = 10 } = req.query;
 
-        // Validate search query
-        if (!q || q.trim() === '') {
+        // Validate required parameters
+        if (!query || !type) {
             return res.status(400).json({
-                status: 'error',
-                message: 'Invalid search query'
+                success: false,
+                error: {
+                    code: 'MISSING_PARAMETERS',
+                    message: 'Query and type parameters are required'
+                }
             });
         }
 
-        const searchTerm = q.trim();
+        // Validate search type
+        const validTypes = ['post_id', 'post_title', 'user_id', 'username', 'date', 'status'];
+        if (!validTypes.includes(type)) {
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'INVALID_SEARCH_TYPE',
+                    message: `Invalid search type. Must be one of: ${validTypes.join(', ')}`
+                }
+            });
+        }
 
-        // Search posts by various criteria
-        const posts = await Post.findAll({
-            where: {
-                [Op.or]: [
-                    // Search by post ID (exact match)
-                    { id: searchTerm },
-                    // Search by unique traceability ID
-                    { unique_traceability_id: { [Op.iLike]: `%${searchTerm}%` } },
-                    // Search by title
-                    { title: { [Op.iLike]: `%${searchTerm}%` } },
-                    // Search by description
-                    { description: { [Op.iLike]: `%${searchTerm}%` } }
-                ]
-            },
+        // Build where clause based on search type
+        let whereClause = {};
+        switch (type) {
+            case 'post_id':
+                whereClause.id = query;
+                break;
+            case 'post_title':
+                whereClause.title = {
+                    [Op.iLike]: `%${query}%`
+                };
+                break;
+            case 'user_id':
+                whereClause.user_id = query;
+                break;
+            case 'username':
+                whereClause['$user.username$'] = {
+                    [Op.iLike]: `%${query}%`
+                };
+                break;
+            case 'date':
+                const searchDate = new Date(query);
+                if (isNaN(searchDate.getTime())) {
+                    return res.status(400).json({
+                        success: false,
+                        error: {
+                            code: 'INVALID_DATE',
+                            message: 'Invalid date format. Use YYYY-MM-DD'
+                        }
+                    });
+                }
+                whereClause.created_at = {
+                    [Op.gte]: searchDate,
+                    [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                };
+                break;
+            case 'status':
+                const validStatuses = ['pending', 'approved', 'rejected'];
+                if (!validStatuses.includes(query.toLowerCase())) {
+                    return res.status(400).json({
+                        success: false,
+                        error: {
+                            code: 'INVALID_STATUS',
+                            message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+                        }
+                    });
+                }
+                whereClause.status = query.toLowerCase();
+                break;
+        }
+
+        // Calculate pagination
+        const offset = (page - 1) * limit;
+
+        // Perform the search with pagination
+        const { count, rows: posts } = await Post.findAndCountAll({
+            where: whereClause,
             include: [
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'username', 'email']
-                },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                    attributes: ['id', 'username', 'email', 'status', 'profile_picture']
                 }
             ],
-            order: [['createdAt', 'DESC']],
-            limit: 50 // Limit results to prevent performance issues
+            order: [['created_at', 'DESC']],
+            limit: parseInt(limit),
+            offset: parseInt(offset)
         });
 
-        // Add full URLs for files
-        const postsWithUrls = posts.map(post => {
+        // Format the response
+        const formattedPosts = posts.map(post => {
             const postData = post.toJSON();
-            if (postData.video_url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
-            }
-            return postData;
+            return {
+                id: postData.id,
+                title: postData.title,
+                description: postData.description,
+                status: postData.status,
+                created_at: postData.created_at,
+                updated_at: postData.updated_at,
+                user_id: postData.user_id,
+                user: postData.user
+            };
         });
 
         res.json({
-            status: 'success',
-            data: postsWithUrls
+            success: true,
+            data: {
+                posts: formattedPosts,
+                pagination: {
+                    total: count,
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total_pages: Math.ceil(count / limit)
+                }
+            }
         });
 
     } catch (error) {
         console.error('Error searching posts:', error);
         res.status(500).json({
-            status: 'error',
-            message: 'Internal server error',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            success: false,
+            error: {
+                code: 'INTERNAL_SERVER_ERROR',
+                message: 'An error occurred while searching posts'
+            }
         });
     }
 }; 
