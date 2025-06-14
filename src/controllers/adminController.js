@@ -1491,3 +1491,51 @@ exports.getUsersStats = async (req, res) => {
         });
     }
 };
+
+exports.getUserStats = async (req, res) => {
+    try {
+        // Get user statistics
+        const totalUsers = await User.count();
+        const activeUsers = await User.count({ where: { status: 'active' } });
+        const frozenUsers = await User.count({ where: { status: 'frozen' } });
+
+        // Get post statistics
+        const totalPosts = await Post.count();
+        const approvedPosts = await Post.count({ where: { status: 'approved' } });
+        const pendingPosts = await Post.count({ where: { status: 'pending' } });
+
+        res.json({
+            status: 'success',
+            data: {
+                users: {
+                    total: totalUsers,
+                    active: activeUsers,
+                    frozen: frozenUsers
+                },
+                posts: {
+                    total: totalPosts,
+                    approved: approvedPosts,
+                    pending: pendingPosts
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error getting user stats:', error);
+        // Return default values in case of error
+        res.status(500).json({
+            status: 'error',
+            data: {
+                users: {
+                    total: 0,
+                    active: 0,
+                    frozen: 0
+                },
+                posts: {
+                    total: 0,
+                    approved: 0,
+                    pending: 0
+                }
+            }
+        });
+    }
+};

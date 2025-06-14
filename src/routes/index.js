@@ -90,7 +90,7 @@ router.get('/admin/posts/pending', authenticate, isAdmin, adminController.getPen
 router.get('/admin/posts/rejected', authenticate, isAdmin, adminController.getRejectedPosts);
 router.get('/admin/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
 router.get('/admin/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
-// router.get('/admin/users/stats', authenticate, isAdmin, adminController.getUsersStats);
+router.get('/admin/users/stats', authenticate, isAdmin, adminController.getUserStats);
 // Search posts API for admin
 router.get('/admin/posts/search', authenticate, isAdmin, adminController.searchPosts);
 
