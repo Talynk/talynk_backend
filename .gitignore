@@ -8,3 +8,4 @@ logs/
 uploads/
 *.sql
 *.sql.gz
+*.dump
