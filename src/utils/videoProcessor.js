@@ -10,21 +10,21 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 // Create watermark image
 async function createWatermarkImage(videoId) {
     const watermarkText = 'Talynk';
-    const width = 300;  // Increased from 200
-    const height = 80;  // Increased from 50
+    const width = 400;  // Increased from 300
+    const height = 120; // Increased from 80
     
     // Create a semi-transparent watermark with two-tone colors
     const svgBuffer = Buffer.from(`
         <svg width="${width}" height="${height}">
             <style>
-                .blue-text { fill: #0066ff; font-size: 32px; font-family: Arial; opacity: 0.8; }
-                .white-text { fill: white; font-size: 32px; font-family: Arial; opacity: 0.8; }
-                .id-text { fill: white; font-size: 16px; font-family: Arial; opacity: 0.6; }
+                .blue-text { fill: #0066ff; font-size: 42px; font-family: Arial; opacity: 0.9; }
+                .white-text { fill: white; font-size: 42px; font-family: Arial; opacity: 0.9; }
+                .id-text { fill: white; font-size: 24px; font-family: Arial; opacity: 0.9; }
             </style>
             <text x="50%" y="40%" text-anchor="middle" dominant-baseline="middle">
                 <tspan class="blue-text">Tal</tspan><tspan class="white-text">ynk</tspan>
             </text>
-            <text x="50%" y="70%" text-anchor="middle" dominant-baseline="middle" class="id-text">
+            <text x="50%" y="75%" text-anchor="middle" dominant-baseline="middle" class="id-text">
                 ID: ${videoId}
             </text>
         </svg>
