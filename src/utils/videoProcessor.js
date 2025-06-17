@@ -10,16 +10,24 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 // Create watermark image
 async function createWatermarkImage(videoId) {
     const watermarkText = 'Talynk';
-    const width = 400;  // Increased from 300
-    const height = 120; // Increased from 80
+    const width = 500;  // Increased from 400 to add padding
+    const height = 120;
+    const padding = 50; // Padding on each side
     
-    // Create a semi-transparent watermark with two-tone colors
+    // Create a semi-transparent watermark with two-tone colors and background
     const svgBuffer = Buffer.from(`
         <svg width="${width}" height="${height}">
+            <defs>
+                <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:rgba(0,0,0,0.7);stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:rgba(0,0,0,0.8);stop-opacity:1" />
+                </linearGradient>
+            </defs>
+            <rect x="0" y="0" width="100%" height="100%" fill="url(#bg)" rx="10" ry="10"/>
             <style>
-                .blue-text { fill: #0066ff; font-size: 42px; font-family: Arial; opacity: 0.9; }
-                .white-text { fill: white; font-size: 42px; font-family: Arial; opacity: 0.9; }
-                .id-text { fill: white; font-size: 24px; font-family: Arial; opacity: 0.9; }
+                .blue-text { fill: #0066ff; font-size: 42px; font-family: Arial; opacity: 1; font-weight: bold; }
+                .white-text { fill: white; font-size: 42px; font-family: Arial; opacity: 1; font-weight: bold; }
+                .id-text { fill: white; font-size: 24px; font-family: Arial; opacity: 1; }
             </style>
             <text x="50%" y="40%" text-anchor="middle" dominant-baseline="middle">
                 <tspan class="blue-text">Tal</tspan><tspan class="white-text">ynk</tspan>
@@ -57,8 +65,9 @@ async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
                     {
                         filter: 'overlay',
                         options: {
-                            x: 'W-w-20', // 20 pixels from right
-                            y: 'H-h-20'  // 20 pixels from bottom
+                            x: 'W-w-30', // 30 pixels from right
+                            y: 'H-h-30',  // 30 pixels from bottom
+                            format: 'rgb'  // Ensure proper color handling
                         }
                     }
                 ])
