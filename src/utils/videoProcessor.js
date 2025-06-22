@@ -118,8 +118,8 @@ async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
                 }
             ])
             .outputOptions('-c:v libx264')
-            .outputOptions('-preset medium')
-            .outputOptions('-crf 18')
+            .outputOptions('-preset ultrafast')
+            .outputOptions('-crf 23')
             .outputOptions('-pix_fmt yuv420p')
             .outputOptions('-movflags +faststart')
             .output(outputPath);
