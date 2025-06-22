@@ -25,7 +25,7 @@ async function createWatermarkImage(videoId) {
                         <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="black" flood-opacity="0.8"/>
                     </filter>
                     <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" style="stop-color:rgba(0,0,0,0.95);stop-opacity:1" />
+                        <stop offset="0%" style="stop-color:rgba(0,0,0,0.98);stop-opacity:1" />
                         <stop offset="100%" style="stop-color:rgba(0,0,0,1);stop-opacity:1" />
                     </linearGradient>
                 </defs>
@@ -89,20 +89,15 @@ async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
                         options: {
                             x: 'W-w-30',
                             y: 'H-h-30',
-                            format: 'rgb',
-                            eof_action: 'pass',  // Ensure watermark stays on top
-                            shortest: 0  // Ensure watermark appears throughout the video
+                            eof_action: 'repeat'  // Repeat watermark throughout the video
                         }
                     }
                 ])
                 .outputOptions('-c:v libx264')  // Ensure proper video codec
-                .outputOptions('-preset fast')  // Faster encoding
-                .outputOptions('-crf 23')       // Good quality
+                .outputOptions('-preset medium')  // Better quality encoding
+                .outputOptions('-crf 18')       // Higher quality
                 .outputOptions('-pix_fmt yuv420p')  // Ensure compatibility
                 .outputOptions('-movflags +faststart')  // Optimize for streaming
-                .outputOptions('-color_primaries bt709')  // Better color handling
-                .outputOptions('-color_trc bt709')  // Better color handling
-                .outputOptions('-colorspace bt709')  // Better color handling
                 .output(outputPath);
             
             ffmpegCommand
@@ -110,7 +105,9 @@ async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
                     console.log(`[WATERMARK] FFmpeg command: ${commandLine}`);
                 })
                 .on('progress', (progress) => {
-                    console.log(`[WATERMARK] Processing progress: ${progress.percent}% done`);
+                    if (progress.percent) {
+                        console.log(`[WATERMARK] Processing progress: ${progress.percent.toFixed(1)}% done`);
+                    }
                 })
                 .on('end', async () => {
                     console.log(`[WATERMARK] FFmpeg processing completed successfully`);
