@@ -81,7 +81,11 @@ async function createWatermarkImage(videoId, videoWidth, videoHeight) {
 // Add watermark to video with robust fallback
 async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
     console.log(`[WATERMARK] Starting watermark process for video ID: ${videoId}`);
-    const tempInputPath = path.join(__dirname, '../../uploads/temp_input.mp4');
+    // Ensure uploads directory exists
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    await fs.mkdir(uploadsDir, { recursive: true });
+
+    const tempInputPath = path.join(uploadsDir, 'temp_input.mp4');
     await fs.writeFile(tempInputPath, inputBuffer);
     let videoWidth = 1920, videoHeight = 1080;
     try {
