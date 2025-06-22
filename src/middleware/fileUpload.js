@@ -32,14 +32,19 @@ const handleSupabaseUpload = async (req, res, next) => {
   try {
     // Skip if no file uploaded
     if (!req.file) {
+      console.log('[UPLOAD] No file uploaded, skipping processing');
       return next();
     }
+
+    console.log(`[UPLOAD] Processing file: ${req.file.originalname}`);
+    console.log(`[UPLOAD] File size: ${req.file.size} bytes`);
+    console.log(`[UPLOAD] File mimetype: ${req.file.mimetype}`);
 
     // Get supabase instance from app.locals
     const supabase = req.app.locals.supabase;
     
     if (!supabase) {
-      console.error('Supabase client not available');
+      console.error('[UPLOAD] Supabase client not available');
       return res.status(500).json({
         status: 'error',
         message: 'Storage service unavailable'
@@ -58,20 +63,37 @@ const handleSupabaseUpload = async (req, res, next) => {
     
     // If it's a video, add watermark
     if (file.mimetype.startsWith('video/')) {
-      console.log('Processing video with watermark...');
+      console.log('[UPLOAD] Video detected, starting watermark process...');
       const videoId = uuidv4(); // Generate a unique ID for the video
       const tempOutputPath = path.join(os.tmpdir(), `watermarked-${videoId}${fileExt}`);
       
       try {
+        console.log(`[UPLOAD] Video ID generated: ${videoId}`);
+        console.log(`[UPLOAD] Temporary output path: ${tempOutputPath}`);
+        
+        // Add watermark to video
         await addWatermarkToVideo(file.buffer, tempOutputPath, videoId);
+        
+        // Read the processed video
         fileBuffer = await fs.readFile(tempOutputPath);
-        await fs.unlink(tempOutputPath); // Clean up the temporary file
-        console.log('Watermark processing completed');
+        console.log(`[UPLOAD] Watermarked video size: ${fileBuffer.length} bytes`);
+        
+        // Clean up the temporary file
+        await fs.unlink(tempOutputPath);
+        console.log('[UPLOAD] Watermark processing completed successfully');
+        
       } catch (error) {
-        console.error('Watermarking failed:', error);
+        console.error('[UPLOAD] Watermarking failed:', error);
+        console.log('[UPLOAD] Continuing with original video file');
         // Continue with original file if watermarking fails
+        fileBuffer = file.buffer;
       }
+    } else {
+      console.log('[UPLOAD] Non-video file, skipping watermark process');
     }
+    
+    console.log(`[UPLOAD] Uploading to Supabase bucket: ${bucketName}`);
+    console.log(`[UPLOAD] File path: ${filePath}`);
     
     // Upload file to Supabase
     const { data, error } = await supabase.storage
@@ -82,7 +104,7 @@ const handleSupabaseUpload = async (req, res, next) => {
       });
 
     if (error) {
-      console.error('Supabase upload error:', error);
+      console.error('[UPLOAD] Supabase upload error:', error);
       return res.status(500).json({
         status: 'error',
         message: 'Error uploading file to storage',
@@ -95,16 +117,17 @@ const handleSupabaseUpload = async (req, res, next) => {
       .from(bucketName)
       .getPublicUrl(filePath);
       
-    console.log('File uploaded successfully to Supabase:', urlData.publicUrl);
+    console.log('[UPLOAD] File uploaded successfully to Supabase:', urlData.publicUrl);
     
     // Add file info to request
     req.file.filename = fileName;
     req.file.path = filePath;
     req.file.supabaseUrl = urlData.publicUrl;
     
+    console.log('[UPLOAD] File processing completed successfully');
     next();
   } catch (error) {
-    console.error('File upload error:', error);
+    console.error('[UPLOAD] File upload error:', error);
     return res.status(500).json({
       status: 'error',
       message: 'File upload failed',
