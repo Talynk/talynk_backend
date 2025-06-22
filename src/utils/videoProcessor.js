@@ -1,25 +1,50 @@
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
+const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 
-// Set ffmpeg path
+// Set ffmpeg and ffprobe paths
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+ffmpeg.setFfprobePath(ffprobeInstaller.path);
+console.log('[WATERMARK] Using ffprobe path:', ffprobeInstaller.path);
 
-// Create watermark image
-async function createWatermarkImage(videoId) {
-    console.log(`[WATERMARK] Creating watermark for video ID: ${videoId}`);
-    
-    const watermarkText = 'Talynk';
-    const width = 600;
-    const height = 150;
-    const padding = 100;
-    
+// Get video dimensions with fallback
+async function getVideoDimensions(videoPath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(videoPath, (err, metadata) => {
+            if (err) {
+                console.error(`[WATERMARK] Error getting video dimensions:`, err);
+                reject(err);
+                return;
+            }
+            const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
+            if (!videoStream) {
+                reject(new Error('No video stream found'));
+                return;
+            }
+            const width = videoStream.width;
+            const height = videoStream.height;
+            resolve({ width, height });
+        });
+    });
+}
+
+// Create dynamic watermark image based on video dimensions
+async function createWatermarkImage(videoId, videoWidth, videoHeight) {
+    // Calculate watermark size based on video dimensions
+    const baseWidth = Math.max(300, Math.floor(videoWidth * 0.15)); // 15% of video width, minimum 300px
+    const baseHeight = Math.max(80, Math.floor(baseWidth * 0.25)); // 25% of watermark width, minimum 80px
+    const maxWidth = Math.floor(videoWidth * 0.4); // Maximum 40% of video width
+    const maxHeight = Math.floor(videoHeight * 0.2); // Maximum 20% of video height
+    const watermarkWidth = Math.min(baseWidth, maxWidth);
+    const watermarkHeight = Math.min(baseHeight, maxHeight);
+    const mainFontSize = Math.max(24, Math.floor(watermarkHeight * 0.3));
+    const idFontSize = Math.max(14, Math.floor(watermarkHeight * 0.16));
     try {
-        // Create a watermark with solid background and enhanced colors
         const svgBuffer = Buffer.from(`
-            <svg width="${width}" height="${height}">
+            <svg width="${watermarkWidth}" height="${watermarkHeight}">
                 <defs>
                     <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
                         <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="black" flood-opacity="0.8"/>
@@ -29,11 +54,11 @@ async function createWatermarkImage(videoId) {
                         <stop offset="100%" style="stop-color:rgba(0,0,0,1);stop-opacity:1" />
                     </linearGradient>
                 </defs>
-                <rect x="0" y="0" width="100%" height="100%" fill="url(#bg)" rx="10" ry="10"/>
+                <rect x="0" y="0" width="100%" height="100%" fill="url(#bg)" rx="8" ry="8"/>
                 <style>
-                    .blue-text { fill: #0066ff; font-size: 42px; font-family: Arial; opacity: 1; font-weight: bold; filter: url(#shadow); }
-                    .white-text { fill: white; font-size: 42px; font-family: Arial; opacity: 1; font-weight: bold; filter: url(#shadow); }
-                    .id-text { fill: white; font-size: 24px; font-family: Arial; opacity: 1; filter: url(#shadow); }
+                    .blue-text { fill: #0066ff; font-size: ${mainFontSize}px; font-family: Arial; opacity: 1; font-weight: bold; filter: url(#shadow); }
+                    .white-text { fill: white; font-size: ${mainFontSize}px; font-family: Arial; opacity: 1; font-weight: bold; filter: url(#shadow); }
+                    .id-text { fill: white; font-size: ${idFontSize}px; font-family: Arial; opacity: 1; filter: url(#shadow); }
                 </style>
                 <text x="50%" y="40%" text-anchor="middle" dominant-baseline="middle">
                     <tspan class="white-text">Tal</tspan><tspan class="blue-text">ynk</tspan>
@@ -43,104 +68,73 @@ async function createWatermarkImage(videoId) {
                 </text>
             </svg>
         `);
-
         const watermarkPath = path.join(__dirname, '../../uploads/watermark.png');
-        
-        // Convert SVG to PNG with enhanced settings for better color preservation
-        await sharp(svgBuffer)
-            .png()
-            .toFile(watermarkPath);
-        
-        console.log(`[WATERMARK] Watermark image created successfully at: ${watermarkPath}`);
+        await sharp(svgBuffer).png().toFile(watermarkPath);
         return watermarkPath;
     } catch (error) {
-        console.error(`[WATERMARK] Error creating watermark image:`, error);
-        throw error;
+        console.error('[WATERMARK] Error creating dynamic watermark, using static fallback.', error);
+        // Fallback: use a static PNG watermark (ensure you have this file in your project)
+        return path.join(__dirname, 'fallback-watermark.png');
     }
 }
 
-// Add watermark to video
+// Add watermark to video with robust fallback
 async function addWatermarkToVideo(inputBuffer, outputPath, videoId) {
     console.log(`[WATERMARK] Starting watermark process for video ID: ${videoId}`);
-    console.log(`[WATERMARK] Input buffer size: ${inputBuffer.length} bytes`);
-    console.log(`[WATERMARK] Output path: ${outputPath}`);
-    
+    const tempInputPath = path.join(__dirname, '../../uploads/temp_input.mp4');
+    await fs.writeFile(tempInputPath, inputBuffer);
+    let videoWidth = 1920, videoHeight = 1080;
     try {
-        // Create watermark image with video ID
-        const watermarkPath = await createWatermarkImage(videoId);
-        
-        // Create temporary input file
-        const tempInputPath = path.join(__dirname, '../../uploads/temp_input.mp4');
-        console.log(`[WATERMARK] Writing input buffer to temp file: ${tempInputPath}`);
-        await fs.writeFile(tempInputPath, inputBuffer);
-        
-        // Check if temp file was created successfully
-        const tempFileStats = await fs.stat(tempInputPath);
-        console.log(`[WATERMARK] Temp input file size: ${tempFileStats.size} bytes`);
-        
-        return new Promise((resolve, reject) => {
-            console.log(`[WATERMARK] Starting ffmpeg processing...`);
-            
-            const ffmpegCommand = ffmpeg(tempInputPath)
-                .input(watermarkPath)
-                .complexFilter([
-                    {
-                        filter: 'overlay',
-                        options: {
-                            x: 'W-w-30',
-                            y: 'H-h-30',
-                            eof_action: 'repeat'  // Repeat watermark throughout the video
-                        }
-                    }
-                ])
-                .outputOptions('-c:v libx264')  // Ensure proper video codec
-                .outputOptions('-preset medium')  // Better quality encoding
-                .outputOptions('-crf 18')       // Higher quality
-                .outputOptions('-pix_fmt yuv420p')  // Ensure compatibility
-                .outputOptions('-movflags +faststart')  // Optimize for streaming
-                .output(outputPath);
-            
-            ffmpegCommand
-                .on('start', (commandLine) => {
-                    console.log(`[WATERMARK] FFmpeg command: ${commandLine}`);
-                })
-                .on('progress', (progress) => {
-                    if (progress.percent) {
-                        console.log(`[WATERMARK] Processing progress: ${progress.percent.toFixed(1)}% done`);
-                    }
-                })
-                .on('end', async () => {
-                    console.log(`[WATERMARK] FFmpeg processing completed successfully`);
-                    
-                    // Verify output file was created
-                    try {
-                        const outputStats = await fs.stat(outputPath);
-                        console.log(`[WATERMARK] Output file size: ${outputStats.size} bytes`);
-                        
-                        // Clean up temporary files
-                        await Promise.all([
-                            fs.unlink(tempInputPath),
-                            fs.unlink(watermarkPath)
-                        ]);
-                        console.log(`[WATERMARK] Temporary files cleaned up`);
-                        
-                        resolve(outputPath);
-                    } catch (error) {
-                        console.error(`[WATERMARK] Error verifying output or cleanup:`, error);
-                        resolve(outputPath); // Still resolve even if cleanup fails
-                    }
-                })
-                .on('error', (err) => {
-                    console.error(`[WATERMARK] FFmpeg error:`, err);
-                    console.error(`[WATERMARK] FFmpeg stderr:`, err.stderr);
-                    reject(err);
-                })
-                .run();
-        });
-    } catch (error) {
-        console.error(`[WATERMARK] Error in addWatermarkToVideo:`, error);
-        throw new Error(`Error adding watermark to video: ${error.message}`);
+        const dims = await getVideoDimensions(tempInputPath);
+        videoWidth = dims.width;
+        videoHeight = dims.height;
+    } catch (err) {
+        console.warn('[WATERMARK] Could not get video dimensions, using default 1920x1080');
     }
+    let watermarkPath;
+    try {
+        watermarkPath = await createWatermarkImage(videoId, videoWidth, videoHeight);
+    } catch (err) {
+        console.warn('[WATERMARK] Could not create dynamic watermark, using static fallback.');
+        watermarkPath = path.join(__dirname, 'fallback-watermark.png');
+    }
+    const paddingX = Math.max(20, Math.floor(videoWidth * 0.02));
+    const paddingY = Math.max(20, Math.floor(videoHeight * 0.02));
+    return new Promise((resolve, reject) => {
+        const ffmpegCommand = ffmpeg(tempInputPath)
+            .input(watermarkPath)
+            .complexFilter([
+                {
+                    filter: 'overlay',
+                    options: {
+                        x: `W-w-${paddingX}`,
+                        y: `H-h-${paddingY}`,
+                        eof_action: 'repeat'
+                    }
+                }
+            ])
+            .outputOptions('-c:v libx264')
+            .outputOptions('-preset medium')
+            .outputOptions('-crf 18')
+            .outputOptions('-pix_fmt yuv420p')
+            .outputOptions('-movflags +faststart')
+            .output(outputPath);
+        ffmpegCommand
+            .on('end', async () => {
+                try {
+                    await Promise.all([
+                        fs.unlink(tempInputPath),
+                        fs.unlink(watermarkPath)
+                    ]);
+                } catch {}
+                resolve(outputPath);
+            })
+            .on('error', (err) => {
+                console.error(`[WATERMARK] FFmpeg error:`, err);
+                reject(err);
+            })
+            .run();
+    });
 }
 
 module.exports = {
