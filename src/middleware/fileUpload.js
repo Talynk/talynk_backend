@@ -1,7 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { addWatermarkToVideo } = require('../utils/videoProcessor');
+// const { addWatermarkToVideo } = require('../utils/videoProcessor'); // No longer used here
 const os = require('os');
 const fs = require('fs').promises;
 
@@ -27,7 +27,7 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
-// Middleware to handle file upload to Supabase
+// Middleware to handle file upload to Supabase (no watermarking)
 const handleSupabaseUpload = async (req, res, next) => {
   try {
     // Skip if no file uploaded
@@ -60,37 +60,7 @@ const handleSupabaseUpload = async (req, res, next) => {
     const filePath = `uploads/${fileName}`;
 
     let fileBuffer = file.buffer;
-    
-    // If it's a video, add watermark
-    if (file.mimetype.startsWith('video/')) {
-      console.log('[UPLOAD] Video detected, starting watermark process...');
-      const videoId = uuidv4(); // Generate a unique ID for the video
-      const tempOutputPath = path.join(os.tmpdir(), `watermarked-${videoId}${fileExt}`);
-      
-      try {
-        console.log(`[UPLOAD] Video ID generated: ${videoId}`);
-        console.log(`[UPLOAD] Temporary output path: ${tempOutputPath}`);
-        
-        // Add watermark to video
-        await addWatermarkToVideo(file.buffer, tempOutputPath, videoId);
-        
-        // Read the processed video
-        fileBuffer = await fs.readFile(tempOutputPath);
-        console.log(`[UPLOAD] Watermarked video size: ${fileBuffer.length} bytes`);
-        
-        // Clean up the temporary file
-        await fs.unlink(tempOutputPath);
-        console.log('[UPLOAD] Watermark processing completed successfully');
-        
-      } catch (error) {
-        console.error('[UPLOAD] Watermarking failed:', error);
-        console.log('[UPLOAD] Continuing with original video file');
-        // Continue with original file if watermarking fails
-        fileBuffer = file.buffer;
-      }
-    } else {
-      console.log('[UPLOAD] Non-video file, skipping watermark process');
-    }
+    // No watermarking here!
     
     console.log(`[UPLOAD] Uploading to Supabase bucket: ${bucketName}`);
     console.log(`[UPLOAD] File path: ${filePath}`);

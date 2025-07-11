@@ -11,6 +11,12 @@ const { sql}  =  require("@sequelize/core")
 const { QueryTypes } = require('sequelize');
 const Notification = require('../models/Notification.js');
 const sequelize = require('../config/database');
+const { addWatermarkToVideo } = require('../utils/videoProcessor');
+const { createClient } = require('@supabase/supabase-js');
+const os = require('os');
+const fs = require('fs').promises;
+
+// Remove the applyWatermarkAsync function and all calls to it
 
 exports.createPost = async (req, res) => {
     try {
@@ -45,11 +51,14 @@ exports.createPost = async (req, res) => {
         // Handle file upload
         let video_url = '';
         let fileType = 'text';
-
+        let filePath = '';
+        let mimetype = '';
         if (req.file) {
             // File was uploaded to Supabase
             video_url = req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
+            filePath = req.file.path;
+            mimetype = req.file.mimetype;
             console.log("File uploaded successfully to Supabase:", {
                 url: req.file.supabaseUrl,
                 filename: req.file.filename,
