@@ -6,7 +6,7 @@ const DB_USER = process.env.DB_USER;
 const DB_PASSWORD = process.env.DB_PASSWORD;
 const DB_HOST = process.env.DB_HOST;
 const DB_PORT = process.env.DB_PORT;
-const DB_SSL = process.env.DB_SSL === 'true';
+const DB_SSL = false;
 
 // Create Sequelize instance
 const sequelize = new Sequelize(
