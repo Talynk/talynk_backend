@@ -727,22 +727,32 @@ exports.getUserPostsById = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
+        const status = req.query.status || 'approved'; // Default to approved if no status specified
+
+        // Validate status parameter
+        const validStatuses = ['approved', 'pending', 'rejected'];
+        if (status && !validStatuses.includes(status)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid status parameter. Must be one of: approved, pending, rejected'
+            });
+        }
+
+        // Build where clause based on status parameter
+        const whereClause = { user_id: userId };
+        if (status) {
+            whereClause.status = status;
+        }
 
         // Use Sequelize model queries rather than raw SQL
         // Find the count first
         const { count: totalCount } = await Post.findAndCountAll({
-            where: { 
-                user_id: userId,
-                status: 'approved'
-            }
+            where: whereClause
         });
 
         // Get the posts with all needed data
         const posts = await Post.findAll({
-            where: {
-                user_id: userId,
-                status: 'approved'
-            },
+            where: whereClause,
             include: [
                 {
                     model: Category,
@@ -816,6 +826,113 @@ exports.getUserPostsById = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching user posts'
+        });
+    }
+};
+
+// Get user approved posts only (for external profiles)
+exports.getUserApprovedPosts = async (req, res) => {
+    try {
+        let userId = req.params.id;
+        
+        // Validate UUID format - ensure it's a proper UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID format'
+            });
+        }
+        
+        const currentUserId = req.user ? req.user.id : null;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+
+        // Use Sequelize model queries rather than raw SQL
+        // Find the count first - only approved posts
+        const { count: totalCount } = await Post.findAndCountAll({
+            where: { 
+                user_id: userId,
+                status: 'approved'
+            }
+        });
+
+        // Get the posts with all needed data - only approved posts
+        const posts = await Post.findAll({
+            where: {
+                user_id: userId,
+                status: 'approved'
+            },
+            include: [
+                {
+                    model: Category,
+                    as: 'category',
+                    attributes: ['name']
+                },
+                {
+                    model: User,
+                    as: 'user',
+                    attributes: ['username', 'profile_picture']
+                }
+            ],
+            order: [['created_at', 'DESC']],
+            limit: limit,
+            offset: offset
+        });
+
+        // Transform to match the expected format
+        const formattedPosts = posts.map(post => {
+            const postData = post.toJSON();
+            return {
+                id: postData.id,
+                title: postData.title,
+                description: postData.description,
+                videoUrl: postData.video_url,
+                mediaType: postData.video_url ? 'video' : 'image',
+                created_at: postData.created_at,
+                likesCount: postData.likes || 0,
+                category_id: postData.category_id,
+                categoryName: postData.category?.name,
+                commentsCount: postData.comment_count || 0,
+                authorName: postData.user?.username,
+                authorProfilePicture: postData.user?.profile_picture
+            };
+        });
+
+        // Check if user liked these posts
+        if (currentUserId && formattedPosts.length > 0) {
+            const postIds = formattedPosts.map(post => post.id);
+            
+            const likedPosts = await PostLike.findAll({
+                where: {
+                    user_id: currentUserId,
+                    post_id: {
+                        [Op.in]: postIds
+                    }
+                },
+                attributes: ['post_id']
+            });
+            
+            const likedPostIdSet = new Set(likedPosts.map(like => like.post_id));
+            
+            // Add isLiked flag to each post
+            formattedPosts.forEach(post => {
+                post.isLiked = likedPostIdSet.has(post.id);
+            });
+        }
+
+        const hasMore = offset + formattedPosts.length < totalCount;
+
+        res.json({
+            status: 'success',
+            data: formattedPosts
+        });
+    } catch (error) {
+        console.error('Error fetching user approved posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user approved posts'
         });
     }
 };
