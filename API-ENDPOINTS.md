@@ -50,13 +50,15 @@ http://localhost:3000/api
 |--------|----------|-------------|---------------|
 | POST | `/` | Create new post | ✅ |
 | GET | `/user` | Get current user's posts | ✅ |
-| GET | `/liked` | Get user's liked posts | ✅ |
 | DELETE | `/:postId` | Delete post | ✅ |
-| POST | `/:postId/like` | Like/unlike post | ✅ |
-| GET | `/:postId/like-status` | Check like status | ✅ |
 | GET | `/all` | Get all approved posts | ❌ |
 | GET | `/search` | Search posts | ❌ |
 | GET | `/:postId` | Get post by ID | ❌ |
+
+**Note**: Like functionality has been moved to dedicated `/api/likes` endpoints:
+- `GET /api/likes/user/liked` - Get user's liked posts
+- `POST /api/likes/posts/:postId/toggle` - Toggle like on post  
+- `GET /api/likes/posts/:postId/status` - Check like status
 
 ---
 
@@ -249,7 +251,7 @@ http://localhost:3000/api
 ### By Feature:
 - **Authentication**: 5 endpoints
 - **User Management**: 12 endpoints
-- **Post Management**: 9 endpoints
+- **Post Management**: 6 endpoints
 - **Admin Functions**: 13 endpoints
 - **Approver Functions**: 7 endpoints
 - **Categories**: 7 endpoints
@@ -258,7 +260,9 @@ http://localhost:3000/api
 - **Content Management**: 8 endpoints (reports, featured, recommendations)
 - **System Features**: 8 endpoints (countries, suggestions, subscriptions, ads)
 
-### Total Endpoints: **87**
+### Total Endpoints: **84**
+
+**Note**: 3 like-related endpoints were moved from `/api/posts` to `/api/likes` for better organization.
 
 ---
 

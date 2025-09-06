@@ -11,10 +11,12 @@ const postController = require('../controllers/postController');
 // Post routes (all protected)
 router.post('/', authenticate, ...upload.single('file'), postController.createPost);
 router.get('/user', authenticate, postController.getUserPosts);
-router.get('/liked', authenticate, postController.getLikedPosts);
 router.delete('/:postId', authenticate, postController.deletePost);
-router.post('/:postId/like', authenticate, postController.likePost);
-router.get('/:postId/like-status', authenticate, postController.checkLikeStatus);
+
+// Note: Like functionality has been moved to /api/likes endpoints
+// - GET /api/likes/user/liked - Get user's liked posts
+// - POST /api/likes/posts/:postId/toggle - Toggle like on post
+// - GET /api/likes/posts/:postId/status - Check like status
 
 // Public post routes
 router.get('/all', postController.getAllPosts); // only approved
