@@ -10,6 +10,7 @@ const likeController = require('../controllers/likeController');
 // Like routes (all require authentication)
 router.post('/posts/:postId/toggle', authenticate, likeController.toggleLike);
 router.get('/posts/:postId/status', authenticate, likeController.checkLikeStatus);
+router.post('/posts/batch-status', authenticate, likeController.batchCheckLikeStatus);
 router.get('/posts/:postId/stats', likeController.getPostLikeStats);
 router.get('/user/liked', authenticate, likeController.getLikedPosts);
 

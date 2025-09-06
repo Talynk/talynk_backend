@@ -33,6 +33,7 @@ model User {
   last_active_date      DateTime @default(now())
   follower_count        Int      @default(0)
   interests             String[] @default([])
+  country_id            Int?     // Reference to country
   createdAt             DateTime?
   updatedAt             DateTime?
 
@@ -49,8 +50,24 @@ model User {
   views                 View[]
   reports               PostReport[]
   preferences           UserPreference[]
+  country               Country? @relation(fields: [country_id], references: [id])
 
   @@map("users")
+}
+
+model Country {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique @db.VarChar(100)
+  code        String   @unique @db.VarChar(3) // ISO 3166-1 alpha-3 code
+  flag_emoji  String?  @db.VarChar(10) // Flag emoji
+  is_active   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users       User[]
+
+  @@map("countries")
 }
 
 model Post {

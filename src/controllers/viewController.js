@@ -30,17 +30,15 @@ exports.recordView = async (req, res) => {
             let newViewCount = post.view_count;
 
             if (userId) {
-                // Authenticated user - check unique user view
-                const existingView = await tx.view.findUnique({
+                // Authenticated user - fast existence query using count()
+                const viewExists = await tx.view.count({
                     where: {
-                        unique_user_post_view: {
-                            user_id: userId,
-                            post_id: postId
-                        }
+                        user_id: userId,
+                        post_id: postId
                     }
                 });
 
-                if (!existingView) {
+                if (viewExists === 0) {
                     await tx.view.create({
                         data: {
                             user_id: userId,
@@ -52,17 +50,15 @@ exports.recordView = async (req, res) => {
                     viewRecorded = true;
                 }
             } else {
-                // Anonymous user - check unique IP view
-                const existingView = await tx.view.findUnique({
+                // Anonymous user - fast existence query using count()
+                const viewExists = await tx.view.count({
                     where: {
-                        unique_ip_post_view: {
-                            ip_address: ipAddress,
-                            post_id: postId
-                        }
+                        ip_address: ipAddress,
+                        post_id: postId
                     }
                 });
 
-                if (!existingView) {
+                if (viewExists === 0) {
                     await tx.view.create({
                         data: {
                             user_id: null,

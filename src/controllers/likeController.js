@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { userHasLikedPost, batchUserLikes } = require('../utils/existenceQueries');
 
 /**
  * Like or unlike a post with atomic operations
@@ -21,27 +22,18 @@ exports.toggleLike = async (req, res) => {
                 throw new Error('Post not found');
             }
 
-            // Check if user already liked the post
-            const existingLike = await tx.postLike.findUnique({
-                where: {
-                    unique_user_post_like: {
-                        user_id: userId,
-                        post_id: postId
-                    }
-                }
-            });
+            // Fast existence query using utility function
+            const likeExists = await userHasLikedPost(userId, postId);
 
             let isLiked = false;
             let newLikeCount = post.like_count;
 
-            if (existingLike) {
+            if (likeExists) {
                 // Unlike: Remove the like and decrement count
-                await tx.postLike.delete({
+                await tx.postLike.deleteMany({
                     where: {
-                        unique_user_post_like: {
-                            user_id: userId,
-                            post_id: postId
-                        }
+                        user_id: userId,
+                        post_id: postId
                     }
                 });
                 
@@ -100,31 +92,27 @@ exports.toggleLike = async (req, res) => {
 };
 
 /**
- * Check if a user has liked a specific post
+ * Check if a user has liked a specific post (Fast existence query)
+ * Uses count() for boolean response instead of fetching full records
  */
 exports.checkLikeStatus = async (req, res) => {
     try {
         const { postId } = req.params;
         const userId = req.user.id;
 
-        const like = await prisma.postLike.findUnique({
-            where: {
-                unique_user_post_like: {
-                    user_id: userId,
-                    post_id: postId
-                }
-            }
-        });
-
-        const post = await prisma.post.findUnique({
-            where: { id: postId },
-            select: { like_count: true }
-        });
+        // Fast existence query using utility function
+        const [likeExists, post] = await Promise.all([
+            userHasLikedPost(userId, postId),
+            prisma.post.findUnique({
+                where: { id: postId },
+                select: { like_count: true }
+            })
+        ]);
 
         res.json({
             status: 'success',
             data: {
-                isLiked: !!like,
+                isLiked: likeExists, // Already a boolean
                 likeCount: post?.like_count || 0
             }
         });
@@ -213,6 +201,73 @@ exports.getLikedPosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching liked posts'
+        });
+    }
+};
+
+/**
+ * Batch check like status for multiple posts
+ * Efficient for checking multiple posts at once
+ */
+exports.batchCheckLikeStatus = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { postIds } = req.body;
+
+        if (!Array.isArray(postIds) || postIds.length === 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'postIds must be a non-empty array'
+            });
+        }
+
+        if (postIds.length > 100) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Maximum 100 posts can be checked at once'
+            });
+        }
+
+        // Batch existence check for user likes
+        const likeStatuses = await batchUserLikes(userId, postIds);
+
+        // Get like counts for all posts
+        const posts = await prisma.post.findMany({
+            where: {
+                id: {
+                    in: postIds
+                }
+            },
+            select: {
+                id: true,
+                like_count: true
+            }
+        });
+
+        const likeCounts = {};
+        posts.forEach(post => {
+            likeCounts[post.id] = post.like_count;
+        });
+
+        // Combine results
+        const result = {};
+        postIds.forEach(postId => {
+            result[postId] = {
+                isLiked: likeStatuses[postId] || false,
+                likeCount: likeCounts[postId] || 0
+            };
+        });
+
+        res.json({
+            status: 'success',
+            data: result
+        });
+
+    } catch (error) {
+        console.error('Batch check like status error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error checking like statuses'
         });
     }
 };
