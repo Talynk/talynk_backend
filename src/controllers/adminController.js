@@ -1256,13 +1256,16 @@ exports.searchByTraceId = async (req, res) => {
         const { type, id } = req.params;
 
         if (type === 'post') {
-            const post = await Post.findOne({
-                where: { unique_traceability_id: id },
-                include: [{
-                    model: User,
-                    as: 'author',
-                    attributes: ['username']
-                }]
+            const post = await prisma.post.findUnique({
+                where: { id: id },
+                include: {
+                    user: {
+                        select: {
+                            username: true,
+                            email: true
+                        }
+                    }
+                }
             });
 
             if (!post) {

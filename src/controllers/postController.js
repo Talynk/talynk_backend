@@ -17,27 +17,59 @@ exports.createPost = async (req, res) => {
         console.log("Request body:", req.body);
         console.log("Request file:", req.file);
         console.log("user id ----->", userId);
-        console.log("post_category ----->", post_category);
+        console.log("post_category ----->", post_category)
 
-        // First, get the category ID from the category name
+        // Validate that the user exists
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found',
+                user_id: userId
+            });
+        }
+
+        console.log("User found:", user.username || user.email);
+
+        // First, get the category ID from the category name (can be main category or subcategory)
         const category = await prisma.category.findFirst({
             where: {
                 name: {
                     mode: 'insensitive',
-                    contains: post_category.trim()
-                }
+                    equals: post_category.trim()
+                },
+                status: 'active'
             }
         });
         console.log("found category ----->", category);
 
         if (!category) {
+            // Get available categories for error message
+            const availableCategories = await prisma.category.findMany({
+                where: { status: 'active' },
+                select: { name: true, level: true, parent_id: true },
+                orderBy: [
+                    { level: 'asc' },
+                    { sort_order: 'asc' }
+                ]
+            });
+
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid category',
                 received_category: post_category,
-                available_categories: ['Technology', 'Entertainment', 'Sports', 'Education', 'Lifestyle', 'Business', 'Health', 'Travel', 'Science', 'Art']
+                available_categories: availableCategories.map(cat => ({
+                    name: cat.name,
+                    level: cat.level === 1 ? 'main' : 'subcategory',
+                    parent_id: cat.parent_id
+                }))
             });
         }
+
+        console.log("Category found:", category.name, "(ID:", category.id + ")");
 
         // Handle file upload
         let video_url = '';
@@ -75,6 +107,8 @@ exports.createPost = async (req, res) => {
             }
         });
 
+        console.log("Post created successfully:", post.id);
+
         // Update user's post count
         await prisma.user.update({
             where: { id: userId },
@@ -96,6 +130,24 @@ exports.createPost = async (req, res) => {
         });
     } catch (error) {
         console.error('Post creation error:', error);
+        
+        // Handle specific Prisma errors
+        if (error.code === 'P2003') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Foreign key constraint violation. User or category not found.',
+                details: error.meta
+            });
+        }
+        
+        if (error.code === 'P2002') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Unique constraint violation. Post with this data already exists.',
+                details: error.meta
+            });
+        }
+        
         res.status(500).json({
             status: 'error',
             message: 'Error creating post',

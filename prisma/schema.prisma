@@ -80,7 +80,6 @@ model Post {
   approver_id           String?  @db.Uuid
   admin_id              String?  @db.Uuid
   approved_at           DateTime?
-  unique_traceability_id String? @unique @db.VarChar(255)
   views                 Int      @default(0)
   likes                 Int      @default(0)
   shares                Int      @default(0)
@@ -91,6 +90,9 @@ model Post {
   report_count          Int      @default(0)
   featured_at           DateTime?
   frozen_at             DateTime?
+  uploadDate            DateTime @default(now())
+  type                  String   @default("text") @db.VarChar(50)
+  content               String?  @db.Text
   createdAt             DateTime @default(now())
   updatedAt             DateTime @default(now())
 
@@ -114,10 +116,15 @@ model Category {
   name        String   @unique
   description String?  @db.Text
   status      CategoryStatus @default(active)
+  parent_id   Int?     // Reference to parent category
+  level       Int      @default(1) // 1 for main categories, 2 for subcategories
+  sort_order  Int      @default(0) // For ordering categories
 
   // Relations
   posts       Post[]
   userPreferences UserPreference[]
+  parent      Category? @relation("CategoryHierarchy", fields: [parent_id], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
 
   @@map("categories")
 }

@@ -1,19 +1,23 @@
 const prisma = require('../lib/prisma');
 
-// Get all categories
+// Get all categories with hierarchy
 exports.getAllCategories = async (req, res) => {
     try {
-        const { status = 'active' } = req.query;
+        const { status = 'active', include_subcategories = 'true' } = req.query;
 
+        // Get main categories with their subcategories
         const categories = await prisma.category.findMany({
             where: {
-                status: status
+                status: status,
+                level: 1 // Only main categories
             },
             select: {
                 id: true,
                 name: true,
                 description: true,
                 status: true,
+                level: true,
+                sort_order: true,
                 _count: {
                     select: {
                         posts: {
@@ -23,10 +27,33 @@ exports.getAllCategories = async (req, res) => {
                             }
                         }
                     }
-                }
+                },
+                children: include_subcategories === 'true' ? {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true,
+                        status: true,
+                        level: true,
+                        sort_order: true,
+                        _count: {
+                            select: {
+                                posts: {
+                                    where: {
+                                        status: 'approved',
+                                        is_frozen: false
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    orderBy: {
+                        sort_order: 'asc'
+                    }
+                } : false
             },
             orderBy: {
-                name: 'asc'
+                sort_order: 'asc'
             }
         });
 
@@ -40,6 +67,57 @@ exports.getAllCategories = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching categories',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get subcategories for a main category
+exports.getSubcategories = async (req, res) => {
+    try {
+        const { parentId } = req.params;
+        const { status = 'active' } = req.query;
+
+        const subcategories = await prisma.category.findMany({
+            where: {
+                parent_id: parseInt(parentId),
+                status: status,
+                level: 2
+            },
+            select: {
+                id: true,
+                name: true,
+                description: true,
+                status: true,
+                level: true,
+                sort_order: true,
+                parent_id: true,
+                _count: {
+                    select: {
+                        posts: {
+                            where: {
+                                status: 'approved',
+                                is_frozen: false
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: {
+                sort_order: 'asc'
+            }
+        });
+
+        res.json({
+            status: 'success',
+            data: subcategories
+        });
+
+    } catch (error) {
+        console.error('Get subcategories error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching subcategories',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
