@@ -95,15 +95,15 @@ exports.createPost = async (req, res) => {
 
         const post = await prisma.post.create({
             data: {
-                user_id: userId,
-                status: 'pending',
-                category_id: category.id,  // Use the category ID instead of name
-                title,
-                description: caption,
-                uploadDate: new Date(),
-                type: fileType,
-                video_url,
-                content: caption
+            user_id: userId,
+            status: 'pending',
+            category_id: category.id,  // Use the category ID instead of name
+            title,
+            description: caption,
+            uploadDate: new Date(),
+            type: fileType,
+            video_url,
+            content: caption
             }
         });
 
@@ -250,82 +250,52 @@ exports.getPostById = async (req, res) => {
         console.log("postId ----->", postId);
         console.log(`Attempting to find post with ID: ${postId}`);
         
-        // First, try a simpler query without associations
-        const postExists = await Post.findByPk(postId);
-        
-        if (!postExists) {
-            console.log(`Post with ID ${postId} not found in database using Sequelize`);
-            
-            // Try with raw SQL as a fallback
-            const [rawPost] = await sequelize.query(
-                `SELECT * FROM posts WHERE id = :postId`,
-                {
-                    replacements: { postId },
-                    type: sequelize.QueryTypes.SELECT
-                }
-            );
-            
-            if (!rawPost) {
-                console.log(`Post with ID ${postId} not found with raw SQL either`);
-                return res.status(404).json({
-                    status: 'error',
-                    message: 'Post not found'
-                });
-            }
-            
-            console.log(`Post found with raw SQL: ${JSON.stringify(rawPost)}`);
-            
-            // Get user info with raw SQL
-            const [user] = await sequelize.query(
-                `SELECT id, username, email FROM users WHERE id = :userId`,
-                {
-                    replacements: { userId: rawPost.user_id },
-                    type: sequelize.QueryTypes.SELECT
-                }
-            );
-            
-            // Get category info with raw SQL
-            const [category] = await sequelize.query(
-                `SELECT id, name FROM categories WHERE id = :categoryId`,
-                {
-                    replacements: { categoryId: rawPost.category_id },
-                    type: sequelize.QueryTypes.SELECT
-                }
-            );
-            
-            // Combine the results
-            rawPost.user = user || null;
-            rawPost.category = category || null;
-            
-            return res.json({
-                status: 'success',
-                data: { post: rawPost }
-            });
-        }
-        
-        console.log(`Post exists in database: ${postExists.id}`);
-        
-        // Now try with associations
-        const post = await Post.findByPk(postId, {
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email']
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true,
+                        profile_picture: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                comments: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                profile_picture: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        comment_date: 'desc'
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ]
+            }
         });
 
         if (!post) {
-            console.log(`Post found but association query failed`);
+            console.log(`Post with ID ${postId} not found`);
             return res.status(404).json({
                 status: 'error',
-                message: 'Post found but association query failed'
+                message: 'Post not found'
             });
         }
 
@@ -346,25 +316,47 @@ exports.getPostById = async (req, res) => {
 
 exports.updatePost = async (req, res) => {
     try {
-        const post = await Post.findOne({
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        // Check if post exists and belongs to user
+        const existingPost = await prisma.post.findFirst({
             where: { 
-                id: req.params.id,
-                uploaderId: req.user.id
+                id: postId,
+                user_id: userId
             }
         });
 
-        if (!post) {
+        if (!existingPost) {
             return res.status(404).json({
                 status: 'error',
-                message: 'Post not found'
+                message: 'Post not found or you do not have permission to update it'
             });
         }
 
-        await post.update(req.body);
+        const updatedPost = await prisma.post.update({
+            where: { id: postId },
+            data: req.body,
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                },
+                category: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
+                }
+            }
+        });
 
         res.json({
             status: 'success',
-            data: { post }
+            data: { post: updatedPost }
         });
     } catch (error) {
         console.error('Error updating post:', error);
@@ -380,7 +372,8 @@ exports.deletePost = async (req, res) => {
         const { postId } = req.params;
         const userID = req.user.id;
 
-        const post = await Post.findOne({
+        // Check if post exists and belongs to user
+        const post = await prisma.post.findFirst({
             where: {
                 id: postId,
                 user_id: userID
@@ -394,11 +387,19 @@ exports.deletePost = async (req, res) => {
             });
         }
 
-        await post.destroy();
+        // Delete the post (this will cascade delete related records)
+        await prisma.post.delete({
+            where: { id: postId }
+        });
 
         // Update user's post count
-        await User.decrement('posts_count', {
-            where: { id: userID }
+        await prisma.user.update({
+            where: { id: userID },
+            data: {
+                posts_count: {
+                    decrement: 1
+                }
+            }
         });
 
         res.json({
@@ -419,15 +420,26 @@ exports.getPostsByUser = async (req, res) => {
 
         console.log("user id -->", req.user.id);
 
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: { user_id: req.user.id },
-            include: [
-                {
-                    model: Category,
-                    as: 'category'
+            include: {
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         res.json({
@@ -447,27 +459,40 @@ exports.getPostsByUser = async (req, res) => {
 
 exports.getPendingPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: { status: 'pending' },
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Process media URLs
         const processedPosts = posts.map(post => {
-            const postObj = post.toJSON();
-            if (postObj.mediaUrl && !postObj.mediaUrl.startsWith('http')) {
-                postObj.mediaUrl = `/uploads/${postObj.mediaUrl.replace(/^uploads\//, '')}`;
+            const postObj = { ...post };
+            if (postObj.video_url && !postObj.video_url.startsWith('http')) {
+                postObj.video_url = `/uploads/${postObj.video_url.replace(/^uploads\//, '')}`;
             }
             return postObj;
         });
@@ -500,7 +525,9 @@ exports.updatePostStatus = async (req, res) => {
             });
         }
 
-        const post = await Post.findByPk(id);
+        const post = await prisma.post.findUnique({
+            where: { id: id }
+        });
 
         if (!post) {
             return res.status(404).json({
@@ -509,26 +536,30 @@ exports.updatePostStatus = async (req, res) => {
             });
         }
 
-        const updateData = { status };
-        if (status === 'rejected' && rejectionReason) {
-            updateData.rejectionReason = rejectionReason;
-        }
+        const updateData = { 
+            status: status,
+            approved_at: status === 'approved' ? new Date() : null
+        };
 
-        await post.update(updateData);
-
-        // Fetch updated post with associations
-        const updatedPost = await Post.findByPk(id, {
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+        const updatedPost = await prisma.post.update({
+            where: { id: id },
+            data: updateData,
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
                 }
-            ]
+            }
         });
 
         console.log('Post updated:', updatedPost); // Debug log
@@ -551,23 +582,36 @@ exports.updatePostStatus = async (req, res) => {
 
 exports.getUserPendingPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: {
-                userId: req.user.id,
+                user_id: req.user.id,
                 status: 'pending'
             },
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         console.log(`Found ${posts.length} pending posts for user ${req.user.id}`);
@@ -591,28 +635,44 @@ exports.getUserPosts = async (req, res) => {
         console.log("user id ----->", req.user.id);
         console.log("user id type ----->", typeof req.user.id);
         
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: { 
                 user_id: req.user.id
             },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['username', 'email']
+            include: {
+                user: {
+                    select: {
+                        username: true,
+                        email: true,
+                        profile_picture: true
+                    }
                 },
-                {
-                    model: PostLike,
-                    attributes: ['user_id'],
-                    required: false
+                category: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
+                },
+                postLikes: {
+                    select: {
+                        user_id: true
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ],
-            order: [['created_at', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Add full URLs for files
         const postsWithUrls = posts.map(post => {
-            const postData = post.toJSON();
+            const postData = { ...post };
             if (postData.video_url) {
                 postData.fullUrl = `${req.protocol}://${req.get('host')}${postData.video_url}`;
             }
@@ -621,7 +681,6 @@ exports.getUserPosts = async (req, res) => {
         });
         console.log(` Posts: ${JSON.stringify(postsWithUrls)}`)
         res.json({
-          
             status: 'success',
             data: { posts: postsWithUrls }
         });
@@ -637,20 +696,33 @@ exports.getUserPosts = async (req, res) => {
 
 exports.getApprovedPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: { status: 'approved' },
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         const processedPosts = posts.map(post => {
