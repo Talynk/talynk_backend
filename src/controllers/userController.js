@@ -29,7 +29,16 @@ exports.getProfile = async (req, res) => {
                 selected_category: true,
                 status: true,
                 role: true,
-                last_login: true
+                last_login: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                }
             }
         });
 
@@ -921,6 +930,64 @@ exports.getUserApprovedPosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching user approved posts'
+        });
+    }
+};
+
+/**
+ * Update user's country
+ */
+exports.updateUserCountry = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { country_id } = req.body;
+
+        // Validate country_id if provided
+        if (country_id !== null && country_id !== undefined) {
+            const countryExists = await prisma.country.findUnique({
+                where: { id: parseInt(country_id) }
+            });
+
+            if (!countryExists) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid country ID'
+                });
+            }
+        }
+
+        // Update user's country
+        const updatedUser = await prisma.user.update({
+            where: { id: userId },
+            data: { country_id: country_id ? parseInt(country_id) : null },
+            select: {
+                id: true,
+                username: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                }
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Country updated successfully',
+            data: {
+                user: updatedUser
+            }
+        });
+
+    } catch (error) {
+        console.error('Update user country error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error updating country'
         });
     }
 };

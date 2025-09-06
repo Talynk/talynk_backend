@@ -12,6 +12,7 @@ const userController = require('../controllers/userController');
 router.get('/profile', authenticate, userController.getProfile);
 router.put('/profile', authenticate, ...upload.single('user_facial_image'), userController.updateProfile);
 router.put('/interests', authenticate, userController.updateUserInterests);
+router.put('/country', authenticate, userController.updateUserCountry);
 router.get('/statistics', authenticate, userController.getStatistics);
 router.get('/searches', authenticate, userController.getRecentSearches);
 router.post('/searches', authenticate, userController.addSearchTerm);

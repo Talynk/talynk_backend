@@ -106,30 +106,58 @@ exports.createPost = async (req, res) => {
 
 exports.getAllPosts = async (req, res) => {
     try {
-        const posts = await prisma.post.findMany({
-            where: {
-                status: 'approved',
-                is_frozen: false
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        username: true,
-                        profile_picture: true
+        const { country_id, page = 1, limit = 20 } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Build where clause
+        const whereClause = {
+            status: 'approved',
+            is_frozen: false
+        };
+
+        // Add country filter if provided
+        if (country_id) {
+            whereClause.user = {
+                country_id: parseInt(country_id)
+            };
+        }
+
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
                     }
                 },
-                category: {
-                    select: {
-                        id: true,
-                        name: true
-                    }
-                }
-            },
-            orderBy: {
-                createdAt: 'desc'
-            }
-        });
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
 
         // Add full URLs for files
         const postsWithUrls = posts.map(post => {
@@ -138,12 +166,21 @@ exports.getAllPosts = async (req, res) => {
             }
             return post;
         });
-        // console.log("postsWithUrls ----->", postsWithUrls)
 
         res.json({
             status: 'success',
-            data: postsWithUrls,
-           
+            data: {
+                posts: postsWithUrls,
+                pagination: {
+                    total,
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    totalPages: Math.ceil(total / limit)
+                },
+                filters: {
+                    country_id: country_id ? parseInt(country_id) : null
+                }
+            }
         });
     } catch (error) {
         console.error('Error getting posts:', error);

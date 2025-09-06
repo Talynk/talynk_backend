@@ -1,56 +1,102 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
+const { 
+    validateLoginFields, 
+    sanitizeLoginInput, 
+    detectLoginType, 
+    buildLoginWhereClause,
+    createConflictMessage 
+} = require('../utils/authUtils');
 
 exports.register = async (req, res) => {
     try {
         const { username, email, password, phone1, phone2 } = req.body;
         
-        // Validate required fields
-        if (!username || !email || !password || !phone1) {
+        // Validate required fields - at least one of username or email must be provided
+        if (!password || !phone1) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Username, email, password, and primary phone number are required'
+                message: 'Password and primary phone number are required'
+            });
+        }
+
+        if (!username && !email) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Either username or email (or both) must be provided'
+            });
+        }
+
+        // Validate email format if provided
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Validate username format if provided (alphanumeric, underscore, hyphen, 3-30 chars)
+        if (username && !/^[a-zA-Z0-9_-]{3,30}$/.test(username)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Username must be 3-30 characters long and contain only letters, numbers, underscores, and hyphens'
             });
         }
         
-        // Check if user exists
+        // Check if user exists with the same username or email
         const existingUser = await prisma.user.findFirst({
             where: {
                 OR: [
-                    { username },
-                    { email }
+                    ...(username ? [{ username }] : []),
+                    ...(email ? [{ email }] : [])
                 ]
             }
         });
 
         if (existingUser) {
+            const conflictField = existingUser.username === username ? 'username' : 'email';
             return res.status(400).json({
                 status: 'error',
-                message: 'Username or email already exists'
+                message: `${conflictField.charAt(0).toUpperCase() + conflictField.slice(1)} already exists`
             });
         }
 
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user
+        // Create user with provided fields
+        const userData = {
+            password: hashedPassword,
+            phone1,
+            phone2: phone2 || null,
+            createdAt: new Date(),
+            updatedAt: new Date()
+        };
+
+        // Add username and email if provided
+        if (username) userData.username = username;
+        if (email) userData.email = email;
+
         const user = await prisma.user.create({
-            data: {
-                username,
-                email,
-                password: hashedPassword,
-                phone1,
-                phone2: phone2 || null, // Optional second phone number
-                createdAt: new Date(),
-                updatedAt: new Date()
+            data: userData,
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                phone1: true,
+                phone2: true,
+                createdAt: true,
+                updatedAt: true
             }
         });
    
         res.status(201).json({
             status: 'success',
             message: 'User registered successfully',
-            user: user
+            data: {
+                user
+            }
         });
     } catch (error) {
         console.error('Registration error:', error);
@@ -63,14 +109,36 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
-        const { email, password, role } = req.body;
-        console.log('Login attempt:', { email, role }); // Debug log
-
-        // Validate input
-        if (!email || !password || !role) {
+        const { email, username, password, role, loginField } = req.body;
+        
+        // Determine what field to use for login (email, username, or auto-detect)
+        let loginValue;
+        let loginType;
+        
+        if (loginField) {
+            // If loginField is specified, use it
+            loginValue = loginField;
+            loginType = email ? 'email' : 'username';
+        } else if (email) {
+            loginValue = email;
+            loginType = 'email';
+        } else if (username) {
+            loginValue = username;
+            loginType = 'username';
+        } else {
             return res.status(400).json({
                 status: 'error',
-                message: 'Email, password and role are required'
+                message: 'Either email or username (or loginField) and password are required'
+            });
+        }
+
+        console.log('Login attempt:', { loginValue, loginType, role }); // Debug log
+
+        // Validate input
+        if (!password || !role) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password and role are required'
             });
         }
 
@@ -78,11 +146,17 @@ exports.login = async (req, res) => {
         let user;
         
         if (role === 'user') {
+            // Build where clause for flexible login
+            const whereClause = { role };
+            
+            if (loginType === 'email') {
+                whereClause.email = loginValue;
+            } else if (loginType === 'username') {
+                whereClause.username = loginValue;
+            }
+
             user = await prisma.user.findFirst({ 
-                where: { 
-                    email,
-                    role
-                },
+                where: whereClause,
                 select: {
                     id: true,
                     email: true,
@@ -101,11 +175,17 @@ exports.login = async (req, res) => {
                 });
             }
         } else if (role === 'admin') {
+            // Build where clause for admin login
+            const whereClause = { status: 'active' };
+            
+            if (loginType === 'email') {
+                whereClause.email = loginValue;
+            } else if (loginType === 'username') {
+                whereClause.username = loginValue;
+            }
+
             user = await prisma.admin.findFirst({ 
-                where: { 
-                    email,
-                    status: 'active'
-                },
+                where: whereClause,
                 select: {
                     id: true,
                     email: true,
@@ -122,11 +202,17 @@ exports.login = async (req, res) => {
                 user.role = 'admin';
             }
         } else if (role === 'approver') {
+            // Build where clause for approver login
+            const whereClause = { status: 'active' };
+            
+            if (loginType === 'email') {
+                whereClause.email = loginValue;
+            } else if (loginType === 'username') {
+                whereClause.username = loginValue;
+            }
+
             user = await prisma.approver.findFirst({ 
-                where: { 
-                    email,
-                    status: 'active'
-                },
+                where: whereClause,
                 select: {
                     id: true,
                     email: true,
@@ -146,7 +232,7 @@ exports.login = async (req, res) => {
             });
         }
 
-        console.log('User found:', user ? { id: user.id, email: user.email || user.adminEmail, role: user.role } : null); // Debug log
+        console.log('User found:', user ? { id: user.id, email: user.email, username: user.username, role: user.role } : null); // Debug log
 
         if (!user) {
             return res.status(401).json({
