@@ -1,14 +1,4 @@
-const User = require('../models/User.js');
-const Admin = require('../models/Admin.js');
-const Approver = require('../models/Approver.js');
-const Category = require('../models/Category.js');
-const Post = require('../models/Post.js');
-const Like = require('../models/PostLike.js');
-const Comment = require('../models/Comment.js');
-const Share = require('../models/Share.js');
-const View = require('../models/View.js');
-const { Op } = require('sequelize');
-const sequelize = require('../config/database');
+const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 
 exports.searchPosts = async (req, res) => {
@@ -39,13 +29,21 @@ exports.searchPosts = async (req, res) => {
                 whereClause.id = query;
                 break;
             case 'post_title':
-                whereClause.title = { [Op.iLike]: `%${query}%` };
+                whereClause.title = { 
+                    mode: 'insensitive',
+                    contains: query 
+                };
                 break;
             case 'user_id':
                 whereClause.user_id = query;
                 break;
             case 'username':
-                whereClause['$user.username$'] = { [Op.iLike]: `%${query}%` };
+                whereClause.user = {
+                    username: {
+                        mode: 'insensitive',
+                        contains: query
+                    }
+                };
                 break;
             case 'date':
                 const searchDate = new Date(query);
@@ -58,9 +56,9 @@ exports.searchPosts = async (req, res) => {
                         }
                     });
                 }
-                whereClause.created_at = {
-                    [Op.gte]: searchDate,
-                    [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                whereClause.createdAt = {
+                    gte: searchDate,
+                    lt: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
                 };
                 break;
             case 'status':
@@ -78,32 +76,41 @@ exports.searchPosts = async (req, res) => {
                 break;
         }
         const offset = (page - 1) * limit;
-        const { count, rows: posts } = await Post.findAndCountAll({
-            where: whereClause,
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email', 'status', 'profile_picture']
-                }
-            ],
-            order: [['created_at', 'DESC']],
-            limit: parseInt(limit),
-            offset: parseInt(offset)
-        });
-        const formattedPosts = posts.map(post => {
-            const postData = post.toJSON();
-            return {
-                id: postData.id,
-                title: postData.title,
-                description: postData.description,
-                status: postData.status,
-                created_at: postData.created_at,
-                updated_at: postData.updated_at,
-                user_id: postData.user_id,
-                user: postData.user
-            };
-        });
+        const [posts, count] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            status: true,
+                            profile_picture: true
+                        }
+                    }
+                },
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
+        
+        const formattedPosts = posts.map(post => ({
+            id: post.id,
+            title: post.title,
+            description: post.description,
+            status: post.status,
+            created_at: post.createdAt,
+            updated_at: post.updatedAt,
+            user_id: post.user_id,
+            user: post.user
+        }));
         res.json({
             success: true,
             data: {

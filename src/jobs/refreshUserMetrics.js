@@ -1,9 +1,8 @@
+const prisma = require('../lib/prisma');
 /**
  * Background job to refresh user metrics
  * This should be scheduled to run daily
  */
-const db = require('../models');
-const { QueryTypes } = require('sequelize');
 const sequelize = db.sequelize;
 
 async function refreshUserMetrics() {

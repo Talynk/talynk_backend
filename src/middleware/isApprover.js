@@ -1,8 +1,10 @@
-const Approver = require('../models/Approver');
+const prisma = require('../lib/prisma');
 
 exports.isApprover = async (req, res, next) => {
     try {
-        const approver = await Approver.findByPk(req.user.id);
+        const approver = await prisma.approver.findUnique({
+            where: { id: req.user.id }
+        });
         
         if (!approver) {
             return res.status(403).json({
@@ -10,7 +12,8 @@ exports.isApprover = async (req, res, next) => {
                 message: 'Access denied. Approver privileges required.'
             });
         }
-                req.approver = approver;
+        
+        req.approver = approver;
         next();
     } catch (error) {
         console.error('Approver check error:', error);

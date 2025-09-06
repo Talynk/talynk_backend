@@ -1,5 +1,4 @@
-const db = require('../models');
-const { Op } = require('sequelize');
+const prisma = require('../lib/prisma');
 const { updateFollowerCount } = require('./suggestionController');
 
 /**
@@ -8,25 +7,21 @@ const { updateFollowerCount } = require('./suggestionController');
 const createFollowNotification = async (followerId, followingId) => {
   try {
     // Get follower's username and profile picture for the notification
-    const follower = await db.User.findByPk(followerId, {
-      attributes: ['id', 'username', 'profile_picture']
+    const follower = await prisma.user.findUnique({
+      where: { id: followerId },
+      select: { id: true, username: true, profile_picture: true }
     });
     
     if (!follower) return;
     
     // Create notification for the followed user with additional context data
-    await db.Notification.create({
-      user_id: followingId,
-      notification_text: `${follower.username} started following you`,
-      notification_date: new Date(),
-      is_read: false,
-      // Store additional context data for frontend use
-      context_data: JSON.stringify({
+    await prisma.notification.create({
+      data: {
+        userID: followingId,
+        message: `${follower.username} started following you`,
         type: 'follow',
-        follower_id: follower.id,
-        follower_username: follower.username,
-        follower_profile_picture: follower.profile_picture
-      })
+        isRead: false
+      }
     });
     
     console.log(`Notification created: ${follower.username} followed user ${followingId}`);

@@ -1,5 +1,4 @@
-const { ValidationError } = require('sequelize');
-
+const prisma = require('../lib/prisma');
 exports.errorHandler = (err, req, res, next) => {
     console.error('Error:', err);
 

@@ -1,11 +1,7 @@
-const Subscription = require('../models/Subscription.js');
-const User = require('../models/User.js');
-const Notification = require('../models/Notification.js');
+const prisma = require('../lib/prisma');
 const { validate } = require('uuid');
-const  sequelize  = require('../config/database');
 
 exports.subscribe = async (req, res) => {
-    const transaction = await sequelize.transaction();
     try {
         const subscriberId = req.user.id;
         const { userID: subscribedToId } = req.params;
@@ -14,7 +10,6 @@ exports.subscribe = async (req, res) => {
 
         // 1. Validate Input
         if (!validate(subscriberId) || !validate(subscribedToId)) {
-            await transaction.rollback();
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid user ID format'
@@ -22,7 +17,6 @@ exports.subscribe = async (req, res) => {
         }
 
         if (subscriberId === subscribedToId) {
-            await transaction.rollback();
             return res.status(400).json({
                 status: 'error',
                 message: 'Cannot subscribe to yourself'
@@ -30,9 +24,10 @@ exports.subscribe = async (req, res) => {
         }
 
         // 2. Check if Target User Exists
-        const userToSubscribe = await User.findByPk(subscribedToId, { transaction });
+        const userToSubscribe = await prisma.user.findUnique({ 
+            where: { id: subscribedToId }
+        });
         if (!userToSubscribe) {
-            await transaction.rollback();
             return res.status(404).json({
                 status: 'error',
                 message: 'User to subscribe to not found'
@@ -40,9 +35,10 @@ exports.subscribe = async (req, res) => {
         }
         
         // 3. Check if Subscriber User Exists (important check)
-        const subscriberUser = await User.findByPk(subscriberId, { transaction });
+        const subscriberUser = await prisma.user.findUnique({ 
+            where: { id: subscriberId }
+        });
         if (!subscriberUser) {
-            await transaction.rollback();
             console.error(`Subscriber user with ID ${subscriberId} not found in users table.`);
             // Return a generic error for security, but log the specific issue
             return res.status(401).json({ 
@@ -52,82 +48,55 @@ exports.subscribe = async (req, res) => {
         }
 
         // 4. Check if subscription already exists
-        const existingSubscription = await sequelize.query(
-            `SELECT * FROM "subscriptions" 
-             WHERE "subscriber_id" = :subscriberId 
-             AND "subscribed_to" = :subscribedToId 
-             LIMIT 1`,
-            {
-                replacements: { subscriberId, subscribedToId },
-                type: sequelize.QueryTypes.SELECT,
-                transaction
+        const existingSubscription = await prisma.subscription.findFirst({
+            where: {
+                subscriber_id: subscriberId,
+                subscribed_to: subscribedToId
             }
-        );
+        });
 
         let subscriptionResult;
         let created = false;
 
-        if (!existingSubscription || existingSubscription.length === 0) {
+        if (!existingSubscription) {
             console.log('Subscription does not exist, creating new one...');
             // 5. Create new subscription
             const creationTime = new Date();
-            const newSubscriptionResult = await sequelize.query(
-                `INSERT INTO "subscriptions" ("subscriber_id", "subscribed_to", "subscription_date") 
-                 VALUES (:subscriberId, :subscribedToId, :subscriptionDate) 
-                 RETURNING *`,
-                {
-                    replacements: { 
-                        subscriberId, 
-                        subscribedToId, 
-                        subscriptionDate: creationTime
-                    },
-                    type: sequelize.QueryTypes.INSERT,
-                    transaction
+            subscriptionResult = await prisma.subscription.create({
+                data: {
+                    subscriber_id: subscriberId,
+                    subscribed_to: subscribedToId,
+                    subscription_date: creationTime
                 }
-            );
-            
-            // sequelize.query with INSERT might return [[result], metadata]
-            subscriptionResult = newSubscriptionResult[0][0]; 
+            });
             created = true;
             console.log('Subscription created:', subscriptionResult);
 
             // 6. Increment subscriber count
-            await sequelize.query(
-                `UPDATE "users" 
-                 SET "subscribers" = "subscribers" + 1 
-                 WHERE "id" = :subscribedToId`,
-                {
-                    replacements: { subscribedToId }, // Corrected variable name
-                    type: sequelize.QueryTypes.UPDATE,
-                    transaction
+            await prisma.user.update({
+                where: { id: subscribedToId },
+                data: {
+                    subscribers: {
+                        increment: 1
+                    }
                 }
-            );
+            });
             console.log(`Incremented subscriber count for ${subscribedToId}`);
 
             // 7. Notify user
-            await sequelize.query(
-                `INSERT INTO "notifications" ("user_id", "notification_text", "notification_date") 
-                 VALUES (:userId, :notificationText, :notificationDate)`,
-                {
-                    replacements: { 
-                        userId: subscribedToId, 
-                        notificationText: `${req.user.username} subscribed to your channel`,
-                        notificationDate: creationTime // Use same timestamp
-                    },
-                    type: sequelize.QueryTypes.INSERT,
-                    transaction
+            await prisma.notification.create({
+                data: {
+                    user_id: subscribedToId,
+                    notification_text: `${req.user.username} subscribed to your channel`,
+                    notification_date: creationTime
                 }
-            );
+            });
             console.log(`Notification created for ${subscribedToId}`);
 
         } else {
             console.log('Subscription already exists.');
-            subscriptionResult = existingSubscription[0];
+            subscriptionResult = existingSubscription;
         }
-
-        // Commit transaction
-        await transaction.commit();
-        console.log('Transaction committed.');
 
         res.json({
             status: 'success',
@@ -142,12 +111,10 @@ exports.subscribe = async (req, res) => {
         });
 
     } catch (error) {
-        // Rollback transaction if any error occurs
-        await transaction.rollback();
         console.error('Subscription error:', error);
         // Check for specific foreign key constraint error
-        if (error.name === 'SequelizeForeignKeyConstraintError') {
-             console.error('Foreign key constraint violation details:', error.parent);
+        if (error.code === 'P2003') {
+             console.error('Foreign key constraint violation details:', error);
              return res.status(400).json({
                  status: 'error',
                  message: 'Invalid user ID provided for subscription.' 
@@ -163,22 +130,29 @@ exports.subscribe = async (req, res) => {
 
 exports.unsubscribe = async (req, res) => {
     try {
-        const subscriberID = req.user.username;
-        const { username: subscribed_to } = req.params;
+        const subscriberId = req.user.id;
+        const { userId: subscribedToId } = req.params;
 
-        const subscription = await Subscription.findOne({
+        const subscription = await prisma.subscription.findFirst({
             where: {
-                subscriberID,
-                subscribed_to
+                subscriber_id: subscriberId,
+                subscribed_to: subscribedToId
             }
         });
 
         if (subscription) {
-            await subscription.destroy();
+            await prisma.subscription.delete({
+                where: { id: subscription.id }
+            });
             
             // Decrement subscriber count
-            await User.decrement('subscribers', {
-                where: { username: subscribed_to }
+            await prisma.user.update({
+                where: { id: subscribedToId },
+                data: {
+                    subscribers: {
+                        decrement: 1
+                    }
+                }
             });
         }
 
@@ -197,16 +171,20 @@ exports.unsubscribe = async (req, res) => {
 
 exports.getSubscribers = async (req, res) => {
     try {
-        const username = req.user.username;
+        const userId = req.user.id;
 
-        const subscribers = await Subscription.findAll({
-            where: { subscribed_to: username },
-            include: [{
-                model: User,
-                as: 'subscriber',
-                attributes: ['username', 'email', 'user_facial_image']
-            }],
-            order: [['subscription_date', 'DESC']]
+        const subscribers = await prisma.subscription.findMany({
+            where: { subscribed_to: userId },
+            include: {
+                subscriber: {
+                    select: { 
+                        username: true, 
+                        email: true, 
+                        user_facial_image: true 
+                    }
+                }
+            },
+            orderBy: { subscription_date: 'desc' }
         });
 
         res.json({

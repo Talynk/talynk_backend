@@ -1,37 +1,32 @@
-const Approver = require('../models/Approver.js');
-const Post = require('../models/Post.js');
-const User = require('../models/User.js');
-const Notification = require('../models/Notification.js');
-const { Op } = require('sequelize');
+const prisma = require('../lib/prisma');
 const {validate, parse} = require('uuid');
-const sequelize = require('../config/database');
 
 exports.getApproverStats = async (req, res) => {
     try {
-        const approverUsername = req.user.id;
+        const approverId = req.user.id;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
         const [pendingCount, approvedCount, rejectedCount, todayCount] = await Promise.all([
-            Post.count({ where: { status: 'pending' } }),
-            Post.count({ 
+            prisma.post.count({ where: { status: 'pending' } }),
+            prisma.post.count({ 
                 where: { 
                     status: 'approved',
-                    approver_id: approverUsername 
+                    approver_id: approverId 
                 } 
             }),
-            Post.count({ 
+            prisma.post.count({ 
                 where: { 
                     status: 'rejected',
-                    approver_id: approverUsername 
+                    approver_id: approverId 
                 } 
             }),
-            Post.count({
+            prisma.post.count({
                 where: {
                     status: 'approved',
-                    approver_id: approverUsername,
-                    updated_at: {
-                        [Op.gte]: today
+                    approver_id: approverId,
+                    updatedAt: {
+                        gte: today
                     }
                 }
             })
@@ -60,24 +55,29 @@ exports.getPendingPosts = async (req, res) => {
         const { page = 1, limit = 10 } = req.query;
         const offset = (page - 1) * limit;
 
-        const posts = await Post.findAndCountAll({
-            where: { status: 'pending' },
-            include: [{
-                model: User,
-                as: "user",
-                attributes: ['username', 'email']
-            }],
-            order: [['updated_at', 'DESC']],
-            limit: parseInt(limit),
-            offset: parseInt(offset)
-        });
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: { status: 'pending' },
+                include: {
+                    user: {
+                        select: { username: true, email: true }
+                    }
+                },
+                orderBy: { updatedAt: 'desc' },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { status: 'pending' }
+            })
+        ]);
 
         res.json({
             status: 'success',
             data: {
-                posts: posts.rows,
-                total: posts.count,
-                pages: Math.ceil(posts.count / limit),
+                posts,
+                total,
+                pages: Math.ceil(total / limit),
                 currentPage: parseInt(page)
             }
         });
@@ -93,44 +93,50 @@ exports.getPendingPosts = async (req, res) => {
 exports.getApprovedPosts = async (req, res) => {
     try {
         const { date, search, page = 1, limit = 10 } = req.query;
-        const approverUsername = req.user.id;
+        const approverId = req.user.id;
         const whereClause = {
             status: 'approved',
-            approver_id: approverUsername
+            approver_id: approverId
         };
 
         if (date) {
             const searchDate = new Date(date);
             whereClause.approved_at = {
-                [Op.gte]: searchDate,
-                [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                gte: searchDate,
+                lt: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
             };
         }
 
         if (search) {
             whereClause.title = {
-                [Op.like]: `%${search}%`
+                contains: search,
+                mode: 'insensitive'
             };
         }
 
-        const posts = await Post.findAndCountAll({
-            where: whereClause,
-            include: [{
-                model: User,
-                as: "user",
-                attributes: ['username', 'email']
-            }],
-            order: [['approved_at', 'DESC']],
-            limit: parseInt(limit),
-            offset: (page - 1) * limit
-        });
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: { username: true, email: true }
+                    }
+                },
+                orderBy: { approved_at: 'desc' },
+                take: parseInt(limit),
+                skip: (page - 1) * limit
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
 
         res.json({
             status: 'success',
             data: {
-                posts: posts.rows,
-                total: posts.count,
-                pages: Math.ceil(posts.count / limit),
+                posts,
+                total,
+                pages: Math.ceil(total / limit),
                 currentPage: parseInt(page)
             }
         });
@@ -147,12 +153,13 @@ exports.getPostDetails = async (req, res) => {
     try {
         const { postId } = req.params;
 
-        const post = await Post.findOne({
-            where: { uniqueTraceability_id: postId },
-            include: [{
-                model: User,
-                attributes: ['username', 'email']
-            }]
+        const post = await prisma.post.findFirst({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: { username: true, email: true }
+                }
+            }
         });
 
         if (!post) {
@@ -179,19 +186,19 @@ exports.approvePost = async (req, res) => {
     try {
         const { postId } = req.params;
         const { notes } = req.body;
-        const approverUsername = req.user.id;
+        const approverId = req.user.id;
         console.log("Got id ----->" + postId + "Type of it is : ----->" + typeof postId)
 
-        const post = await Post.findOne({
+        const post = await prisma.post.findFirst({
             where: { 
                 id: postId,
                 status: 'pending'
             },
-            include: [{
-                model: User,
-                as: "user",
-                attributes: ['username',"id"]
-            }]
+            include: {
+                user: {
+                    select: { username: true, id: true }
+                }
+            }
         });
 
         if (!post) {
@@ -201,27 +208,25 @@ exports.approvePost = async (req, res) => {
             });
         }
 
-        await post.update({
-            status: 'approved',
-            approver_id: approverUsername,
-            aproved_at: new Date(),
-            review_notes: notes
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                status: 'approved',
+                approver_id: approverId,
+                approved_at: new Date(),
+                review_notes: notes
+            }
         });
 
-        // Create notification using raw SQL
-        await sequelize.query(
-            `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-             VALUES ($1, $2, $3, $4)`,
-            {
-                bind: [
-                    post.user?.id,
-                    'Your post has been approved',
-                    new Date(),
-                    false
-                ],
-                type: sequelize.QueryTypes.INSERT
+        // Create notification
+        await prisma.notification.create({
+            data: {
+                user_id: post.user?.id,
+                notification_text: 'Your post has been approved',
+                notification_date: new Date(),
+                is_read: false
             }
-        );
+        });
 
         res.json({
             status: 'success',
@@ -240,18 +245,18 @@ exports.rejectPost = async (req, res) => {
     try {
         const { postId } = req.params;
         const { notes } = req.body;
-        const approverUsername = req.user.id;
+        const approverId = req.user.id;
 
-        const post = await Post.findOne({
+        const post = await prisma.post.findFirst({
             where: { 
                 id: postId,
                 status: 'pending'
             },
-            include: [{
-                model: User,
-                as: "user",
-                attributes: ['username', 'id']
-            }]
+            include: {
+                user: {
+                    select: { username: true, id: true }
+                }
+            }
         });
 
         if (!post) {
@@ -261,28 +266,25 @@ exports.rejectPost = async (req, res) => {
             });
         }
 
-        await post.update({
-            status: 'rejected',
-            approver_id: approverUsername,
-            rejected_at: new Date(),
-            review_notes: notes,
-            approved_at: new Date(),
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                status: 'rejected',
+                approver_id: approverId,
+                rejected_at: new Date(),
+                review_notes: notes
+            }
         });
 
-        // Create notification using raw SQL
-        await sequelize.query(
-            `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-             VALUES ($1, $2, $3, $4)`,
-            {
-                bind: [
-                    post.user.id,
-                    `Your post has been rejected. Reason: ${notes}`,
-                    new Date(),
-                    false
-                ],
-                type: sequelize.QueryTypes.INSERT
+        // Create notification
+        await prisma.notification.create({
+            data: {
+                user_id: post.user.id,
+                notification_text: `Your post has been rejected. Reason: ${notes}`,
+                notification_date: new Date(),
+                is_read: false
             }
-        );
+        });
 
         res.json({
             status: 'success',
@@ -299,19 +301,13 @@ exports.rejectPost = async (req, res) => {
 
 exports.getApproverNotifications = async (req, res) => {
     try {
-        const approverUsername = req.user.username;
+        const approverId = req.user.id;
 
-        // Get notifications using raw SQL
-        const [notifications] = await sequelize.query(
-            `SELECT * FROM notifications 
-             WHERE user_id = $1 
-             ORDER BY notification_date DESC 
-             LIMIT 50`,
-            {
-                bind: [approverUsername],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const notifications = await prisma.notification.findMany({
+            where: { user_id: approverId },
+            orderBy: { notification_date: 'desc' },
+            take: 50
+        });
 
         res.json({
             status: 'success',
@@ -354,13 +350,21 @@ exports.searchPosts = async (req, res) => {
                 whereClause.id = query;
                 break;
             case 'post_title':
-                whereClause.title = { [Op.iLike]: `%${query}%` };
+                whereClause.title = { 
+                    mode: 'insensitive', 
+                    contains: query 
+                };
                 break;
             case 'user_id':
                 whereClause.user_id = query;
                 break;
             case 'username':
-                whereClause['$user.username$'] = { [Op.iLike]: `%${query}%` };
+                whereClause.user = {
+                    username: {
+                        mode: 'insensitive',
+                        contains: query
+                    }
+                };
                 break;
             case 'date':
                 const searchDate = new Date(query);
@@ -373,9 +377,9 @@ exports.searchPosts = async (req, res) => {
                         }
                     });
                 }
-                whereClause.created_at = {
-                    [Op.gte]: searchDate,
-                    [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                whereClause.createdAt = {
+                    gte: searchDate,
+                    lt: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
                 };
                 break;
             case 'status':
@@ -393,47 +397,51 @@ exports.searchPosts = async (req, res) => {
                 break;
         }
         // Only allow approver to see posts they are allowed to see
-        // For example, posts they approved or pending posts
-        whereClause[Op.or] = [
+        whereClause.OR = [
             { approver_id: req.user.id },
             { status: 'pending' }
         ];
+        
         const offset = (page - 1) * limit;
-        const { count, rows: posts } = await Post.findAndCountAll({
-            where: whereClause,
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email', 'status', 'profile_picture']
-                }
-            ],
-            order: [['created_at', 'DESC']],
-            limit: parseInt(limit),
-            offset: parseInt(offset)
-        });
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: { id: true, username: true, email: true, status: true, profile_picture: true }
+                    }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
+        
         const formattedPosts = posts.map(post => {
-            const postData = post.toJSON();
             return {
-                id: postData.id,
-                title: postData.title,
-                description: postData.description,
-                status: postData.status,
-                created_at: postData.created_at,
-                updated_at: postData.updated_at,
-                user_id: postData.user_id,
-                user: postData.user
+                id: post.id,
+                title: post.title,
+                description: post.description,
+                status: post.status,
+                created_at: post.createdAt,
+                updated_at: post.updatedAt,
+                user_id: post.user_id,
+                user: post.user
             };
         });
+        
         res.json({
             success: true,
             data: {
                 posts: formattedPosts,
                 pagination: {
-                    total: count,
+                    total,
                     page: parseInt(page),
                     limit: parseInt(limit),
-                    total_pages: Math.ceil(count / limit)
+                    total_pages: Math.ceil(total / limit)
                 }
             }
         });
@@ -447,4 +455,4 @@ exports.searchPosts = async (req, res) => {
             }
         });
     }
-}; 
+};

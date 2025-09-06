@@ -1,6 +1,4 @@
-const { Op, QueryTypes, literal } = require('sequelize');
-const db = require('../models');
-const sequelize = db.sequelize;
+const prisma = require('../lib/prisma');
 
 /**
  * Get mutual connection suggestions (Tier 1)
@@ -14,54 +12,61 @@ const getMutualSuggestions = async (req, res) => {
     const offset = (page - 1) * limit;
 
     // Find users who follow the current user but the current user is not following back
-    const { count, rows: suggestions } = await db.User.findAndCountAll({
-      attributes: [
-        'id', 'username', 'profile_picture', 'bio', 'follower_count', 'posts_count'
-      ],
-      include: [
-        {
-          model: db.Follow,
-          as: 'followers',
-          required: true,
+    const suggestions = await prisma.user.findMany({
+      select: { 
+        id: true,
+        username: true,
+        profile_picture: true,
+        bio: true,
+        follower_count: true,
+        posts_count: true,
+        followers: {
           where: {
             followingId: userId
           },
-          attributes: [
-            'createdAt' // When they started following the current user
-          ]
+          select: {
+            createdAt: true
+          }
         }
-      ],
+      },
       where: {
         id: {
-          [Op.ne]: userId, // Not the current user
-          [Op.notIn]: sequelize.literal(`(
-            SELECT "followingId" FROM "follows"
-            WHERE "followerId" = '${userId}'
-          )`) // Not already being followed by current user
+          not: userId // Not the current user
+        },
+        followers: {
+          some: {
+            followingId: userId
+          }
+        },
+        following: {
+          none: {
+            followerId: userId
+          }
         },
         status: 'active' // Only active users
       },
-      order: [
-        [{ model: db.Follow, as: 'followers' }, 'createdAt', 'DESC'] // Most recent followers first
-      ],
-      subQuery: false,
-      limit,
-      offset,
-      distinct: true
+      orderBy: {
+        followers: {
+          _count: 'desc'
+        }
+      },
+      take: limit,
+      skip: offset
     });
 
     // Get mutual follower counts for each suggestion
     const suggestionsWithMutualCounts = await Promise.all(
       suggestions.map(async (user) => {
         // Count mutual followers (users who follow both the current user and the suggested user)
-        const mutualFollowersCount = await db.Follow.count({
+        const mutualFollowersCount = await prisma.follow.count({
           where: {
             followingId: user.id,
-            followerId: {
-              [Op.in]: sequelize.literal(`(
-                SELECT "followerId" FROM "follows"
-                WHERE "followingId" = '${userId}'
-              )`)
+            follower: {
+              following: {
+                some: {
+                  followingId: userId
+                }
+              }
             }
           }
         });
@@ -84,11 +89,30 @@ const getMutualSuggestions = async (req, res) => {
       })
     );
 
+    const totalCount = await prisma.user.count({
+      where: {
+        id: {
+          not: userId
+        },
+        followers: {
+          some: {
+            followingId: userId
+          }
+        },
+        following: {
+          none: {
+            followerId: userId
+          }
+        },
+        status: 'active'
+      }
+    });
+
     res.status(200).json({
       status: 'success',
       data: { 
         suggestions: suggestionsWithMutualCounts,
-        totalCount: count
+        totalCount
       }
     });
   } catch (error) {
@@ -120,39 +144,47 @@ const getDiscoverSuggestions = async (req, res) => {
     excludeIds.push(userId);
 
     // Get the current user's interests
-    const currentUser = await db.User.findByPk(userId, {
-      attributes: ['interests', 'selected_category']
+    const currentUser = await prisma.user.findUnique({ 
+      where: { id: userId },
+      select: { interests: true, selected_category: true }
     });
     
     // Combine interests and selected category
     const userInterests = [
-      ...(currentUser.interests || []),
-      currentUser.selected_category
+      ...(currentUser?.interests || []),
+      currentUser?.selected_category
     ].filter(Boolean);
 
     // Find users that current user is not following
-    const { count, rows: suggestions } = await db.User.findAndCountAll({
-      attributes: [
-        'id', 'username', 'profile_picture', 'bio', 'follower_count', 
-        'posts_count', 'last_active_date', 'interests', 'selected_category'
-      ],
+    const suggestions = await prisma.user.findMany({
+      select: { 
+        id: true,
+        username: true,
+        profile_picture: true,
+        bio: true,
+        follower_count: true,
+        posts_count: true,
+        last_active_date: true,
+        interests: true,
+        selected_category: true
+      },
       where: {
         id: {
-          [Op.notIn]: excludeIds,
-          [Op.notIn]: sequelize.literal(`(
-            SELECT "followingId" FROM "follows"
-            WHERE "followerId" = '${userId}'
-          )`)
+          notIn: excludeIds
+        },
+        following: {
+          none: {
+            followerId: userId
+          }
         },
         status: 'active'
       },
-      order: [
-        ['last_active_date', 'DESC'],
-        ['follower_count', 'DESC'],
-        sequelize.literal('RANDOM()')
+      orderBy: [
+        { last_active_date: 'desc' },
+        { follower_count: 'desc' }
       ],
-      limit,
-      offset
+      take: limit,
+      skip: offset
     });
 
     // Calculate relevance scores based on activity, popularity, and interest overlap
@@ -199,11 +231,25 @@ const getDiscoverSuggestions = async (req, res) => {
     // Sort by relevance score (highest first)
     suggestionsWithRelevance.sort((a, b) => b.relevanceScore - a.relevanceScore);
 
+    const totalCount = await prisma.user.count({
+      where: {
+        id: {
+          notIn: excludeIds
+        },
+        following: {
+          none: {
+            followerId: userId
+          }
+        },
+        status: 'active'
+      }
+    });
+
     res.status(200).json({
       status: 'success',
       data: { 
         suggestions: suggestionsWithRelevance,
-        totalCount: count
+        totalCount
       }
     });
   } catch (error) {
@@ -223,10 +269,10 @@ const updateUserActivityMetrics = async (userId) => {
   try {
     if (!userId) return;
     
-    await db.User.update(
-      { last_active_date: new Date() },
-      { where: { id: userId } }
-    );
+    await prisma.user.update({
+      where: { id: userId },
+      data: { last_active_date: new Date() }
+    });
   } catch (error) {
     console.error('Error updating user activity metrics:', error);
   }
@@ -241,15 +287,15 @@ const updateFollowerCount = async (followingId) => {
     if (!followingId) return;
     
     // Count the actual followers
-    const followerCount = await db.Follow.count({
+    const followerCount = await prisma.follow.count({
       where: { followingId }
     });
     
     // Update the user's follower_count field
-    await db.User.update(
-      { follower_count: followerCount },
-      { where: { id: followingId } }
-    );
+    await prisma.user.update({
+      where: { id: followingId },
+      data: { follower_count: followerCount }
+    });
   } catch (error) {
     console.error('Error updating follower count:', error);
   }

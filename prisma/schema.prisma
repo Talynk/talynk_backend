@@ -1,0 +1,371 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String   @id @default(uuid()) @db.Uuid
+  username              String   @unique @db.VarChar(255)
+  email                 String   @unique @db.VarChar(255)
+  phone1                String?  @db.VarChar(15)
+  phone2                String?  @db.VarChar(15)
+  posts_count           Int      @default(0)
+  total_profile_views   Int      @default(0)
+  user_facial_image     Bytes?
+  selected_category     String?  @db.VarChar(255)
+  password              String   @db.VarChar(255)
+  notification          Boolean  @default(true)
+  recent_searches       Json?
+  likes                 Int      @default(0)
+  subscribers           Int      @default(0)
+  remember_me           Boolean  @default(false)
+  status                String   @default("active") @db.VarChar(255)
+  role                  String   @default("user") @db.VarChar(255)
+  profile_picture       String?  @db.VarChar(255)
+  last_login            DateTime?
+  last_active_date      DateTime @default(now())
+  follower_count        Int      @default(0)
+  interests             String[] @default([])
+  createdAt             DateTime?
+  updatedAt             DateTime?
+
+  // Relations
+  posts                 Post[]
+  comments              Comment[]
+  postLikes             PostLike[]
+  notifications         Notification[]
+  recentSearches        RecentSearch[]
+  following             Follow[] @relation("UserFollowing")
+  followers             Follow[] @relation("UserFollowers")
+  subscriptions         Subscription[]
+  shares                Share[]
+  views                 View[]
+  reports               PostReport[]
+  preferences           UserPreference[]
+
+  @@map("users")
+}
+
+model Post {
+  id                    String   @id @default(uuid()) @db.Uuid
+  title                 String   @db.VarChar(255)
+  description           String?  @db.Text
+  video_url             String?  @db.VarChar(255)
+  status                PostStatus @default(pending)
+  user_id               String?  @db.Uuid
+  approver_id           String?  @db.Uuid
+  admin_id              String?  @db.Uuid
+  approved_at           DateTime?
+  unique_traceability_id String? @unique @db.VarChar(255)
+  views                 Int      @default(0)
+  likes                 Int      @default(0)
+  shares                Int      @default(0)
+  comment_count         Int      @default(0)
+  category_id           Int?
+  is_featured           Boolean  @default(false)
+  is_frozen             Boolean  @default(false)
+  report_count          Int      @default(0)
+  featured_at           DateTime?
+  frozen_at             DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @default(now())
+
+  // Relations
+  user                  User?    @relation(fields: [user_id], references: [id])
+  approver              Approver? @relation(fields: [approver_id], references: [id])
+  admin                 Admin?   @relation(fields: [admin_id], references: [id])
+  category              Category? @relation(fields: [category_id], references: [id])
+  comments              Comment[]
+  postLikes             PostLike[]
+  postShares            Share[]
+  postViews             View[]
+  reports               PostReport[]
+  featuredPosts         FeaturedPost[]
+
+  @@map("posts")
+}
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?  @db.Text
+  status      CategoryStatus @default(active)
+
+  // Relations
+  posts       Post[]
+  userPreferences UserPreference[]
+
+  @@map("categories")
+}
+
+model Comment {
+  comment_id      Int      @id @default(autoincrement())
+  commentor_id    String   @db.Uuid
+  comment_date    DateTime @default(now())
+  post_id         String   @db.Uuid
+  comment_text    String?  @db.Text
+  comment_reports Int      @default(0)
+
+  // Relations
+  user            User     @relation(fields: [commentor_id], references: [id])
+  post            Post     @relation(fields: [post_id], references: [id])
+
+  @@map("comments")
+}
+
+model PostLike {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  post_id   String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, post_id], name: "unique_user_post_like")
+  @@map("post_likes")
+}
+
+model View {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid // Optional for anonymous views
+  post_id   String   @db.Uuid
+  ip_address String? @db.VarChar(45) // For anonymous tracking
+  user_agent String? @db.Text // For analytics
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, post_id], name: "unique_user_post_view")
+  @@unique([ip_address, post_id], name: "unique_ip_post_view")
+  @@map("views")
+}
+
+model Follow {
+  id           String   @id @default(uuid()) @db.Uuid
+  followerId   String   @db.Uuid
+  followingId  String   @db.Uuid
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now())
+
+  // Relations
+  follower     User     @relation("UserFollowing", fields: [followerId], references: [id])
+  following    User     @relation("UserFollowers", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userID    String   @db.VarChar(255)
+  message   String?  @db.Text
+  type      String?  @db.VarChar(255)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userID], references: [username])
+
+  @@map("notifications")
+}
+
+model RecentSearch {
+  id        Int      @id @default(autoincrement())
+  userID    String   @db.VarChar(255)
+  searchTerm String? @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userID], references: [username])
+
+  @@map("recent_searches")
+}
+
+model Subscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  plan      String?  @db.VarChar(255)
+  status    String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id])
+
+  @@map("subscriptions")
+}
+
+model Share {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String   @db.Uuid
+  post_id   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id])
+  post      Post     @relation(fields: [post_id], references: [id])
+
+  @@map("shares")
+}
+
+model View {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid
+  post_id   String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User?    @relation(fields: [user_id], references: [id])
+  post      Post     @relation(fields: [post_id], references: [id])
+
+  @@map("views")
+}
+
+model Admin {
+  id        String   @id @default(uuid()) @db.Uuid
+  username  String   @unique @db.VarChar(255)
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  status    String   @default("active") @db.VarChar(255)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  // Relations
+  posts     Post[]
+  reports   PostReport[]
+  featuredPosts FeaturedPost[]
+
+  @@map("admins")
+}
+
+model Approver {
+  id        String   @id @default(uuid()) @db.Uuid
+  username  String   @unique @db.VarChar(255)
+  email     String   @unique @db.VarChar(255)
+  password  String   @db.VarChar(255)
+  status    String   @default("active") @db.VarChar(255)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  // Relations
+  posts     Post[]
+
+  @@map("approvers")
+}
+
+model Ad {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String?  @db.VarChar(255)
+  content   String?  @db.Text
+  image_url String?  @db.VarChar(255)
+  status    String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  @@map("ads")
+}
+
+model AccountManagement {
+  id        String   @id @default(uuid()) @db.Uuid
+  user_id   String?  @db.Uuid
+  balance   Decimal? @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+
+  @@map("account_management")
+}
+
+model PostReport {
+  id          String   @id @default(uuid()) @db.Uuid
+  post_id     String   @db.Uuid
+  user_id     String   @db.Uuid
+  reason      ReportReason
+  description String?  @db.Text
+  status      ReportStatus @default(pending)
+  reviewed_by String?  @db.Uuid
+  reviewed_at DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+
+  // Relations
+  post        Post     @relation(fields: [post_id], references: [id])
+  user        User     @relation(fields: [user_id], references: [id])
+  reviewer    Admin?   @relation(fields: [reviewed_by], references: [id])
+
+  @@unique([post_id, user_id])
+  @@map("post_reports")
+}
+
+model UserPreference {
+  id              String   @id @default(uuid()) @db.Uuid
+  user_id         String   @db.Uuid
+  category_id     Int
+  preference_score Float   @default(0.0)
+  interaction_count Int    @default(0)
+  last_interaction DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  // Relations
+  user            User     @relation(fields: [user_id], references: [id])
+  category        Category @relation(fields: [category_id], references: [id])
+
+  @@unique([user_id, category_id])
+  @@map("user_preferences")
+}
+
+model FeaturedPost {
+  id          String   @id @default(uuid()) @db.Uuid
+  post_id     String   @db.Uuid
+  featured_by String   @db.Uuid
+  reason      String?  @db.Text
+  expires_at  DateTime?
+  is_active   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+
+  // Relations
+  post        Post     @relation(fields: [post_id], references: [id])
+  admin       Admin    @relation(fields: [featured_by], references: [id])
+
+  @@map("featured_posts")
+}
+
+enum PostStatus {
+  pending
+  approved
+  rejected
+  frozen
+}
+
+enum CategoryStatus {
+  active
+  inactive
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE_CONTENT
+  COPYRIGHT_VIOLATION
+  FALSE_INFORMATION
+  VIOLENCE
+  HATE_SPEECH
+  OTHER
+}
+
+enum ReportStatus {
+  pending
+  reviewed
+  resolved
+  dismissed
+}

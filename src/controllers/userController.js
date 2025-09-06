@@ -1,17 +1,5 @@
-// const { User, Post, Comment, Notification, Subscription, PostLike, RecentSearch } = require('../models');
-const User = require('../models/User.js');
-const Post = require('../models/Post.js');
-const Comment = require('../models/Comment.js');
-const Notification = require('../models/Notification.js');
-const Subscription = require('../models/Subscription.js');
-const PostLike = require('../models/PostLike.js');
-const RecentSearch = require('../models/RecentSearch.js');
-const { Op } = require('sequelize');
-const db = require('../config/db');
-const sequelize = require('../config/database');
+const prisma = require('../lib/prisma');
 const { updateUserActivityMetrics } = require('./suggestionController');
-const Category = require('../models/Category.js');
-const Follow = require('../models/Follow.js');
 
 // Get user profile
 exports.getProfile = async (req, res) => {
@@ -21,36 +9,40 @@ exports.getProfile = async (req, res) => {
         // Update user activity timestamp
         await updateUserActivityMetrics(userId);
         
-        // Get user using raw SQL to avoid field naming issues
-        const [user] = await sequelize.query(
-            `SELECT 
-                id, 
-                username,
-                username as "fullName", 
-                email,
-                bio,
-                profile_picture as "profilePicture",
-                posts_count as "postsCount",
-                follower_count as "followersCount",
-                total_profile_views, 
-                likes, 
-                subscribers, 
-                recent_searches, 
-                phone1,
-                phone2, 
-                selected_category,
-                status, 
-                role, 
-                last_login
-             FROM users 
-             WHERE id = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
+        // Get user with Prisma
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                bio: true,
+                profile_picture: true,
+                posts_count: true,
+                follower_count: true,
+                total_profile_views: true,
+                likes: true,
+                subscribers: true,
+                recent_searches: true,
+                phone1: true,
+                phone2: true,
+                selected_category: true,
+                status: true,
+                role: true,
+                last_login: true
             }
-        );
+        });
 
-        if (!user) {
+        // Transform the user object to match expected format
+        const transformedUser = user ? {
+            ...user,
+            fullName: user.username,
+            profilePicture: user.profile_picture,
+            postsCount: user.posts_count,
+            followersCount: user.follower_count
+        } : null;
+
+        if (!transformedUser) {
             return res.status(404).json({
                 status: 'error',
                 message: 'User not found'
@@ -58,26 +50,22 @@ exports.getProfile = async (req, res) => {
         }
 
         // Get following count
-        const [followingCount] = await sequelize.query(
-            `SELECT COUNT(*) as count
-             FROM follows
-             WHERE "followerId" = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
+        const followingCount = await prisma.follow.count({
+            where: {
+                followerId: userId
             }
-        );
+        });
         
-        user.followingCount = parseInt(followingCount.count);
-        user.coverPhoto = null; // Add coverPhoto field for consistency
+        transformedUser.followingCount = followingCount;
+        transformedUser.coverPhoto = null; // Add coverPhoto field for consistency
         
         // Add timestamps
-        user.createdAt = new Date().toISOString();
-        user.updatedAt = new Date().toISOString();
+        transformedUser.createdAt = new Date().toISOString();
+        transformedUser.updatedAt = new Date().toISOString();
 
         res.json({
             status: 'success',
-            data: user
+            data: transformedUser
         });
     } catch (error) {
         console.error('Profile fetch error:', error);

@@ -9,3 +9,4 @@ uploads/
 *.sql
 *.sql.gz
 *.dump
+/src/generated/prisma

@@ -1,8 +1,4 @@
-const User = require('../models/User.js');
-const Post = require('../models/Post.js');
-const Category = require('../models/Category.js');
-const { Op } = require('sequelize');
-
+const prisma = require('../lib/prisma');
 exports.searchPosts = async (req, res) => {
     try {
         const { query, type, page = 1, limit = 10 } = req.query;
@@ -38,7 +34,7 @@ exports.searchPosts = async (req, res) => {
                 break;
             case 'post_title':
                 whereClause.title = {
-                    [Op.iLike]: `%${query}%`
+                    { mode: 'insensitive', contains: : `%${query}%`
                 };
                 break;
             case 'user_id':
@@ -46,7 +42,7 @@ exports.searchPosts = async (req, res) => {
                 break;
             case 'username':
                 whereClause['$user.username$'] = {
-                    [Op.iLike]: `%${query}%`
+                    { mode: 'insensitive', contains: : `%${query}%`
                 };
                 break;
             case 'date':
@@ -61,8 +57,8 @@ exports.searchPosts = async (req, res) => {
                     });
                 }
                 whereClause.created_at = {
-                    [Op.gte]: searchDate,
-                    [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                    { gte: : searchDate,
+                    { lt: : new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
                 };
                 break;
             case 'status':
@@ -86,21 +82,21 @@ exports.searchPosts = async (req, res) => {
         // Perform the search with pagination
         const { count, rows: posts } = await Post.findAndCountAll({
             where: whereClause,
-            include: [
+            include: { 
                 {
                     model: User,
                     as: 'user',
-                    attributes: ['id', 'username', 'email', 'status', 'profile_picture']
+                    select: { 'id', 'username', 'email', 'status', 'profile_picture' }
                 }
-            ],
-            order: [['created_at', 'DESC']],
+             },
+            orderBy: { 'created_at': 'DESC' },
             limit: parseInt(limit),
             offset: parseInt(offset)
         });
 
         // Format the response
         const formattedPosts = posts.map(post => {
-            const postData = post.toJSON();
+            const postData = post;
             return {
                 id: postData.id,
                 title: postData.title,

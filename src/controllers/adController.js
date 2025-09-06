@@ -1,15 +1,15 @@
-const Ad = require('../models/Ad.js');
-const Admin = require('../models/Admin.js');
+const prisma = require('../lib/prisma');
 
 exports.getActiveAds = async (req, res) => {
     try {
-        const ads = await Ad.findAll({
+        const ads = await prisma.ad.findMany({
             where: { status: 'active' },
-            order: [['upload_date', 'DESC']],
-            include: [{
-                model: Admin,
-                attributes: ['username']
-            }]
+            orderBy: { upload_date: 'desc' },
+            include: {
+                admin: {
+                    select: { username: true }
+                }
+            }
         });
 
         res.json({
@@ -30,18 +30,21 @@ exports.deleteAd = async (req, res) => {
         const { adId } = req.params;
         const adminUsername = req.user.username;
 
-        const admin = await Admin.findByPk(adminUsername);
-        if (!admin.ads_management) {
+        const admin = await prisma.admin.findUnique({
+            where: { username: adminUsername }
+        });
+        
+        if (!admin || !admin.ads_management) {
             return res.status(403).json({
                 status: 'error',
                 message: 'Not authorized to manage ads'
             });
         }
 
-        await Ad.update(
-            { status: 'deleted' },
-            { where: { adID: adId } }
-        );
+        await prisma.ad.update({
+            where: { adID: adId },
+            data: { status: 'deleted' }
+        });
 
         res.json({
             status: 'success',

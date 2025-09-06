@@ -1,7 +1,4 @@
-const Post = require('../models/Post.js');
-const User = require('../models/User.js');
-const Approver = require('../models/Approver.js');
-const { Op } = require('sequelize');
+const prisma = require('../lib/prisma');
 const PDFDocument = require('pdfkit');
 const ExcelJS = require('exceljs');
 const fs = require('fs');
@@ -43,7 +40,7 @@ exports.generateReport = async (req, res) => {
 
 async function gatherReportData(approverUsername, dateRange, metrics) {
     const data = {
-        approver: await Approver.findByPk(approverUsername),
+        approver: await Approver.findUnique({ where: { id: approverUsername),
         period: {
             start: dateRange.startDate,
             end: dateRange.endDate
@@ -55,7 +52,7 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
         where: {
             approverID: approverUsername,
             updatedAt: {
-                [Op.between]: [dateRange.startDate, dateRange.endDate]
+                { gte: : [dateRange.startDate, dateRange.endDate]
             }
         }
     };
@@ -82,9 +79,9 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
                 });
                 break;
             case 'response_time':
-                const posts = await Post.findAll({
+                const posts = await Post.findMany({
                     ...baseQuery,
-                    attributes: ['uploadDate', 'approvedDate', 'rejectedDate']
+                    select: { 'uploadDate', 'approvedDate', 'rejectedDate' }
                 });
                 data.metrics.response_time = calculateAverageResponseTime(posts);
                 break;

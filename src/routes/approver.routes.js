@@ -1,27 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, isApprover } = require('../middleware/auth');
 
-// Protected approver routes
-router.use(authenticate, isApprover);
+// Import middleware
+const { authenticate } = require('../middleware/auth');
+const { isApprover } = require('../middleware/isApprover');
 
-// Get approver dashboard data
-router.get('/dashboard', async (req, res) => {
-    try {
-        res.json({
-            status: 'success',
-            data: {
-                pendingVideos: 5,
-                approvedToday: 10,
-                totalReviewed: 50
-            }
-        });
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: error.message
-        });
-    }
-});
+// Import controllers
+const approverController = require('../controllers/approverController');
+
+// Approver routes (all require authentication and approver privileges)
+router.get('/stats', authenticate, isApprover, approverController.getApproverStats);
+router.get('/posts/pending', authenticate, isApprover, approverController.getPendingPosts);
+router.get('/posts/approved', authenticate, isApprover, approverController.getApprovedPosts);
+router.put('/posts/:postId/approve', authenticate, isApprover, approverController.approvePost);
+router.put('/posts/:postId/reject', authenticate, isApprover, approverController.rejectPost);
+router.get('/notifications', authenticate, isApprover, approverController.getApproverNotifications);
+router.get('/posts/search', authenticate, isApprover, approverController.searchPosts);
 
 module.exports = router; 

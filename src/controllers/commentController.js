@@ -1,9 +1,4 @@
-const Post = require('../models/Post.js');
-const User = require('../models/User.js');
-const Notification = require('../models/Notification.js');
-const Comment = require('../models/Comment.js');
-const sequelize = require('../config/database');
-const { Op } = require('sequelize');
+const prisma = require('../lib/prisma');
 
 exports.addComment = async (req, res) => {
     try {
@@ -12,52 +7,42 @@ exports.addComment = async (req, res) => {
         const username = req.user.id;
         const commentorName = req.user.username;
 
-        // Create comment using raw SQL with all required fields
-        const [comment] = await sequelize.query(
-            `INSERT INTO comments (commentor_id, post_id, comment_text, comment_date)
-             VALUES ($1, $2, $3, $4)
-             RETURNING *`,
-            {
-                bind: [username, postId, comment_text, new Date()],
-                type: sequelize.QueryTypes.INSERT
+        // Create comment using Prisma
+        const comment = await prisma.comment.create({
+            data: {
+                commentor_id: username,
+                post_id: postId,
+                comment_text: comment_text,
+                comment_date: new Date()
             }
-        );
+        });
 
-        // Increment post's comment count using raw SQL
-        await sequelize.query(
-            `UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1`,
-            {
-                bind: [postId],
-                type: sequelize.QueryTypes.UPDATE
+        // Increment post's comment count using Prisma
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                comment_count: {
+                    increment: 1
+                }
             }
-        );
+        });
 
         // Get post owner's username for notification
-        const [post] = await sequelize.query(
-            `SELECT u.id FROM posts p 
-             JOIN users u ON p.user_id = u.id 
-             WHERE p.id = $1`,
-            {
-                bind: [postId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { user_id: true }
+        });
 
         if (post) {
-            // Create notification using raw SQL
-            await sequelize.query(
-                `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-                 VALUES ($1, $2, $3, $4)`,
-                {
-                    bind: [
-                        post.id,
-                        `${commentorName} commented on your post`,
-                        new Date(),
-                        false
-                    ],
-                    type: sequelize.QueryTypes.INSERT
+            // Create notification using Prisma
+            await prisma.notification.create({
+                data: {
+                    userID: post.user_id,
+                    message: `${commentorName} commented on your post`,
+                    type: 'comment',
+                    isRead: false
                 }
-            );
+            });
         }
 
         res.status(201).json({

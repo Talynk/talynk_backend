@@ -1,10 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const Admin = require('../models/Admin');
-const Approver = require('../models/Approver');
-const { Op } = require('sequelize');
-const { TIME } = require('@sequelize/core/_non-semver-use-at-your-own-risk_/data-types.js');
+const prisma = require('../lib/prisma');
 
 exports.register = async (req, res) => {
     try {
@@ -19,9 +15,12 @@ exports.register = async (req, res) => {
         }
         
         // Check if user exists
-        const existingUser = await User.findOne({
+        const existingUser = await prisma.user.findFirst({
             where: {
-                [Op.or]: [{ username }, { email }]
+                OR: [
+                    { username },
+                    { email }
+                ]
             }
         });
 
@@ -36,14 +35,16 @@ exports.register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
 
         // Create user
-        const user = await User.create({
-            username,
-            email,
-            password: hashedPassword,
-            phone1,
-            phone2: phone2 || null, // Optional second phone number
-            createdAt: new Date(),
-            updatedAt: new Date()
+        const user = await prisma.user.create({
+            data: {
+                username,
+                email,
+                password: hashedPassword,
+                phone1,
+                phone2: phone2 || null, // Optional second phone number
+                createdAt: new Date(),
+                updatedAt: new Date()
+            }
         });
    
         res.status(201).json({
@@ -77,12 +78,19 @@ exports.login = async (req, res) => {
         let user;
         
         if (role === 'user') {
-            user = await User.findOne({ 
+            user = await prisma.user.findFirst({ 
                 where: { 
                     email,
                     role
                 },
-                attributes: ['id', 'email', 'username', 'password', 'role', 'status']
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    password: true,
+                    role: true,
+                    status: true
+                }
             });
 
             // Check if account is frozen
@@ -93,12 +101,17 @@ exports.login = async (req, res) => {
                 });
             }
         } else if (role === 'admin') {
-            user = await Admin.findOne({ 
+            user = await prisma.admin.findFirst({ 
                 where: { 
                     email,
                     status: 'active'
                 },
-                attributes: ['id', 'email', 'username', 'password']
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    password: true
+                }
             });
             
             // Map admin fields to match user fields for consistent handling
@@ -109,12 +122,17 @@ exports.login = async (req, res) => {
                 user.role = 'admin';
             }
         } else if (role === 'approver') {
-            user = await Approver.findOne({ 
+            user = await prisma.approver.findFirst({ 
                 where: { 
                     email,
                     status: 'active'
                 },
-                attributes: ['id', 'email', 'username', 'password']
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    password: true
+                }
             });
             
             // Set role for approver

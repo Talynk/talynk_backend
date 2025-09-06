@@ -1,4 +1,4 @@
-const { Admin } = require('../models');
+const prisma = require('../lib/prisma');
 
 exports.isAdmin = async (req, res, next) => {
     try {

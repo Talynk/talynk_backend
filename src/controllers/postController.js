@@ -1,16 +1,6 @@
-const Post = require('../models/Post.js');
-const User = require('../models/User.js');
-const Category = require('../models/Category.js');
-const Comment = require('../models/Comment.js');
-const PostLike = require('../models/PostLike.js');
 const { v4: uuidv4 } = require('uuid');
-const { Op } = require('sequelize');
 const path = require('path');
-const db = require('../config/database');
-const { sql}  =  require("@sequelize/core")
-const { QueryTypes } = require('sequelize');
-const Notification = require('../models/Notification.js');
-const sequelize = require('../config/database');
+const prisma = require('../lib/prisma');
 const { addWatermarkToVideo } = require('../utils/videoProcessor');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
@@ -30,10 +20,11 @@ exports.createPost = async (req, res) => {
         console.log("post_category ----->", post_category);
 
         // First, get the category ID from the category name
-        const category = await Category.findOne({
+        const category = await prisma.category.findFirst({
             where: {
                 name: {
-                    [Op.iLike]: post_category.trim()  // Case-insensitive and trim whitespace
+                    mode: 'insensitive',
+                    contains: post_category.trim()
                 }
             }
         });
@@ -70,28 +61,35 @@ exports.createPost = async (req, res) => {
             console.log("No file was uploaded. Check if the request is using multipart/form-data and the file field is named 'file'");
         }
 
-        const post = await Post.create({
-            user_id: userId,
-            status: 'pending',
-            category_id: category.id,  // Use the category ID instead of name
-            title,
-            description: caption,
-            uploadDate: new Date(),
-            type: fileType,
-            video_url,
-            content: caption
+        const post = await prisma.post.create({
+            data: {
+                user_id: userId,
+                status: 'pending',
+                category_id: category.id,  // Use the category ID instead of name
+                title,
+                description: caption,
+                uploadDate: new Date(),
+                type: fileType,
+                video_url,
+                content: caption
+            }
         });
 
         // Update user's post count
-        await User.increment('posts_count', {
-            where: { id: userId }
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                posts_count: {
+                    increment: 1
+                }
+            }
         });
 
         res.status(201).json({
             status: 'success',
             data: { 
                 post: {
-                    ...post.toJSON(),
+                    ...post,
                     video_url: video_url // Already the full Supabase URL
                 }
             }
@@ -108,32 +106,37 @@ exports.createPost = async (req, res) => {
 
 exports.getAllPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: {
-                status: 'approved'
+                status: 'approved',
+                is_frozen: false
             },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'profile_picture']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profile_picture: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                category: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Add full URLs for files
         const postsWithUrls = posts.map(post => {
-            const postData = post.toJSON();
-            if (postData.video_url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+            if (post.video_url) {
+                post.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}`;
             }
-            return postData;
+            return post;
         });
         // console.log("postsWithUrls ----->", postsWithUrls)
 

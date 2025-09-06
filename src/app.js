@@ -14,10 +14,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // Import routes
 const routes = require('./routes');
 
-// Import database and associations
-const db = require('./models');
-// No need to require associations separately since it's loaded by the models index
-// require('./models/associations');
+// Import Prisma client
+const prisma = require('./lib/prisma');
 
 const app = express();
 
@@ -105,19 +103,7 @@ app.use('/api', routes);
 // Export Supabase client for use in other files
 app.locals.supabase = supabase;
 
-// API Routes
-const authRoutes = require('./routes/auth.routes');
-const adminRoutes = require('./routes/admin.routes');
-const approverRoutes = require('./routes/approver.routes');
-const postsRoutes = require('./routes/posts.routes');
-const postRoutes = require('./routes/post');
-
-// Mount API routes
-app.use('/api/auth', authRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/approver', approverRoutes);
-app.use('/api/posts', postsRoutes);
-app.use('/api/post', postRoutes);
+// All routes are now organized in ./routes/index.js
 
 // Serve index.html for root route
 app.get('/', (req, res) => {
