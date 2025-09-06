@@ -13,7 +13,11 @@ exports.register = async (req, res) => {
     try {
         const { username, email, password, phone1, phone2 } = req.body;
         
-        // Validate required fields - at least one of username or email must be provided
+        // Sanitize inputs
+        const sanitizedEmail = email ? sanitizeLoginInput(email, 'email') : null;
+        const sanitizedUsername = username ? sanitizeLoginInput(username, 'username') : null;
+
+        // Validate required fields
         if (!password || !phone1) {
             return res.status(400).json({
                 status: 'error',
@@ -21,26 +25,12 @@ exports.register = async (req, res) => {
             });
         }
 
-        if (!username && !email) {
+        // Validate login fields using utility function
+        const validation = validateLoginFields(sanitizedEmail, sanitizedUsername);
+        if (!validation.isValid) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Either username or email (or both) must be provided'
-            });
-        }
-
-        // Validate email format if provided
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid email format'
-            });
-        }
-
-        // Validate username format if provided (alphanumeric, underscore, hyphen, 3-30 chars)
-        if (username && !/^[a-zA-Z0-9_-]{3,30}$/.test(username)) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Username must be 3-30 characters long and contain only letters, numbers, underscores, and hyphens'
+                message: validation.errors.join(', ')
             });
         }
         
@@ -48,17 +38,17 @@ exports.register = async (req, res) => {
         const existingUser = await prisma.user.findFirst({
             where: {
                 OR: [
-                    ...(username ? [{ username }] : []),
-                    ...(email ? [{ email }] : [])
+                    ...(sanitizedUsername ? [{ username: sanitizedUsername }] : []),
+                    ...(sanitizedEmail ? [{ email: sanitizedEmail }] : [])
                 ]
             }
         });
 
         if (existingUser) {
-            const conflictField = existingUser.username === username ? 'username' : 'email';
+            const conflictMessage = createConflictMessage(existingUser, sanitizedEmail, sanitizedUsername);
             return res.status(400).json({
                 status: 'error',
-                message: `${conflictField.charAt(0).toUpperCase() + conflictField.slice(1)} already exists`
+                message: conflictMessage
             });
         }
 
@@ -75,8 +65,8 @@ exports.register = async (req, res) => {
         };
 
         // Add username and email if provided
-        if (username) userData.username = username;
-        if (email) userData.email = email;
+        if (sanitizedUsername) userData.username = sanitizedUsername;
+        if (sanitizedEmail) userData.email = sanitizedEmail;
 
         const user = await prisma.user.create({
             data: userData,
@@ -111,19 +101,19 @@ exports.login = async (req, res) => {
     try {
         const { email, username, password, role, loginField } = req.body;
         
-        // Determine what field to use for login (email, username, or auto-detect)
+        // Determine what field to use for login
         let loginValue;
         let loginType;
         
         if (loginField) {
-            // If loginField is specified, use it
-            loginValue = loginField;
-            loginType = email ? 'email' : 'username';
+            // If loginField is specified, auto-detect the type
+            loginValue = sanitizeLoginInput(loginField, 'auto');
+            loginType = detectLoginType(loginValue);
         } else if (email) {
-            loginValue = email;
+            loginValue = sanitizeLoginInput(email, 'email');
             loginType = 'email';
         } else if (username) {
-            loginValue = username;
+            loginValue = sanitizeLoginInput(username, 'username');
             loginType = 'username';
         } else {
             return res.status(400).json({
@@ -147,13 +137,7 @@ exports.login = async (req, res) => {
         
         if (role === 'user') {
             // Build where clause for flexible login
-            const whereClause = { role };
-            
-            if (loginType === 'email') {
-                whereClause.email = loginValue;
-            } else if (loginType === 'username') {
-                whereClause.username = loginValue;
-            }
+            const whereClause = buildLoginWhereClause(loginValue, loginType, { role });
 
             user = await prisma.user.findFirst({ 
                 where: whereClause,
@@ -176,13 +160,7 @@ exports.login = async (req, res) => {
             }
         } else if (role === 'admin') {
             // Build where clause for admin login
-            const whereClause = { status: 'active' };
-            
-            if (loginType === 'email') {
-                whereClause.email = loginValue;
-            } else if (loginType === 'username') {
-                whereClause.username = loginValue;
-            }
+            const whereClause = buildLoginWhereClause(loginValue, loginType, { status: 'active' });
 
             user = await prisma.admin.findFirst({ 
                 where: whereClause,
@@ -203,13 +181,7 @@ exports.login = async (req, res) => {
             }
         } else if (role === 'approver') {
             // Build where clause for approver login
-            const whereClause = { status: 'active' };
-            
-            if (loginType === 'email') {
-                whereClause.email = loginValue;
-            } else if (loginType === 'username') {
-                whereClause.username = loginValue;
-            }
+            const whereClause = buildLoginWhereClause(loginValue, loginType, { status: 'active' });
 
             user = await prisma.approver.findFirst({ 
                 where: whereClause,
@@ -259,20 +231,20 @@ exports.login = async (req, res) => {
 
         // Update last login time based on user type
         if (role === 'user') {
-            await User.update(
-                { lastLoginAt: new Date() },
-                { where: { id: user.id } }
-            );
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { last_login: new Date() }
+            });
         } else if (role === 'admin') {
-            await Admin.update(
-                { lastloginat: new Date() },
-                { where: { id: user.id } }
-            );
+            await prisma.admin.update({
+                where: { id: user.id },
+                data: { lastloginat: new Date() }
+            });
         } else if (role === 'approver') {
-            await Approver.update(
-                { lastLoginAt: new Date() },
-                { where: { id: user.id } }
-            );
+            await prisma.approver.update({
+                where: { id: user.id },
+                data: { lastLoginAt: new Date() }
+            });
         }
 
         // Generate tokens
@@ -319,9 +291,38 @@ exports.login = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] }
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        phone1: true,
+        phone2: true,
+        role: true,
+        status: true,
+        posts_count: true,
+        total_profile_views: true,
+        createdAt: true,
+        updatedAt: true,
+        last_login: true,
+        country: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            flag_emoji: true
+          }
+        }
+      }
     });
+
+    if (!user) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
 
     res.json({
       status: 'success',
@@ -343,11 +344,11 @@ exports.updateProfile = async (req, res) => {
     
     // If username is provided in params, update that user (admin functionality)
     // Otherwise update the logged-in user's profile
-    const user = username 
-      ? await User.findOne({ where: { username } })
-      : await User.findByPk(req.user.id);
+    const targetUserId = username 
+      ? (await prisma.user.findFirst({ where: { username }, select: { id: true } }))?.id
+      : req.user.id;
 
-    if (!user) {
+    if (!targetUserId) {
       return res.status(404).json({
         status: 'error',
         message: 'User not found'
@@ -366,18 +367,26 @@ exports.updateProfile = async (req, res) => {
     const { password, role, ...safeUpdateData } = updateData;
     
     // Update the user
-    await user.update(safeUpdateData);
+    const updatedUser = await prisma.user.update({
+      where: { id: targetUserId },
+      data: {
+        ...safeUpdateData,
+        updatedAt: new Date()
+      },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        phone1: true,
+        phone2: true,
+        updatedAt: true
+      }
+    });
 
     res.json({
       status: 'success',
       message: 'Profile updated successfully',
-      data: {
-        username: user.username,
-        email: user.email,
-        phone1: user.phone1,
-        phone2: user.phone2,
-        updatedAt: user.updatedAt
-      }
+      data: updatedUser
     });
   } catch (error) {
     console.error('Profile update error:', error);
@@ -452,24 +461,34 @@ exports.refreshToken = async (req, res) => {
         // Find the user based on the decoded token
         let user;
         if (decoded.role === 'admin') {
-            user = await Admin.findOne({ 
+            user = await prisma.admin.findFirst({ 
                 where: { 
                     id: decoded.id,
                     status: 'active' 
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    permissions: true
                 }
             });
             
             // Map admin fields to match user fields for consistent handling
             if (user) {
-                user.email = user.adminEmail;
-                user.username = user.adminName;
                 user.role = 'admin';
             }
         } else if (decoded.role === 'approver') {
-            user = await Approver.findOne({ 
+            user = await prisma.approver.findFirst({ 
                 where: { 
                     id: decoded.id,
                     status: 'active' 
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    permissions: true
                 }
             });
             
@@ -477,10 +496,16 @@ exports.refreshToken = async (req, res) => {
                 user.role = 'approver';
             }
         } else if (decoded.role === 'user') {
-            user = await User.findOne({ 
+            user = await prisma.user.findFirst({ 
                 where: { 
                     id: decoded.id,
                     role: 'user'
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    username: true,
+                    role: true
                 }
             });
         }
@@ -496,8 +521,8 @@ exports.refreshToken = async (req, res) => {
         const accessToken = jwt.sign(
             {
                 id: user.id,
-                email: user.email || user.adminEmail,
-                username: user.username || user.adminName,
+                email: user.email,
+                username: user.username,
                 role: decoded.role,
                 ...(decoded.role !== 'user' && user.permissions && { permissions: user.permissions })
             },
@@ -518,8 +543,8 @@ exports.refreshToken = async (req, res) => {
         // Prepare user data for response
         const userData = {
             id: user.id,
-            email: user.email || user.adminEmail,
-            username: user.username || user.adminName,
+            email: user.email,
+            username: user.username,
             role: decoded.role
         };
         

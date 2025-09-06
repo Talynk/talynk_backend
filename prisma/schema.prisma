@@ -236,18 +236,6 @@ model Share {
   @@map("shares")
 }
 
-model View {
-  id        String   @id @default(uuid()) @db.Uuid
-  user_id   String?  @db.Uuid
-  post_id   String   @db.Uuid
-  createdAt DateTime @default(now())
-
-  // Relations
-  user      User?    @relation(fields: [user_id], references: [id])
-  post      Post     @relation(fields: [post_id], references: [id])
-
-  @@map("views")
-}
 
 model Admin {
   id        String   @id @default(uuid()) @db.Uuid
