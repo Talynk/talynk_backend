@@ -16,6 +16,8 @@ const adRoutes = require('./ad.routes');
 const reportRoutes = require('./report.routes');
 const featuredRoutes = require('./featured.routes');
 const recommendationRoutes = require('./recommendation.routes');
+const likeRoutes = require('./like.routes');
+const viewRoutes = require('./view.routes');
 
 // Test route
 router.get('/test', (req, res) => {
@@ -38,5 +40,7 @@ router.use('/ads', adRoutes);
 router.use('/reports', reportRoutes);
 router.use('/featured', featuredRoutes);
 router.use('/recommendations', recommendationRoutes);
+router.use('/likes', likeRoutes);
+router.use('/views', viewRoutes);
 
 module.exports = router; 

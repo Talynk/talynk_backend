@@ -853,104 +853,13 @@ exports.getPost = async (req, res) => {
     }
 };
 
+// Like functionality moved to likeController.js
+// Use /api/likes/posts/:postId/toggle endpoint instead
 exports.likePost = async (req, res) => {
-    let t = await sequelize.transaction();
-    
-    try {
-        const { postId } = req.params;
-        const userId = req.user.id;
-        
-        try {
-            // Try to insert first - if it exists, it will throw a unique constraint error
-            await sequelize.query(
-                `INSERT INTO post_likes (post_id, user_id, like_date)
-                 VALUES ($1, $2, $3)`,
-                {
-                    bind: [postId, userId, new Date()],
-                    type: sequelize.QueryTypes.INSERT,
-                    transaction: t
-                }
-            );
-
-            // If we get here, the insert succeeded (post was not previously liked)
-            // Increment post's like count
-            await sequelize.query(
-                `UPDATE posts SET likes = likes + 1 WHERE id = $1`,
-                {
-                    bind: [postId],
-                    type: sequelize.QueryTypes.UPDATE,
-                    transaction: t
-                }
-            );
-
-            await t.commit();
-            
-            return res.json({
-                status: 'success',
-                message: 'Post liked successfully',
-                action: 'liked'
-            });
-            
-        } catch (insertError) {
-            // We need to rollback the current transaction since it's in an error state
-            await t.rollback();
-            
-            // Check if this is a unique constraint violation
-            if (insertError.name === 'SequelizeUniqueConstraintError' || 
-                (insertError.original && insertError.original.code === '23505')) {
-                
-                // Start a new transaction for the unlike operation
-                t = await sequelize.transaction();
-                
-                try {
-                    // This means the user already liked the post, so we should unlike it
-                await sequelize.query(
-                        `DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2`,
-                    {
-                            bind: [postId, userId],
-                            type: sequelize.QueryTypes.DELETE,
-                            transaction: t
-                    }
-                );
-
-                    // Decrement post's like count
-                    await sequelize.query(
-                        `UPDATE posts SET likes = GREATEST(likes - 1, 0) WHERE id = $1`,
-            {
-                bind: [postId],
-                            type: sequelize.QueryTypes.UPDATE,
-                            transaction: t
-            }
-        );
-
-                    await t.commit();
-                    
-                    return res.json({
-            status: 'success',
-                        message: 'Post unliked successfully',
-                        action: 'unliked'
-        });
-                } catch (unlikeError) {
-                    await t.rollback();
-                    throw unlikeError;
-                }
-            } else {
-                // Some other error occurred, not related to unique constraint
-                throw insertError;
-            }
-        }
-        
-    } catch (error) {
-        // Make sure any active transaction is rolled back
-        if (t && !t.finished) {
-            await t.rollback();
-        }
-        console.error('Like/Unlike error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error liking/unliking post'
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/likes/posts/:postId/toggle instead'
+    });
 };
 
 exports.addComment = async (req, res) => {
@@ -1021,37 +930,13 @@ exports.getPostComments = async (req, res) => {
     }
 };
 
+// Like status check moved to likeController.js
+// Use /api/likes/posts/:postId/status endpoint instead
 exports.checkLikeStatus = async (req, res) => {
-    try {
-        const { postId } = req.params;
-        const userId = req.user.id;
-
-        // Check if like exists using raw SQL
-        const [existingLike] = await sequelize.query(
-            `SELECT * FROM post_likes 
-             WHERE post_id = $1 AND user_id = $2 
-             LIMIT 1`,
-            {
-                bind: [postId, userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
-
-        res.json({
-            status: 'success',
-            data: {
-                hasLiked: !!existingLike,
-                likeDate: existingLike ? existingLike.like_date : null
-            }
-        });
-    } catch (error) {
-        console.error('Like status check error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error checking like status',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/likes/posts/:postId/status instead'
+    });
 };
 
 exports.searchPosts = async (req, res) => {
@@ -1121,66 +1006,11 @@ exports.searchPosts = async (req, res) => {
     }
 };
 
+// Liked posts functionality moved to likeController.js
+// Use /api/likes/user/liked endpoint instead
 exports.getLikedPosts = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        // Get posts liked by the authenticated user
-        const likedPosts = await sequelize.query(
-            `SELECT 
-                p.id, 
-                p.title, 
-                p.status, 
-                p.video_url as image,
-                p.video_url, 
-                u.id as user_id, 
-                u.username, 
-                u.profile_picture as avatar,
-                p.likes as likes_count, 
-                p.comment_count as comments_count, 
-                p.created_at
-            FROM posts p
-            JOIN post_likes pl ON p.id = pl.post_id
-            JOIN users u ON p.user_id = u.id
-            WHERE pl.user_id = $1 AND p.status = 'approved'
-            ORDER BY pl.like_date DESC`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
-
-        // Process the results to match the expected response format
-        const formattedPosts = likedPosts.map(post => ({
-            id: post.id,
-            title: post.title,
-            status: post.status,
-            image: post.image,
-            video_url: post.video_url,
-            fullUrl: post.video_url ? `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}` : null,
-            user: {
-                id: post.user_id,
-                username: post.username,
-                avatar: post.avatar
-            },
-            likes_count: parseInt(post.likes_count),
-            comments_count: parseInt(post.comments_count),
-            created_at: post.created_at
-        }));
-
-        res.json({
-            status: 'success',
-            message: 'Liked posts retrieved successfully',
-            data: {
-                posts: formattedPosts
-            }
-        });
-    } catch (error) {
-        console.error('Error fetching liked posts:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching liked posts',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/likes/user/liked instead'
+    });
 }; 
