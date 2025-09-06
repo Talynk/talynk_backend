@@ -14,7 +14,7 @@ exports.recordView = async (req, res) => {
         // Check if post exists
         const post = await prisma.post.findUnique({
             where: { id: postId },
-            select: { id: true, view_count: true }
+            select: { id: true, views: true }
         });
 
         if (!post) {
@@ -27,7 +27,7 @@ exports.recordView = async (req, res) => {
         // Use transaction for atomic view recording
         const result = await prisma.$transaction(async (tx) => {
             let viewRecorded = false;
-            let newViewCount = post.view_count;
+            let newViewCount = post.views;
 
             if (userId) {
                 // Authenticated user - fast existence query using count()
@@ -76,12 +76,12 @@ exports.recordView = async (req, res) => {
                 await tx.post.update({
                     where: { id: postId },
                     data: {
-                        view_count: {
+                        views: {
                             increment: 1
                         }
                     }
                 });
-                newViewCount = post.view_count + 1;
+                newViewCount = post.views + 1;
             }
 
             return {
@@ -224,8 +224,8 @@ exports.getTrendingPosts = async (req, res) => {
                 }
             },
             orderBy: [
-                { view_count: 'desc' },
-                { like_count: 'desc' },
+                { views: 'desc' },
+                { likes: 'desc' },
                 { createdAt: 'desc' }
             ],
             take: parseInt(limit)
@@ -234,8 +234,8 @@ exports.getTrendingPosts = async (req, res) => {
         // Calculate trending score (weighted combination of views, likes, and comments)
         const postsWithScore = trendingPosts.map(post => {
             const trendingScore = 
-                (post.view_count * 1) + 
-                (post.like_count * 3) + 
+                (post.views * 1) + 
+                (post.likes * 3) + 
                 (post._count.comments * 2) +
                 (post._count.postLikes * 3);
             
@@ -245,10 +245,10 @@ exports.getTrendingPosts = async (req, res) => {
                 caption: post.caption,
                 video_url: post.video_url,
                 image_url: post.image_url,
-                like_count: post.like_count,
+                like_count: post.likes,
                 comment_count: post.comment_count,
-                view_count: post.view_count,
-                share_count: post.share_count,
+                view_count: post.views,
+                share_count: post.shares,
                 status: post.status,
                 created_at: post.createdAt,
                 user: post.user,

@@ -15,7 +15,7 @@ exports.toggleLike = async (req, res) => {
             // Check if post exists
             const post = await tx.post.findUnique({
                 where: { id: postId },
-                select: { id: true, like_count: true }
+                select: { id: true, likes: true }
             });
 
             if (!post) {
@@ -26,7 +26,7 @@ exports.toggleLike = async (req, res) => {
             const likeExists = await userHasLikedPost(userId, postId);
 
             let isLiked = false;
-            let newLikeCount = post.like_count;
+            let newLikeCount = post.likes;
 
             if (likeExists) {
                 // Unlike: Remove the like and decrement count
@@ -37,7 +37,7 @@ exports.toggleLike = async (req, res) => {
                     }
                 });
                 
-                newLikeCount = Math.max(0, post.like_count - 1);
+                newLikeCount = Math.max(0, post.likes - 1);
                 isLiked = false;
             } else {
                 // Like: Create the like and increment count
@@ -48,14 +48,14 @@ exports.toggleLike = async (req, res) => {
                     }
                 });
                 
-                newLikeCount = post.like_count + 1;
+                newLikeCount = post.likes + 1;
                 isLiked = true;
             }
 
             // Update the post's like count
             await tx.post.update({
                 where: { id: postId },
-                data: { like_count: newLikeCount }
+                data: { likes: newLikeCount }
             });
 
             return {
@@ -105,7 +105,7 @@ exports.checkLikeStatus = async (req, res) => {
             userHasLikedPost(userId, postId),
             prisma.post.findUnique({
                 where: { id: postId },
-                select: { like_count: true }
+                select: { likes: true }
             })
         ]);
 
@@ -113,7 +113,7 @@ exports.checkLikeStatus = async (req, res) => {
             status: 'success',
             data: {
                 isLiked: likeExists, // Already a boolean
-                likeCount: post?.like_count || 0
+                likeCount: post?.likes || 0
             }
         });
 
@@ -172,10 +172,10 @@ exports.getLikedPosts = async (req, res) => {
             caption: like.post.caption,
             video_url: like.post.video_url,
             image_url: like.post.image_url,
-            like_count: like.post.like_count,
+            like_count: like.post.likes,
             comment_count: like.post.comment_count,
-            view_count: like.post.view_count,
-            share_count: like.post.share_count,
+            view_count: like.post.views,
+            share_count: like.post.shares,
             status: like.post.status,
             created_at: like.post.createdAt,
             user: like.post.user,
@@ -240,13 +240,13 @@ exports.batchCheckLikeStatus = async (req, res) => {
             },
             select: {
                 id: true,
-                like_count: true
+                likes: true
             }
         });
 
         const likeCounts = {};
         posts.forEach(post => {
-            likeCounts[post.id] = post.like_count;
+            likeCounts[post.id] = post.likes;
         });
 
         // Combine results
