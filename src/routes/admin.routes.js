@@ -5,6 +5,9 @@ const adminController = require('../controllers/adminController');
 const { authenticate } = require('../middleware/auth');
 const { isAdmin } = require('../middleware/isAdmin');
 
+// Admin registration (no authentication required for initial setup)
+router.post('/register', adminController.registerAdmin);
+
 // Admin routes (all require authentication and admin privileges)
 router.get('/users', authenticate, isAdmin, adminController.getAllUsers);
 router.post('/accounts/manage', authenticate, isAdmin, adminController.manageUserAccount);

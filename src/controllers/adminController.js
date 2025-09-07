@@ -1,6 +1,91 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 
+// Register a new admin
+exports.registerAdmin = async (req, res) => {
+    try {
+        const { email, username, password } = req.body;
+
+        // Validate required fields
+        if (!email || !username || !password) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email, username, and password are required'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Validate password strength
+        if (password.length < 6) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Check if admin already exists
+        const existingAdmin = await prisma.admin.findFirst({
+            where: {
+                OR: [
+                    { email: email.toLowerCase() },
+                    { username: username.toLowerCase() }
+                ]
+            }
+        });
+
+        if (existingAdmin) {
+            return res.status(409).json({
+                status: 'error',
+                message: 'Admin with this email or username already exists'
+            });
+        }
+
+        // Hash password
+        const saltRounds = 10;
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+        // Create admin
+        const admin = await prisma.admin.create({
+            data: {
+                email: email.toLowerCase(),
+                username: username.toLowerCase(),
+                password: hashedPassword,
+                status: 'active'
+            },
+            select: {
+                id: true,
+                email: true,
+                username: true,
+                status: true,
+                createdAt: true
+            }
+        });
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Admin registered successfully',
+            data: {
+                admin
+            }
+        });
+
+    } catch (error) {
+        console.error('Admin registration error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error registering admin'
+        });
+    }
+};
+
 exports.searchPosts = async (req, res) => {
     try {
         const { query, type, page = 1, limit = 10 } = req.query;
