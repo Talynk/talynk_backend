@@ -66,6 +66,7 @@ http://localhost:3000/api
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
+| POST | `/register` | Register new admin | ❌ |
 | GET | `/users` | Get all users | ✅ Admin |
 | POST | `/accounts/manage` | Manage user account | ✅ Admin |
 | POST | `/approvers` | Register new approver | ✅ Admin |
@@ -312,6 +313,64 @@ curl -X GET http://localhost:3000/api/categories/63/subcategories
 5. **Hierarchical Categories**: Categories are organized in a 2-level hierarchy (main categories and subcategories)
 6. **Flexible Authentication**: Login supports both email and username
 7. **Role-Based Access**: Different user roles (user, admin, approver) have different permissions
+
+---
+
+## 📋 Detailed Endpoint Documentation
+
+### Admin Registration
+
+**POST** `/api/admin/register`
+
+Register a new admin user.
+
+**Request Body:**
+```json
+{
+  "email": "admin@example.com",
+  "username": "admin",
+  "password": "securepassword123"
+}
+```
+
+**Response (Success - 201):**
+```json
+{
+  "status": "success",
+  "message": "Admin registered successfully",
+  "data": {
+    "admin": {
+      "id": "uuid",
+      "email": "admin@example.com",
+      "username": "admin",
+      "status": "active",
+      "createdAt": "2025-01-07T05:30:00.000Z"
+    }
+  }
+}
+```
+
+**Response (Error - 400):**
+```json
+{
+  "status": "error",
+  "message": "Email, username, and password are required"
+}
+```
+
+**Response (Error - 409):**
+```json
+{
+  "status": "error",
+  "message": "Admin with this email or username already exists"
+}
+```
+
+**Validation Rules:**
+- Email must be valid format
+- Password must be at least 6 characters
+- Email and username must be unique
+- All fields are required
 
 ---
 

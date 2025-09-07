@@ -250,6 +250,7 @@ model Admin {
   email     String   @unique @db.VarChar(255)
   password  String   @db.VarChar(255)
   status    String   @default("active") @db.VarChar(255)
+  last_login DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now())
 
@@ -267,6 +268,7 @@ model Approver {
   email     String   @unique @db.VarChar(255)
   password  String   @db.VarChar(255)
   status    String   @default("active") @db.VarChar(255)
+  last_login DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now())
 
