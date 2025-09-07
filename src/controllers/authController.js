@@ -294,31 +294,66 @@ exports.login = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        phone1: true,
-        phone2: true,
-        role: true,
-        status: true,
-        posts_count: true,
-        total_profile_views: true,
-        createdAt: true,
-        updatedAt: true,
-        last_login: true,
-        country: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            flag_emoji: true
+    let user;
+    const userRole = req.user.role;
+
+    // Find user based on their role
+    if (userRole === 'admin') {
+      user = await prisma.admin.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          status: true,
+          last_login: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+      if (user) user.role = 'admin';
+    } else if (userRole === 'approver') {
+      user = await prisma.approver.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          status: true,
+          last_login: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+      if (user) user.role = 'approver';
+    } else {
+      // Regular user
+      user = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          phone1: true,
+          phone2: true,
+          role: true,
+          status: true,
+          posts_count: true,
+          total_profile_views: true,
+          createdAt: true,
+          updatedAt: true,
+          last_login: true,
+          country: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              flag_emoji: true
+            }
           }
         }
-      }
-    });
+      });
+    }
 
     if (!user) {
       return res.status(404).json({
