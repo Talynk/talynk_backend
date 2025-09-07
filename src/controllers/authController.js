@@ -472,8 +472,7 @@ exports.refreshToken = async (req, res) => {
                 select: {
                     id: true,
                     email: true,
-                    username: true,
-                    permissions: true
+                    username: true
                 }
             });
             
@@ -490,8 +489,7 @@ exports.refreshToken = async (req, res) => {
                 select: {
                     id: true,
                     email: true,
-                    username: true,
-                    permissions: true
+                    username: true
                 }
             });
             
@@ -527,8 +525,7 @@ exports.refreshToken = async (req, res) => {
                 id: user.id,
                 email: user.email,
                 username: user.username,
-                role: decoded.role,
-                ...(decoded.role !== 'user' && user.permissions && { permissions: user.permissions })
+                role: decoded.role
             },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
@@ -538,7 +535,7 @@ exports.refreshToken = async (req, res) => {
         const newRefreshToken = jwt.sign(
             {
                 id: user.id,
-                role: decoded.role
+                role: user.role
             },
             process.env.JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
