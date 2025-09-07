@@ -388,15 +388,12 @@ exports.toggleNotifications = async (req, res) => {
 exports.getNotifications = async (req, res) => {
     console.log("Hiitting User id -------> " + req.user.id);
     try {
-        const notifications = await sequelize.query(
-            `SELECT * FROM notifications 
-             WHERE user_id = :userId 
-             ORDER BY notification_date DESC`,
-            {
-                replacements: { userId: req.user.id },
-                type: sequelize.QueryTypes.SELECT
+        const notifications = await prisma.notification.findMany({
+            where: { userID: req.user.id },
+            orderBy: {
+                createdAt: 'desc'
             }
-        );
+        });
 console.log("User id -------> " + req.user.id);
         res.json({
             status: 'success',
