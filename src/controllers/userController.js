@@ -16,7 +16,6 @@ exports.getProfile = async (req, res) => {
                 id: true,
                 username: true,
                 email: true,
-                bio: true,
                 profile_picture: true,
                 posts_count: true,
                 follower_count: true,
@@ -152,28 +151,42 @@ exports.updateProfile = async (req, res) => {
     }
     
     // Update the user with the restricted fields
-    const [updated, updatedUsers] = await User.update(updateData, {
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
-      returning: true
+      data: updateData,
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        phone1: true,
+        phone2: true,
+        profile_picture: true,
+        posts_count: true,
+        follower_count: true,
+        total_profile_views: true,
+        likes: true,
+        subscribers: true,
+        status: true,
+        role: true,
+        last_login: true,
+        country_id: true,
+        country: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            flag_emoji: true
+          }
+        },
+        createdAt: true,
+        updatedAt: true
+      }
     });
-    
-    if (!updated) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'User not found'
-      });
-    }
-    
-    // Get the updated user object without sensitive fields
-    const updatedUser = updatedUsers[0].get({ plain: true });
-    delete updatedUser.password;
     
     res.status(200).json({
       status: 'success',
       message: 'Profile updated successfully',
-      data: {
-        user: updatedUser
-      }
+      data: updatedUser
     });
     
   } catch (error) {
@@ -351,12 +364,26 @@ exports.addSearchTerm = async (req, res) => {
 exports.toggleNotifications = async (req, res) => {
     console.log(req.body);
     try {
-        const user = await User.findByPk(req.user.username);
-        await user.update({ notification: !user.notification });
-e
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { notification: true }
+        });
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+        
+        const updatedUser = await prisma.user.update({
+            where: { id: req.user.id },
+            data: { notification: !user.notification },
+            select: { notification: true }
+        });
         res.json({
             status: 'success',
-            message: `Notifications ${user.notification ? 'enabled' : 'disabled'} successfully`
+            message: `Notifications ${updatedUser.notification ? 'enabled' : 'disabled'} successfully`
         });
     } catch (error) {
 
@@ -397,8 +424,35 @@ console.log("User id -------> " + req.user.id);
 
 exports.getCurrentUser = async (req, res) => {
     try {
-        const user = await User.findByPk(req.user.id, {
-            attributes: { exclude: ['password'] }
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                phone1: true,
+                phone2: true,
+                profile_picture: true,
+                posts_count: true,
+                follower_count: true,
+                total_profile_views: true,
+                likes: true,
+                subscribers: true,
+                status: true,
+                role: true,
+                last_login: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
+                createdAt: true,
+                updatedAt: true
+            }
         });
 
         if (!user) {
@@ -423,8 +477,34 @@ exports.getCurrentUser = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
     try {
-        const users = await User.findAll({
-            attributes: { exclude: ['password'] }
+        const users = await prisma.user.findMany({
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                phone1: true,
+                phone2: true,
+                profile_picture: true,
+                posts_count: true,
+                follower_count: true,
+                total_profile_views: true,
+                likes: true,
+                subscribers: true,
+                status: true,
+                role: true,
+                last_login: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
+                createdAt: true,
+                updatedAt: true
+            }
         });
 
         res.json({
@@ -442,8 +522,35 @@ exports.getAllUsers = async (req, res) => {
 
 exports.getUser = async (req, res) => {
     try {
-        const user = await User.findByPk(req.params.id, {
-            attributes: { exclude: ['password'] }
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.id },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                phone1: true,
+                phone2: true,
+                profile_picture: true,
+                posts_count: true,
+                follower_count: true,
+                total_profile_views: true,
+                likes: true,
+                subscribers: true,
+                status: true,
+                role: true,
+                last_login: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
+                createdAt: true,
+                updatedAt: true
+            }
         });
 
         if (!user) {
@@ -468,7 +575,9 @@ exports.getUser = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
     try {
-        const user = await User.findByPk(req.params.id);
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.id }
+        });
 
         if (!user) {
             return res.status(404).json({
@@ -478,23 +587,31 @@ exports.updateUser = async (req, res) => {
         }
 
         const { username, primaryPhone, secondaryPhone, isAdmin } = req.body;
-        await user.update({
-            username,
-            primaryPhone,
-            secondaryPhone,
-            isAdmin
+        const updatedUser = await prisma.user.update({
+            where: { id: req.params.id },
+            data: {
+                username,
+                phone1: primaryPhone,
+                phone2: secondaryPhone,
+                role: isAdmin ? 'admin' : 'user'
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                phone1: true,
+                phone2: true,
+                role: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true
+            }
         });
 
         res.json({
             status: 'success',
             message: 'User updated successfully',
-            data: {
-                id: user.id,
-                username: user.username,
-                primaryPhone: user.primaryPhone,
-                secondaryPhone: user.secondaryPhone,
-                isAdmin: user.isAdmin
-            }
+            data: updatedUser
         });
     } catch (error) {
         console.error('Error updating user:', error);
@@ -507,7 +624,9 @@ exports.updateUser = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
     try {
-        const user = await User.findByPk(req.params.id);
+        const user = await prisma.user.findUnique({
+            where: { id: req.params.id }
+        });
 
         if (!user) {
             return res.status(404).json({
@@ -516,7 +635,9 @@ exports.deleteUser = async (req, res) => {
             });
         }
 
-        await user.destroy();
+        await prisma.user.delete({
+            where: { id: req.params.id }
+        });
 
         res.json({
             status: 'success',
@@ -577,14 +698,15 @@ exports.updateUserInterests = async (req, res) => {
         // Limit the number of interests to 10
         const limitedInterests = interests.slice(0, 10);
 
-        // Update user interests using raw SQL
-        await sequelize.query(
-            `UPDATE users SET interests = $1, "updatedAt" = NOW(), last_active_date = NOW() WHERE id = $2`,
-            {
-                bind: [limitedInterests, userId],
-                type: sequelize.QueryTypes.UPDATE
+        // Update user interests using Prisma
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                interests: limitedInterests,
+                updatedAt: new Date(),
+                last_active_date: new Date()
             }
-        );
+        });
 
         res.json({
             status: 'success',
@@ -619,42 +741,58 @@ exports.getUserProfileById = async (req, res) => {
         
         const currentUserId = req.user ? req.user.id : null;
 
-        // Get user with Sequelize models
-        const user = await User.findOne({
+        // Get user with Prisma
+        const user = await prisma.user.findUnique({
             where: {
-                id: userId,
-                status: 'active'
+                id: userId
             },
-            attributes: [
-                'id',
-                'username',
-                'email',
-                'bio',
-                'profile_picture',
-                'posts_count',
-                'follower_count'
-            ]
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                profile_picture: true,
+                posts_count: true,
+                follower_count: true,
+                total_profile_views: true,
+                status: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
+                createdAt: true,
+                updatedAt: true
+            }
         });
 
-        if (!user) {
+        if (!user || user.status !== 'active') {
             return res.status(404).json({
                 status: 'error',
                 message: 'User not found or account is inactive'
             });
         }
 
-        // Convert to plain object for easier manipulation
-        const userData = user.toJSON();
-        
-        // Rename fields to match expected format
-        userData.fullName = userData.username;
-        userData.profilePicture = userData.profile_picture;
-        userData.postsCount = userData.posts_count;
-        userData.followersCount = userData.follower_count;
-        userData.coverPhoto = null;
+        // Convert to expected format
+        const userData = {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            fullName: user.username,
+            profilePicture: user.profile_picture,
+            postsCount: user.posts_count,
+            followersCount: user.follower_count,
+            coverPhoto: null,
+            country: user.country,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+        };
 
         // Get following count
-        const followingCount = await Follow.count({
+        const followingCount = await prisma.follow.count({
             where: {
                 followerId: userId
             }
@@ -665,7 +803,7 @@ exports.getUserProfileById = async (req, res) => {
         // Check if current user is following this profile
         let isFollowing = false;
         if (currentUserId) {
-            const followExists = await Follow.findOne({
+            const followExists = await prisma.follow.findFirst({
                 where: {
                     followerId: currentUserId,
                     followingId: userId
@@ -675,16 +813,16 @@ exports.getUserProfileById = async (req, res) => {
         }
 
         userData.isFollowing = isFollowing;
-        
-        // Add timestamps
-        userData.createdAt = userData.createdAt || new Date().toISOString();
-        userData.updatedAt = userData.updatedAt || new Date().toISOString();
 
         // Update profile view count if not viewing own profile
         if (currentUserId !== userId) {
-            await User.increment('total_profile_views', {
-                by: 1,
-                where: { id: userId }
+            await prisma.user.update({
+                where: { id: userId },
+                data: {
+                    total_profile_views: {
+                        increment: 1
+                    }
+                }
             });
         }
 
