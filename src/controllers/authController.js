@@ -238,12 +238,12 @@ exports.login = async (req, res) => {
         } else if (role === 'admin') {
             await prisma.admin.update({
                 where: { id: user.id },
-                data: { lastloginat: new Date() }
+                data: { last_login: new Date() }
             });
         } else if (role === 'approver') {
             await prisma.approver.update({
                 where: { id: user.id },
-                data: { lastLoginAt: new Date() }
+                data: { last_login: new Date() }
             });
         }
 
