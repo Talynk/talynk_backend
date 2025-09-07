@@ -257,12 +257,17 @@ exports.getRecentSearches = async (req, res) => {
     try {
         const username = req.user.username;
         
-        // Use Sequelize model instead of raw query
-        const searches = await RecentSearch.findAll({
-            where: { user_id: username },
-            attributes: ['search_term', 'search_date'],
-            order: [['search_date', 'DESC']],
-            limit: 10
+        // Use Prisma to get recent searches
+        const searches = await prisma.recentSearch.findMany({
+            where: { userID: username },
+            select: {
+                searchTerm: true,
+                createdAt: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            },
+            take: 10
         });
 
         res.json({
@@ -290,23 +295,18 @@ exports.addSearchTerm = async (req, res) => {
         console.log(searchTerm);
         
         // Create a new search record using raw SQL
-        await sequelize.query(
-            `INSERT INTO recent_searches (user_id, search_term, search_date)
-             VALUES ($1, $2, $3)`,
-            {
-                bind: [username, searchTerm, new Date()],
-                type: sequelize.QueryTypes.INSERT
+        await prisma.recentSearch.create({
+            data: {
+                userID: username,
+                searchTerm: searchTerm
             }
-        );
+        });
 
         // Update user's recent_searches array using raw SQL
-        const [user] = await sequelize.query(
-            `SELECT recent_searches FROM users WHERE username = $1`,
-            {
-                bind: [username],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const user = await prisma.user.findUnique({
+            where: { username: username },
+            select: { recent_searches: true }
+        });
         
         if (user) {
             // Get current recent searches or initialize empty array
@@ -326,13 +326,10 @@ exports.addSearchTerm = async (req, res) => {
             recentSearches.push(searchTerm);
             
             // Update the user with raw SQL
-            await sequelize.query(
-                `UPDATE users SET recent_searches = $1 WHERE username = $2`,
-                {
-                    bind: [recentSearches, username],
-                    type: sequelize.QueryTypes.UPDATE
-                }
-            );
+            await prisma.user.update({
+                where: { username: username },
+                data: { recent_searches: recentSearches }
+            });
         }
 
         res.json({
