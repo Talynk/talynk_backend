@@ -105,14 +105,20 @@ app.locals.supabase = supabase;
 
 // All routes are now organized in ./routes/index.js
 
-// Serve index.html for root route
+// API root route
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Handle SPA routing - send index.html for all non-API routes
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.json({
+        status: 'success',
+        message: 'Talynk Backend API is running',
+        version: '1.0.0',
+        endpoints: {
+            auth: '/api/auth',
+            users: '/api/users',
+            posts: '/api/posts',
+            admin: '/api/admin',
+            approver: '/api/approver'
+        }
+    });
 });
 
 // Error Handling Middleware

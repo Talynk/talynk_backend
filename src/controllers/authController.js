@@ -512,6 +512,7 @@ exports.refreshToken = async (req, res) => {
 
         if (!user) {
             return res.status(401).json({
+                gotToken: refreshToken,
                 status: 'error',
                 message: 'Invalid refresh token'
             });

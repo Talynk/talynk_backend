@@ -1,4 +1,6 @@
 const prisma = require('../lib/prisma');
+const { ValidationError } = require('@prisma/client');
+
 exports.errorHandler = (err, req, res, next) => {
     console.error('Error:', err);
 
