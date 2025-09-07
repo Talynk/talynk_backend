@@ -206,51 +206,40 @@ exports.getStatistics = async (req, res) => {
         const username = req.user.username;
 
         // Get user data
-        const [user] = await sequelize.query(
-            `SELECT * FROM users WHERE id = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                total_profile_views: true,
+                likes: true,
+                subscribers: true
             }
-        );
+        });
 
         // Get post count
-        const [postCount] = await sequelize.query(
-            `SELECT COUNT(*) as count FROM posts WHERE user_id = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const postCount = await prisma.post.count({
+            where: { user_id: userId }
+        });
 
         // Get comment count
-        const [commentCount] = await sequelize.query(
-            `SELECT COUNT(*) as count FROM comments WHERE commentor_id = $1`,
-            {
-                bind: [req.user.id],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const commentCount = await prisma.comment.count({
+            where: { commentor_id: userId }
+        });
 
         // Get like count
-        const [likeCount] = await sequelize.query(
-            `SELECT COUNT(*) as count FROM post_likes WHERE user_id = $1`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.SELECT
-            }
-        );
+        const likeCount = await prisma.postLike.count({
+            where: { user_id: userId }
+        });
 
         res.json({
             status: 'success',
             data: {
                 statistics: {
-                    posts_count: parseInt(postCount.count),
+                    posts_count: postCount,
                     total_profile_views: user.total_profile_views,
                     total_likes: user.likes,
                     total_subscribers: user.subscribers,
-                    total_comments: parseInt(commentCount.count),
-                    total_likes_given: parseInt(likeCount.count)
+                    total_comments: commentCount,
+                    total_likes_given: likeCount
                 }
             }
         });
