@@ -261,7 +261,10 @@ exports.login = async (req, res) => {
         );
 
         const refreshToken = jwt.sign(
-            { id: user.id },
+            { 
+                id: user.id,
+                role: user.role
+            },
             process.env.JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
