@@ -325,10 +325,13 @@ exports.addSearchTerm = async (req, res) => {
             // Add new search term
             recentSearches.push(searchTerm);
             
-            // Update the user with raw SQL
+            // Filter out undefined values before updating
+            const filteredSearches = recentSearches.filter(term => term !== undefined && term !== null);
+            
+            // Update the user with Prisma
             await prisma.user.update({
                 where: { username: username },
-                data: { recent_searches: recentSearches }
+                data: { recent_searches: filteredSearches }
             });
         }
 
