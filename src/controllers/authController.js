@@ -402,21 +402,55 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Remove sensitive fields that shouldn't be updated directly
-    const { password, role, ...safeUpdateData } = updateData;
+    const { password, role, country, ...safeUpdateData } = updateData;
+    
+    // Handle country update if provided
+    let userUpdateData = {
+      ...safeUpdateData,
+      updatedAt: new Date()
+    };
+    
+    if (country) {
+      // Find country by name to get the ID
+      const countryRecord = await prisma.country.findFirst({
+        where: {
+          name: {
+            mode: 'insensitive',
+            equals: country
+          }
+        },
+        select: { id: true }
+      });
+      
+      if (countryRecord) {
+        userUpdateData.country_id = countryRecord.id;
+      } else {
+        return res.status(400).json({
+          status: 'error',
+          message: `Country '${country}' not found`
+        });
+      }
+    }
     
     // Update the user
     const updatedUser = await prisma.user.update({
       where: { id: targetUserId },
-      data: {
-        ...safeUpdateData,
-        updatedAt: new Date()
-      },
+      data: userUpdateData,
       select: {
         id: true,
         username: true,
         email: true,
         phone1: true,
         phone2: true,
+        country_id: true,
+        country: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            flag_emoji: true
+          }
+        },
         updatedAt: true
       }
     });
