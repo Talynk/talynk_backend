@@ -223,35 +223,34 @@ exports.searchPosts = async (req, res) => {
 exports.getDashboardData = async (req, res) => {
     try {
         // Get counts for different post statuses
-        const totalPosts = await Post.count();
-        const pendingPosts = await Post.count({ where: { status: 'pending' } });
-        const approvedPosts = await Post.count({ where: { status: 'approved' } });
-        const rejectedPosts = await Post.count({ where: { status: 'rejected' } });
+        const totalPosts = await prisma.post.count();
+        const pendingPosts = await prisma.post.count({ where: { status: 'pending' } });
+        const approvedPosts = await prisma.post.count({ where: { status: 'approved' } });
+        const rejectedPosts = await prisma.post.count({ where: { status: 'rejected' } });
 
         // Get recent posts with their authors and categories
-        const recentPosts = await Post.findAll({
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+        const recentPosts = await prisma.post.findMany({
+            include: {
+                author: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
-                }
-            ],
-            order: [['createdAt', 'DESC']],
-            limit: 10
+                category: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            },
+            take: 10
         });
 
         // Process media URLs for recent posts
         const processedPosts = recentPosts.map(post => {
-            const postObj = post.toJSON();
-            if (postObj.mediaUrl && !postObj.mediaUrl.startsWith('http')) {
-                postObj.mediaUrl = `/uploads/${postObj.mediaUrl.replace(/^uploads\//, '')}`;
+            if (post.mediaUrl && !post.mediaUrl.startsWith('http')) {
+                post.mediaUrl = `/uploads/${post.mediaUrl.replace(/^uploads\//, '')}`;
             }
-            return postObj;
+            return post;
         });
 
         res.json({
@@ -433,19 +432,14 @@ exports.updatePostStatus = async (req, res) => {
             }
 
             // Insert notification
-            await sequelize.query(
-                `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-                 VALUES ($1, $2, $3, $4)`,
-                {
-                    bind: [
-                        post.user.id,
-                        notificationText,
-                        new Date(),
-                        false
-                    ],
-                    type: sequelize.QueryTypes.INSERT
+            await prisma.notification.create({
+                data: {
+                    userID: post.user.id,
+                    message: notificationText,
+                    type: 'post_status_update',
+                    isRead: false
                 }
-            );
+            });
             
             console.log(`Notification sent to user ${post.user.id} for post ${post.id} with status ${status}`);
         }
@@ -904,19 +898,20 @@ exports.getAllUsers = async (req, res) => {
         const pendingCountMap = {};
             
         approvedCounts.forEach(count => {
-            approvedCountMap[count.user_id] = parseInt(count.dataValues.count, 10);
+            approvedCountMap[count.user_id] = count._count.id;
         });
             
         pendingCounts.forEach(count => {
-            pendingCountMap[count.user_id] = parseInt(count.dataValues.count, 10);
+            pendingCountMap[count.user_id] = count._count.id;
         });
 
         // Enhance user objects with post counts
         const enhancedUsers = users.map(user => {
-            const userData = user.toJSON();
-            userData.postsApproved = approvedCountMap[userData.id] || 0;
-            userData.postsPending = pendingCountMap[userData.id] || 0;
-            return userData;
+            return {
+                ...user,
+                postsApproved: approvedCountMap[user.id] || 0,
+                postsPending: pendingCountMap[user.id] || 0
+            };
         });
 
         res.json({
