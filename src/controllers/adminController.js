@@ -969,22 +969,23 @@ exports.getRecentActivity = async (req, res) => {
 
 exports.getApprovers = async (req, res) => {
     try {
-        const approvers = await Approver.findAll({
-            attributes: [
-                'id',
-                'username',
-                'email',
-                'status',
-                'createdAt',
-                'lastLoginAt',
-                [
-                    sequelize.literal('(SELECT COUNT(*) FROM posts WHERE posts.approver_id = "Approver".id)'),
-                    'totalApprovedPosts'
-                ]
-            ],
-            order: [
-                ['createdAt', 'DESC']
-            ]
+        const approvers = await prisma.approver.findMany({
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                createdAt: true,
+                last_login: true,
+                _count: {
+                    select: {
+                        approvedPosts: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Process approvers data
@@ -994,8 +995,8 @@ exports.getApprovers = async (req, res) => {
             email: approver.email,
             status: approver.status,
             joinedDate: approver.createdAt,
-            lastActive: approver.lastLoginAt,
-            totalApprovedPosts: approver.getDataValue('totalApprovedPosts') || 0,
+            lastActive: approver.last_login,
+            totalApprovedPosts: approver._count.approvedPosts || 0,
             performance: {
                 approvalRate: 0,
                 averageResponseTime: 0
@@ -1042,21 +1043,27 @@ exports.getApproverDetails = async (req, res) => {
         }
 
         // Get recent approved posts using a separate query
-        const recentPosts = await Post.findAll({
+        const recentPosts = await prisma.post.findMany({
             where: { approver_id: id },
-            attributes: ['id', 'title', 'status', 'createdAt'],
-            limit: 10,
-            order: [['createdAt', 'DESC']]
+            select: {
+                id: true,
+                title: true,
+                status: true,
+                createdAt: true
+            },
+            take: 10,
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Get statistics
-        const stats = await Post.findAll({
+        const stats = await prisma.post.groupBy({
+            by: ['status'],
             where: { approver_id: id },
-            attributes: [
-                'status',
-                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-            ],
-            group: ['status']
+            _count: {
+                id: true
+            }
         });
 
         // Process statistics
