@@ -869,27 +869,34 @@ exports.uploadAd = async (req, res) => {
 exports.getAllUsers = async (req, res) => {
     try {
         // Get users with basic information
-        const users = await User.findAll({
-            attributes: ['id', 'username', 'email', 'createdAt', 'status', 'posts_count', 'phone1', 'phone2']
+        const users = await prisma.user.findMany({
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                createdAt: true,
+                status: true,
+                posts_count: true,
+                phone1: true,
+                phone2: true
+            }
         });
 
         // Get approved and pending post counts for all users
-        const approvedCounts = await Post.findAll({
-            attributes: [
-                'user_id',
-                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-            ],
+        const approvedCounts = await prisma.post.groupBy({
+            by: ['user_id'],
             where: { status: 'approved' },
-            group: ['user_id']
+            _count: {
+                id: true
+            }
         });
 
-        const pendingCounts = await Post.findAll({
-            attributes: [
-                'user_id',
-                [sequelize.fn('COUNT', sequelize.col('id')), 'count']
-            ],
+        const pendingCounts = await prisma.post.groupBy({
+            by: ['user_id'],
             where: { status: 'pending' },
-            group: ['user_id']
+            _count: {
+                id: true
+            }
         });
 
         // Create lookup maps for quick access

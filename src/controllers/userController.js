@@ -644,15 +644,15 @@ exports.markAllNotificationsAsRead = async (req, res) => {
         console.log(`Marking all notifications as read for user ID: ${userId}`);
         
         // Update all unread notifications for the user
-        const result = await sequelize.query(
-            `UPDATE notifications 
-             SET is_read = true 
-             WHERE user_id = $1 AND is_read = false`,
-            {
-                bind: [userId],
-                type: sequelize.QueryTypes.UPDATE
+        const result = await prisma.notification.updateMany({
+            where: { 
+                userID: userId,
+                isRead: false
+            },
+            data: {
+                isRead: true
             }
-        );
+        });
         
         res.json({
             status: 'success',
