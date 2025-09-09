@@ -284,57 +284,66 @@ exports.getPosts = async (req, res) => {
             where.status = status;
         }
 
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where,
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
                 },
-                {
-                    model: User,
-                    as: 'approver',
-                    attributes: ['id', 'username']
+                approver: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category'
+                category: true,
+                likes: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true
+                            }
+                        }
+                    }
                 },
-                {
-                    model: Like,
-                    as: 'likes',
-                    include: [{
-                        model: User,
-                        attributes: ['id', 'username']
-                    }]
+                comments: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true
+                            }
+                        }
+                    }
                 },
-                {
-                    model: Comment,
-                    as: 'comments',
-                    include: [{
-                        model: User,
-                        attributes: ['id', 'username']
-                    }]
+                shares: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true
+                            }
+                        }
+                    }
                 },
-                {
-                    model: Share,
-                    as: 'shares',
-                    include: [{
-                        model: User,
-                        attributes: ['id', 'username']
-                    }]
-                },
-                {
-                    model: View,
-                    as: 'views',
-                    include: [{
-                        model: User,
-                        attributes: ['id', 'username']
-                    }]
+                views: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true
+                            }
+                        }
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         res.json({
@@ -354,21 +363,25 @@ exports.getPosts = async (req, res) => {
 // Get pending posts
 exports.getPendingPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: { status: 'pending' },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                category: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
                 }
-            ],
-            order: [['created_at', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         res.json({
@@ -392,12 +405,16 @@ exports.updatePostStatus = async (req, res) => {
         console.log("Post: --------> " + req.body)
         
         // Find post with user information
-        const post = await Post.findByPk(req.body.id, {
-            include: [{
-                model: User,
-                as: 'user',
-                attributes: ['id', 'username']
-            }]
+        const post = await prisma.post.findUnique({
+            where: { id: req.body.id },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
+                }
+            }
         });
         
         if (!post) {
@@ -414,11 +431,14 @@ exports.updatePostStatus = async (req, res) => {
             });
         }
 
-        await post.update({
-            status,
-            rejectionReason: status === 'rejected' ? rejectionReason : null,
-            approverId: req.user.id,
-            approvedAt: status === 'approved' ? new Date() : null
+        await prisma.post.update({
+            where: { id: req.body.id },
+            data: {
+                status,
+                rejectionReason: status === 'rejected' ? rejectionReason : null,
+                approver_id: req.user.id,
+                approved_at: status === 'approved' ? new Date() : null
+            }
         });
 
         // Create notification for post owner
@@ -460,39 +480,15 @@ exports.updatePostStatus = async (req, res) => {
 // Get admin dashboard stats
 exports.getDashboardStats = async (req, res) => {
     try {
-        // Verify models are loaded
-        console.log('Models:', { User, Approver, Post });
-
-        // Get counts with error handling for each query
+        // Get counts using Prisma
         const stats = await Promise.all([
-            User ? User.count().catch(err => {
-                console.error('Error counting users:', err);
-                return 0;
-            }) : 0,
-            Approver ? Approver.count().catch(err => {
-                console.error('Error counting approvers:', err);
-                return 0;
-            }) : 0,
-            Post ? Post.count({ where: { status: 'pending' } }).catch(err => {
-                console.error('Error counting pending posts:', err);
-                return 0;
-            }) : 0,
-            Post ? Post.count({ where: { status: 'approved' } }).catch(err => {
-                console.error('Error counting approved posts:', err);
-                return 0;
-            }) : 0,
-            Post ? Post.count({ where: { status: 'rejected' } }).catch(err => {
-                console.error('Error counting rejected posts:', err);
-                return 0;
-            }) : 0,
-            User ? User.count({ where: { status: 'active' } }).catch(err => {
-                console.error('Error counting active users:', err);
-                return 0;
-            }) : 0,
-            User ? User.count({ where: { status: 'frozen' } }).catch(err => {
-                console.error('Error counting frozen users:', err);
-                return 0;
-            }) : 0
+            prisma.user.count(),
+            prisma.approver.count(),
+            prisma.post.count({ where: { status: 'pending' } }),
+            prisma.post.count({ where: { status: 'approved' } }),
+            prisma.post.count({ where: { status: 'rejected' } }),
+            prisma.user.count({ where: { status: 'active' } }),
+            prisma.user.count({ where: { status: 'frozen' } })
         ]);
 
         const [totalUsers, totalApprovers, pendingVideos, approvedVideos, rejectedVideos, activeUsers, frozenUsers] = stats;
@@ -525,7 +521,9 @@ exports.manageUserAccount = async (req, res) => {
         const { id, action } = req.body;
 
         // First, get the current user status
-        const user = await User.findByPk(id);
+        const user = await prisma.user.findUnique({
+            where: { id }
+        });
         
         if (!user) {
             return res.status(404).json({
@@ -562,10 +560,10 @@ exports.manageUserAccount = async (req, res) => {
         }
 
         // Update the user status
-        await User.update(
-            { status: newStatus },
-            { where: { id } }
-        );
+        await prisma.user.update({
+            where: { id },
+            data: { status: newStatus }
+        });
 
         res.json({
             status: 'success',
@@ -598,35 +596,46 @@ exports.getApprovedPosts = async (req, res) => {
         if (date) {
             const searchDate = new Date(date);
             whereClause.approved_at = {
-                [Op.gte]: searchDate,
-                [Op.lt]: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                gte: searchDate,
+                lt: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
             };
         }
 
         if (search) {
             whereClause.title = {
-                [Op.like]: `%${search}%`
+                contains: search,
+                mode: 'insensitive'
             };
         }
 
-        const posts = await Post.findAndCountAll({
-            where: whereClause,
-            include: [{
-                model: User,
-                as: 'user',
-                attributes: ['username', 'email']
-            }],
-            order: [['approved_at', 'DESC']],
-            limit: parseInt(limit),
-            offset: (page - 1) * limit
-        });
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            username: true,
+                            email: true
+                        }
+                    }
+                },
+                orderBy: {
+                    approved_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: (page - 1) * limit
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
 
         res.json({
             status: 'success',
             data: {
-                posts: posts.rows,
-                total: posts.count,
-                pages: Math.ceil(posts.count / limit),
+                posts: posts,
+                total: total,
+                pages: Math.ceil(total / limit),
                 currentPage: parseInt(page)
             }
         });
@@ -642,11 +651,14 @@ exports.getApprovedPosts = async (req, res) => {
 // Video Management
 exports.getAllVideos = async (req, res) => {
     try {
-        const videos = await Post.findAll({
-            include: [{
-                model: User,
-                attributes: ['username']
-            }]
+        const videos = await prisma.post.findMany({
+            include: {
+                user: {
+                    select: {
+                        username: true
+                    }
+                }
+            }
         });
         res.json({
             status: 'success',
@@ -1407,32 +1419,36 @@ exports.searchByTraceId = async (req, res) => {
 
 exports.getRejectedPosts = async (req, res) => {
     try {
-        const posts = await Post.findAll({
+        const posts = await prisma.post.findMany({
             where: {
                 status: 'rejected'
             },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email']
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
                 },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                category: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
                 }
-            ],
-            order: [['createdAt', 'DESC']]
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
         });
 
         // Add full URLs for files
         const postsWithUrls = posts.map(post => {
-            const postData = post.toJSON();
-            if (postData.video_url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+            if (post.video_url) {
+                post.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}`;
             }
-            return postData;
+            return post;
         });
 
         res.json({

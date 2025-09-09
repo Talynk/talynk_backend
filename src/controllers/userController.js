@@ -45,7 +45,6 @@ exports.getProfile = async (req, res) => {
         const transformedUser = user ? {
             ...user,
             fullName: user.username,
-            profilePicture: user.profile_picture,
             postsCount: user.posts_count,
             followersCount: user.follower_count
         } : null;
@@ -865,63 +864,64 @@ exports.getUserPostsById = async (req, res) => {
             whereClause.status = status;
         }
 
-        // Use Sequelize model queries rather than raw SQL
-        // Find the count first
-        const { count: totalCount } = await Post.findAndCountAll({
-            where: whereClause
-        });
-
-        // Get the posts with all needed data
-        const posts = await Post.findAll({
-            where: whereClause,
-            include: [
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['name']
+        // Use Prisma to get posts with count
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    category: {
+                        select: {
+                            name: true
+                        }
+                    },
+                    user: {
+                        select: {
+                            username: true,
+                            profile_picture: true
+                        }
+                    }
                 },
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['username', 'profile_picture']
-                }
-            ],
-            order: [['created_at', 'DESC']],
-            limit: limit,
-            offset: offset
-        });
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                take: limit,
+                skip: offset
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
 
         // Transform to match the expected format
-        const formattedPosts = posts.map(post => {
-            const postData = post.toJSON();
-            return {
-                id: postData.id,
-                title: postData.title,
-                description: postData.description,
-                videoUrl: postData.video_url,
-                mediaType: postData.video_url ? 'video' : 'image',
-                created_at: postData.created_at,
-                likesCount: postData.likes || 0,
-                category_id: postData.category_id,
-                categoryName: postData.category?.name,
-                commentsCount: postData.comment_count || 0,
-                authorName: postData.user?.username,
-                authorProfilePicture: postData.user?.profile_picture
-            };
-        });
+        const formattedPosts = posts.map(post => ({
+            id: post.id,
+            title: post.title,
+            description: post.description,
+            videoUrl: post.video_url,
+            mediaType: post.video_url ? 'video' : 'image',
+            created_at: post.createdAt,
+            likesCount: post.likes || 0,
+            category_id: post.category_id,
+            categoryName: post.category?.name,
+            commentsCount: post.comment_count || 0,
+            authorName: post.user?.username,
+            authorProfilePicture: post.user?.profile_picture
+        }));
 
         // Check if user liked these posts
         if (currentUserId && formattedPosts.length > 0) {
             const postIds = formattedPosts.map(post => post.id);
             
-            const likedPosts = await PostLike.findAll({
+            const likedPosts = await prisma.postLike.findMany({
                 where: {
                     user_id: currentUserId,
                     post_id: {
-                        [Op.in]: postIds
+                        in: postIds
                     }
                 },
-                attributes: ['post_id']
+                select: {
+                    post_id: true
+                }
             });
             
             const likedPostIdSet = new Set(likedPosts.map(like => like.post_id));
@@ -970,69 +970,70 @@ exports.getUserApprovedPosts = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
-        // Use Sequelize model queries rather than raw SQL
-        // Find the count first - only approved posts
-        const { count: totalCount } = await Post.findAndCountAll({
-            where: { 
-                user_id: userId,
-                status: 'approved'
-            }
-        });
-
-        // Get the posts with all needed data - only approved posts
-        const posts = await Post.findAll({
-            where: {
-                user_id: userId,
-                status: 'approved'
-            },
-            include: [
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['name']
+        // Use Prisma to get approved posts with count
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: {
+                    user_id: userId,
+                    status: 'approved'
                 },
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['username', 'profile_picture']
+                include: {
+                    category: {
+                        select: {
+                            name: true
+                        }
+                    },
+                    user: {
+                        select: {
+                            username: true,
+                            profile_picture: true
+                        }
+                    }
+                },
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                take: limit,
+                skip: offset
+            }),
+            prisma.post.count({
+                where: {
+                    user_id: userId,
+                    status: 'approved'
                 }
-            ],
-            order: [['created_at', 'DESC']],
-            limit: limit,
-            offset: offset
-        });
+            })
+        ]);
 
         // Transform to match the expected format
-        const formattedPosts = posts.map(post => {
-            const postData = post.toJSON();
-            return {
-                id: postData.id,
-                title: postData.title,
-                description: postData.description,
-                videoUrl: postData.video_url,
-                mediaType: postData.video_url ? 'video' : 'image',
-                created_at: postData.created_at,
-                likesCount: postData.likes || 0,
-                category_id: postData.category_id,
-                categoryName: postData.category?.name,
-                commentsCount: postData.comment_count || 0,
-                authorName: postData.user?.username,
-                authorProfilePicture: postData.user?.profile_picture
-            };
-        });
+        const formattedPosts = posts.map(post => ({
+            id: post.id,
+            title: post.title,
+            description: post.description,
+            videoUrl: post.video_url,
+            mediaType: post.video_url ? 'video' : 'image',
+            created_at: post.createdAt,
+            likesCount: post.likes || 0,
+            category_id: post.category_id,
+            categoryName: post.category?.name,
+            commentsCount: post.comment_count || 0,
+            authorName: post.user?.username,
+            authorProfilePicture: post.user?.profile_picture
+        }));
 
         // Check if user liked these posts
         if (currentUserId && formattedPosts.length > 0) {
             const postIds = formattedPosts.map(post => post.id);
             
-            const likedPosts = await PostLike.findAll({
+            const likedPosts = await prisma.postLike.findMany({
                 where: {
                     user_id: currentUserId,
                     post_id: {
-                        [Op.in]: postIds
+                        in: postIds
                     }
                 },
-                attributes: ['post_id']
+                select: {
+                    post_id: true
+                }
             });
             
             const likedPostIdSet = new Set(likedPosts.map(like => like.post_id));
