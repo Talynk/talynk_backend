@@ -577,6 +577,129 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
+## 💬 Comment Routes (`/api/posts`)
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/:postId/comments` | Add comment to post | ✅ |
+| GET | `/:postId/comments` | Get post comments | ❌ |
+| DELETE | `/comments/:commentId` | Delete comment | ✅ |
+| POST | `/comments/:commentId/report` | Report comment | ✅ |
+
+### Comment API Examples
+
+#### POST `/api/posts/:postId/comments`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "content": "Great post! Love the creativity 🔥"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Comment added successfully",
+  "data": {
+    "comment": {
+      "id": "comment-uuid-here",
+      "content": "Great post! Love the creativity 🔥",
+      "user": {
+        "id": "user-uuid-here",
+        "username": "commenter123",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/profile.jpg"
+      },
+      "post_id": "post-uuid-here",
+      "createdAt": "2025-01-07T10:30:00.000Z"
+    }
+  }
+}
+```
+
+#### GET `/api/posts/:postId/comments`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "comments": [
+      {
+        "id": "comment-uuid-1",
+        "content": "Amazing work! 🔥",
+        "user": {
+          "id": "user-uuid-1",
+          "username": "fan123",
+          "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/fan.jpg"
+        },
+        "createdAt": "2025-01-07T10:30:00.000Z"
+      },
+      {
+        "id": "comment-uuid-2",
+        "content": "Love this! Keep it up!",
+        "user": {
+          "id": "user-uuid-2",
+          "username": "supporter456",
+          "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/supporter.jpg"
+        },
+        "createdAt": "2025-01-07T10:25:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 15,
+      "totalPages": 2
+    }
+  }
+}
+```
+
+#### DELETE `/api/posts/comments/:commentId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Comment deleted successfully"
+}
+```
+
+#### POST `/api/posts/comments/:commentId/report`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This comment contains offensive language"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Comment reported successfully"
+}
+```
+
+---
+
 ## 📝 Post Routes (`/api/posts`)
 
 | Method | Endpoint | Description | Auth Required |
@@ -920,6 +1043,116 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/users/:userId/following` | Get user following | ❌ |
 | GET | `/check/:followingId` | Check follow status | ✅ |
 
+### Follow API Examples
+
+#### POST `/api/follows/`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "followingId": "user-uuid-to-follow"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "User followed successfully",
+  "data": {
+    "following": {
+      "id": "follow-uuid-here",
+      "follower_id": "current-user-uuid",
+      "following_id": "user-uuid-to-follow",
+      "createdAt": "2025-01-07T10:30:00.000Z"
+    }
+  }
+}
+```
+
+#### DELETE `/api/follows/:followingId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "User unfollowed successfully"
+}
+```
+
+#### GET `/api/follows/users/:userId/followers`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "followers": [
+      {
+        "id": "follower-uuid-1",
+        "username": "follower123",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/follower.jpg",
+        "followedAt": "2025-01-07T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 150,
+      "totalPages": 15
+    }
+  }
+}
+```
+
+#### GET `/api/follows/users/:userId/following`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "following": [
+      {
+        "id": "following-uuid-1",
+        "username": "artist123",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/artist.jpg",
+        "followedAt": "2025-01-07T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 45,
+      "totalPages": 5
+    }
+  }
+}
+```
+
+#### GET `/api/follows/check/:followingId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "isFollowing": true
+  }
+}
+```
+
 ---
 
 ## ❤️ Like Routes (`/api/likes`)
@@ -932,6 +1165,135 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/posts/:postId/stats` | Get post like statistics | ❌ |
 | GET | `/user/liked` | Get user's liked posts | ✅ |
 
+### Like API Examples
+
+#### POST `/api/likes/posts/:postId/toggle`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Post liked successfully",
+  "data": {
+    "isLiked": true,
+    "likeCount": 46
+  }
+}
+```
+
+#### GET `/api/likes/posts/:postId/status`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "isLiked": true,
+    "likeCount": 45
+  }
+}
+```
+
+#### POST `/api/likes/posts/batch-status`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "postIds": ["post-uuid-1", "post-uuid-2", "post-uuid-3"]
+}
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "post-uuid-1": { "isLiked": true, "likeCount": 45 },
+    "post-uuid-2": { "isLiked": false, "likeCount": 23 },
+    "post-uuid-3": { "isLiked": true, "likeCount": 67 }
+  }
+}
+```
+
+#### GET `/api/likes/posts/:postId/stats`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "totalLikes": 45,
+    "recentLikes": [
+      {
+        "user": {
+          "id": "user-uuid-1",
+          "username": "fan123",
+          "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/fan.jpg"
+        },
+        "likedAt": "2025-01-07T10:30:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/likes/user/liked`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Amazing Song",
+        "caption": "This is incredible!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/song.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/thumb.jpg",
+        "status": "approved",
+        "likes": 89,
+        "views": 450,
+        "shares": 23,
+        "comments_count": 34,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "musician123"
+        },
+        "isLiked": true,
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 25,
+      "totalPages": 3
+    }
+  }
+}
+```
+
 ---
 
 ## 👀 View Routes (`/api/views`)
@@ -942,6 +1304,86 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/posts/:postId/stats` | Get post view statistics | ❌ |
 | GET | `/trending` | Get trending posts | ❌ |
 | POST | `/batch-update` | Batch update view counts | ✅ |
+
+### View API Examples
+
+#### POST `/api/views/posts/:postId`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "View recorded",
+  "data": {
+    "viewRecorded": true,
+    "viewCount": 121
+  }
+}
+```
+
+#### GET `/api/views/posts/:postId/stats`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "totalViews": 120,
+    "uniqueUserViews": 95,
+    "anonymousViews": 25,
+    "recentViews": [
+      {
+        "user": {
+          "id": "user-uuid-1",
+          "username": "viewer123",
+          "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/viewer.jpg"
+        },
+        "viewedAt": "2025-01-07T10:30:00.000Z",
+        "isAnonymous": false
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/views/trending`
+**Query Parameters:**
+```
+?period=24h&limit=20
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Viral Song",
+        "caption": "This is trending everywhere!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/viral.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/viral_thumb.jpg",
+        "status": "approved",
+        "likes": 89,
+        "views": 450,
+        "shares": 23,
+        "comments_count": 34,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "viralartist"
+        },
+        "trendingScore": 1250,
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ],
+    "period": "24h",
+    "generatedAt": "2025-01-07T10:30:00.000Z"
+  }
+}
+```
 
 ---
 
@@ -955,6 +1397,168 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | PUT | `/:reportId/review` | Review a report | ✅ Admin |
 | GET | `/stats` | Get report statistics | ✅ Admin |
 
+### Report API Examples
+
+#### POST `/api/reports/posts/:postId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This post contains inappropriate content"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Post reported successfully",
+  "data": {
+    "report": {
+      "id": "report-uuid-here",
+      "post_id": "post-uuid-here",
+      "user_id": "user-uuid-here",
+      "reason": "inappropriate_content",
+      "description": "This post contains inappropriate content",
+      "status": "pending",
+      "createdAt": "2025-01-07T10:30:00.000Z"
+    }
+  }
+}
+```
+
+#### GET `/api/reports/`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "reports": [
+      {
+        "id": "report-uuid-1",
+        "reason": "inappropriate_content",
+        "description": "This post contains inappropriate content",
+        "status": "pending",
+        "post": {
+          "id": "post-uuid-1",
+          "title": "Reported Post",
+          "user": {
+            "id": "user-uuid-1",
+            "username": "poster123"
+          }
+        },
+        "reporter": {
+          "id": "user-uuid-2",
+          "username": "reporter456"
+        },
+        "createdAt": "2025-01-07T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 25,
+      "totalPages": 3
+    }
+  }
+}
+```
+
+#### GET `/api/reports/posts/:postId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "reports": [
+      {
+        "id": "report-uuid-1",
+        "reason": "inappropriate_content",
+        "description": "This post contains inappropriate content",
+        "status": "pending",
+        "reporter": {
+          "id": "user-uuid-2",
+          "username": "reporter456"
+        },
+        "createdAt": "2025-01-07T10:30:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### PUT `/api/reports/:reportId/review`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "status": "resolved",
+  "admin_notes": "Content reviewed and found to be appropriate"
+}
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Report reviewed successfully",
+  "data": {
+    "report": {
+      "id": "report-uuid-1",
+      "status": "resolved",
+      "admin_notes": "Content reviewed and found to be appropriate",
+      "reviewedAt": "2025-01-07T10:35:00.000Z"
+    }
+  }
+}
+```
+
+#### GET `/api/reports/stats`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "totalReports": 150,
+    "pendingReports": 25,
+    "resolvedReports": 100,
+    "rejectedReports": 25,
+    "reportsByReason": {
+      "inappropriate_content": 60,
+      "spam": 40,
+      "harassment": 30,
+      "copyright": 20
+    }
+  }
+}
+```
+
 ---
 
 ## ⭐ Featured Routes (`/api/featured`)
@@ -966,6 +1570,141 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | POST | `/posts/:postId` | Feature a post | ✅ Admin |
 | DELETE | `/posts/:postId` | Unfeature a post | ✅ Admin |
 
+### Featured API Examples
+
+#### GET `/api/featured/`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Featured Song",
+        "caption": "This is a featured post!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/featured.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/featured_thumb.jpg",
+        "status": "approved",
+        "likes": 89,
+        "views": 450,
+        "shares": 23,
+        "comments_count": 34,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "featuredartist"
+        },
+        "featured": {
+          "reason": "High engagement and quality content",
+          "featuredAt": "2025-01-07T10:00:00.000Z",
+          "expiresAt": "2025-01-14T10:00:00.000Z"
+        },
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/featured/admin`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Featured Song",
+        "caption": "This is a featured post!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/featured.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/featured_thumb.jpg",
+        "status": "approved",
+        "likes": 89,
+        "views": 450,
+        "shares": 23,
+        "comments_count": 34,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "featuredartist"
+        },
+        "featured": {
+          "reason": "High engagement and quality content",
+          "featuredAt": "2025-01-07T10:00:00.000Z",
+          "expiresAt": "2025-01-14T10:00:00.000Z"
+        },
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 5,
+      "totalPages": 1
+    }
+  }
+}
+```
+
+#### POST `/api/featured/posts/:postId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "reason": "High engagement and quality content",
+  "expiresAt": "2025-01-14T10:00:00.000Z"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Post featured successfully",
+  "data": {
+    "featured": {
+      "id": "featured-uuid-here",
+      "post_id": "post-uuid-here",
+      "reason": "High engagement and quality content",
+      "featuredAt": "2025-01-07T10:30:00.000Z",
+      "expiresAt": "2025-01-14T10:00:00.000Z"
+    }
+  }
+}
+```
+
+#### DELETE `/api/featured/posts/:postId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Post unfeatured successfully"
+}
+```
+
 ---
 
 ## 🎯 Recommendation Routes (`/api/recommendations`)
@@ -976,6 +1715,140 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/trending` | Get trending posts | ❌ |
 | GET | `/categories` | Get recommended categories | ✅ |
 | POST | `/interactions/:postId` | Record user interaction | ✅ |
+
+### Recommendation API Examples
+
+#### GET `/api/recommendations/feed`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Recommended Song",
+        "caption": "Based on your interests!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/recommended.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/recommended_thumb.jpg",
+        "status": "approved",
+        "likes": 45,
+        "views": 120,
+        "shares": 8,
+        "comments_count": 12,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "recommendedartist"
+        },
+        "recommendationScore": 0.85,
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 50,
+      "totalPages": 5
+    }
+  }
+}
+```
+
+#### GET `/api/recommendations/trending`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "Trending Song",
+        "caption": "This is trending everywhere!",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/trending.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/trending_thumb.jpg",
+        "status": "approved",
+        "likes": 89,
+        "views": 450,
+        "shares": 23,
+        "comments_count": 34,
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "user": {
+          "id": "user-uuid-1",
+          "username": "trendingartist"
+        },
+        "trendingScore": 1250,
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/recommendations/categories`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "categories": [
+      {
+        "id": 1,
+        "name": "Music",
+        "recommendationScore": 0.9,
+        "interactionCount": 25,
+        "subcategories": [
+          {
+            "id": 4,
+            "name": "Rock",
+            "recommendationScore": 0.8
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### POST `/api/recommendations/interactions/:postId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "interaction_type": "like",
+  "duration": 45
+}
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Interaction recorded successfully"
+}
+```
 
 ---
 
@@ -991,6 +1864,175 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | PUT | `/:id` | Update country | ✅ Admin |
 | DELETE | `/:id` | Delete country | ✅ Admin |
 
+### Country API Examples
+
+#### GET `/api/countries/`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "countries": [
+      {
+        "id": 1,
+        "name": "Rwanda",
+        "code": "RW",
+        "flag_emoji": "🇷🇼",
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      },
+      {
+        "id": 2,
+        "name": "Kenya",
+        "code": "KE",
+        "flag_emoji": "🇰🇪",
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/countries/search`
+**Query Parameters:**
+```
+?q=rwanda
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "countries": [
+      {
+        "id": 1,
+        "name": "Rwanda",
+        "code": "RW",
+        "flag_emoji": "🇷🇼"
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/countries/:id`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "country": {
+      "id": 1,
+      "name": "Rwanda",
+      "code": "RW",
+      "flag_emoji": "🇷🇼",
+      "createdAt": "2025-01-07T10:00:00.000Z"
+    }
+  }
+}
+```
+
+#### GET `/api/countries/:id/stats`
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "country": {
+      "id": 1,
+      "name": "Rwanda",
+      "code": "RW",
+      "flag_emoji": "🇷🇼"
+    },
+    "stats": {
+      "totalUsers": 150,
+      "totalPosts": 450,
+      "totalViews": 12500,
+      "totalLikes": 2300
+    }
+  }
+}
+```
+
+#### POST `/api/countries/`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Ghana",
+  "code": "GH",
+  "flag_emoji": "🇬🇭"
+}
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Country created successfully",
+  "data": {
+    "country": {
+      "id": 6,
+      "name": "Ghana",
+      "code": "GH",
+      "flag_emoji": "🇬🇭",
+      "createdAt": "2025-01-07T10:30:00.000Z"
+    }
+  }
+}
+```
+
+#### PUT `/api/countries/:id`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Republic of Rwanda",
+  "flag_emoji": "🇷🇼"
+}
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Country updated successfully",
+  "data": {
+    "country": {
+      "id": 1,
+      "name": "Republic of Rwanda",
+      "code": "RW",
+      "flag_emoji": "🇷🇼",
+      "updatedAt": "2025-01-07T10:35:00.000Z"
+    }
+  }
+}
+```
+
+#### DELETE `/api/countries/:id`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Country deleted successfully"
+}
+```
+
 ---
 
 ## 🔍 Suggestion Routes (`/api/`)
@@ -999,6 +2041,59 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 |--------|----------|-------------|---------------|
 | GET | `/users/suggestions/mutual` | Get mutual user suggestions | ✅ |
 | GET | `/users/suggestions/discover` | Get discover user suggestions | ✅ |
+
+### Suggestion API Examples
+
+#### GET `/api/users/suggestions/mutual`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "suggestions": [
+      {
+        "id": "user-uuid-1",
+        "username": "mutualfriend123",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/mutual.jpg",
+        "mutualConnections": 5,
+        "commonInterests": ["Music", "Art"],
+        "suggestionScore": 0.85
+      }
+    ]
+  }
+}
+```
+
+#### GET `/api/users/suggestions/discover`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "suggestions": [
+      {
+        "id": "user-uuid-2",
+        "username": "newartist456",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/newartist.jpg",
+        "followersCount": 120,
+        "postsCount": 25,
+        "commonInterests": ["Music", "Photography"],
+        "suggestionScore": 0.75
+      }
+    ]
+  }
+}
+```
 
 ---
 
@@ -1010,6 +2105,73 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | DELETE | `/:userId` | Unsubscribe from user | ✅ |
 | GET | `/subscribers` | Get user's subscribers | ✅ |
 
+### Subscription API Examples
+
+#### POST `/api/subscriptions/:userID`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (201):**
+```json
+{
+  "status": "success",
+  "message": "Subscribed successfully",
+  "data": {
+    "subscription": {
+      "id": "subscription-uuid-here",
+      "subscriber_id": "current-user-uuid",
+      "subscribed_to_id": "user-uuid-to-subscribe-to",
+      "createdAt": "2025-01-07T10:30:00.000Z"
+    }
+  }
+}
+```
+
+#### DELETE `/api/subscriptions/:userId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Unsubscribed successfully"
+}
+```
+
+#### GET `/api/subscriptions/subscribers`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "subscribers": [
+      {
+        "id": "subscriber-uuid-1",
+        "username": "subscriber123",
+        "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/subscriber.jpg",
+        "subscribedAt": "2025-01-07T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "limit": 10,
+      "total": 45,
+      "totalPages": 5
+    }
+  }
+}
+```
+
 ---
 
 ## 📢 Advertisement Routes (`/api/ads`)
@@ -1018,6 +2180,49 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 |--------|----------|-------------|---------------|
 | GET | `/` | Get active advertisements | ✅ |
 | DELETE | `/:adId` | Delete advertisement | ✅ Admin |
+
+### Advertisement API Examples
+
+#### GET `/api/ads/`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "advertisements": [
+      {
+        "id": "ad-uuid-1",
+        "title": "Premium Music Course",
+        "description": "Learn music production from professionals",
+        "image_url": "https://example.com/ad-image.jpg",
+        "target_url": "https://example.com/course",
+        "is_active": true,
+        "expires_at": "2025-12-31T23:59:59.000Z",
+        "createdAt": "2025-01-07T10:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+#### DELETE `/api/ads/:adId`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Advertisement deleted successfully"
+}
+```
 
 ---
 
@@ -1032,26 +2237,26 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ## 📊 Route Summary
 
 ### By Authentication Level:
-- **Public Routes**: 25 endpoints
-- **Authenticated Routes**: 35 endpoints  
-- **Admin Only Routes**: 20 endpoints
+- **Public Routes**: 28 endpoints
+- **Authenticated Routes**: 38 endpoints  
+- **Admin Only Routes**: 22 endpoints
 - **Approver Only Routes**: 7 endpoints
 
 ### By Feature:
 - **Authentication**: 5 endpoints
 - **User Management**: 12 endpoints
 - **Post Management**: 6 endpoints
-- **Admin Functions**: 13 endpoints
+- **Admin Functions**: 15 endpoints
 - **Approver Functions**: 7 endpoints
 - **Categories**: 7 endpoints
 - **Comments**: 4 endpoints
-- **Social Features**: 13 endpoints (follows, likes, views)
-- **Content Management**: 8 endpoints (reports, featured, recommendations)
-- **System Features**: 8 endpoints (countries, suggestions, subscriptions, ads)
+- **Social Features**: 15 endpoints (follows, likes, views)
+- **Content Management**: 10 endpoints (reports, featured, recommendations)
+- **System Features**: 10 endpoints (countries, suggestions, subscriptions, ads)
 
-### Total Endpoints: **84**
+### Total Endpoints: **95**
 
-**Note**: 3 like-related endpoints were moved from `/api/posts` to `/api/likes` for better organization.
+**Note**: Like functionality has been moved to dedicated `/api/likes` endpoints for better organization.
 
 ---
 
@@ -1428,6 +2633,51 @@ Register a new admin user.
 }
 ```
 
+### Test Like Data
+
+```json
+{
+  "postId": "post-uuid-here",
+  "userId": "user-uuid-here"
+}
+```
+
+### Test View Data
+
+```json
+{
+  "postId": "post-uuid-here",
+  "userId": "user-uuid-here",
+  "duration": 30
+}
+```
+
+### Test Follow Data
+
+```json
+{
+  "followingId": "user-uuid-to-follow"
+}
+```
+
+### Test Subscription Data
+
+```json
+{
+  "userId": "user-uuid-to-subscribe-to"
+}
+```
+
+### Test Report Data
+
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This post contains inappropriate content",
+  "post_id": "post-uuid-here"
+}
+```
+
 ### Test Featured Post Data
 
 ```json
@@ -1455,6 +2705,250 @@ Register a new admin user.
   "category_id": 1,
   "preference_score": 0.8,
   "interaction_count": 5
+}
+```
+
+---
+
+## 🧪 Individual API Endpoint Test Data
+
+### Authentication Endpoints
+
+#### POST `/api/auth/register`
+```json
+{
+  "username": "newuser123",
+  "email": "newuser123@talynk.com",
+  "password": "password123",
+  "phone1": "+250788123456",
+  "country": "Rwanda"
+}
+```
+
+#### POST `/api/auth/login`
+```json
+{
+  "email": "newuser123@talynk.com",
+  "password": "password123"
+}
+```
+
+#### POST `/api/auth/refresh-token`
+```json
+{
+  "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InVzZXItdXVpZCIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzU3MjI4MzMwLCJleHAiOjE3NTc4MzMxMzB9.example"
+}
+```
+
+#### PUT `/api/auth/profile`
+```json
+{
+  "phone1": "+250788999888",
+  "country": "Kenya"
+}
+```
+
+### User Management Endpoints
+
+#### PUT `/api/user/interests`
+```json
+{
+  "interests": ["Music", "Arts", "Photography", "Dancing", "Cooking"]
+}
+```
+
+#### PUT `/api/user/country`
+```json
+{
+  "country": "Kenya"
+}
+```
+
+#### POST `/api/user/searches`
+```json
+{
+  "term": "guitar lessons"
+}
+```
+
+### Post Management Endpoints
+
+#### POST `/api/posts`
+```json
+{
+  "title": "My New Song",
+  "caption": "Check out my latest track! #music #original",
+  "post_category": "Music",
+  "subcategory": "Afrobeats",
+  "type": "video",
+  "content": "Original music content"
+}
+```
+
+### Comment Endpoints
+
+#### POST `/api/posts/:postId/comments`
+```json
+{
+  "content": "Great post! Love the creativity 🔥"
+}
+```
+
+#### POST `/api/posts/comments/:commentId/report`
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This comment contains offensive language"
+}
+```
+
+### Follow Endpoints
+
+#### POST `/api/follows/`
+```json
+{
+  "followingId": "user-uuid-to-follow"
+}
+```
+
+### Like Endpoints
+
+#### POST `/api/likes/posts/batch-status`
+```json
+{
+  "postIds": ["post-uuid-1", "post-uuid-2", "post-uuid-3"]
+}
+```
+
+### Report Endpoints
+
+#### POST `/api/reports/posts/:postId`
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This post contains inappropriate content"
+}
+```
+
+#### PUT `/api/reports/:reportId/review`
+```json
+{
+  "status": "resolved",
+  "admin_notes": "Content reviewed and found to be appropriate"
+}
+```
+
+### Featured Endpoints
+
+#### POST `/api/featured/posts/:postId`
+```json
+{
+  "reason": "High engagement and quality content",
+  "expiresAt": "2025-01-14T10:00:00.000Z"
+}
+```
+
+### Recommendation Endpoints
+
+#### POST `/api/recommendations/interactions/:postId`
+```json
+{
+  "interaction_type": "like",
+  "duration": 45
+}
+```
+
+### Subscription Endpoints
+
+#### POST `/api/subscriptions/:userID`
+```json
+{
+  "userId": "user-uuid-to-subscribe-to"
+}
+```
+
+### Country Endpoints
+
+#### POST `/api/countries/`
+```json
+{
+  "name": "Ghana",
+  "code": "GH",
+  "flag_emoji": "🇬🇭"
+}
+```
+
+#### PUT `/api/countries/:id`
+```json
+{
+  "name": "Republic of Rwanda",
+  "flag_emoji": "🇷🇼"
+}
+```
+
+### Admin Endpoints
+
+#### POST `/api/admin/register`
+```json
+{
+  "email": "admin@talynk.com",
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+#### POST `/api/admin/approvers`
+```json
+{
+  "email": "approver@talynk.com",
+  "username": "approver",
+  "password": "approver123"
+}
+```
+
+#### PUT `/api/admin/approve`
+```json
+{
+  "postId": "post-uuid-here",
+  "status": "approved",
+  "adminNotes": "Content meets community guidelines"
+}
+```
+
+### Approver Endpoints
+
+#### PUT `/api/approver/posts/:postId/approve`
+```json
+{
+  "approverNotes": "High quality content, approved"
+}
+```
+
+#### PUT `/api/approver/posts/:postId/reject`
+```json
+{
+  "rejectionReason": "Content violates community guidelines"
+}
+```
+
+### Category Endpoints
+
+#### POST `/api/categories/`
+```json
+{
+  "name": "Dance",
+  "description": "Dance-related content",
+  "parent_id": null,
+  "level": 1,
+  "sort_order": 4
+}
+```
+
+#### PUT `/api/categories/:id`
+```json
+{
+  "name": "Modern Dance",
+  "description": "Modern dance styles and techniques"
 }
 ```
 
