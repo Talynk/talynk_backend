@@ -86,6 +86,92 @@ exports.registerAdmin = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.searchPosts = async (req, res) => {
     try {
         const { query, type, page = 1, limit = 10 } = req.query;
@@ -220,6 +306,92 @@ exports.searchPosts = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getDashboardData = async (req, res) => {
     try {
         // Get counts for different post statuses
@@ -271,6 +443,92 @@ exports.getDashboardData = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching dashboard data'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -360,6 +618,92 @@ exports.getPosts = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Get pending posts
 exports.getPendingPosts = async (req, res) => {
     try {
@@ -393,6 +737,92 @@ exports.getPendingPosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching pending posts'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -477,6 +907,92 @@ exports.updatePostStatus = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Get admin dashboard stats
 exports.getDashboardStats = async (req, res) => {
     try {
@@ -487,11 +1003,12 @@ exports.getDashboardStats = async (req, res) => {
             prisma.post.count({ where: { status: 'pending' } }),
             prisma.post.count({ where: { status: 'approved' } }),
             prisma.post.count({ where: { status: 'rejected' } }),
+            prisma.post.count({ where: { status: 'frozen' } }),
             prisma.user.count({ where: { status: 'active' } }),
             prisma.user.count({ where: { status: 'frozen' } })
         ]);
 
-        const [totalUsers, totalApprovers, pendingVideos, approvedVideos, rejectedVideos, activeUsers, frozenUsers] = stats;
+        const [totalUsers, totalApprovers, pendingVideos, approvedVideos, rejectedVideos, flaggedVideos, activeUsers, frozenUsers] = stats;
 
         res.json({
             status: 'success',
@@ -501,6 +1018,7 @@ exports.getDashboardStats = async (req, res) => {
                 pendingVideos,
                 approvedVideos,
                 rejectedVideos,
+                flaggedVideos,
                 activeUsers,
                 frozenUsers
             }
@@ -511,6 +1029,92 @@ exports.getDashboardStats = async (req, res) => {
             status: 'error',
             message: 'Failed to fetch dashboard statistics',
             details: error.message
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -584,6 +1188,92 @@ exports.manageUserAccount = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getApprovedPosts = async (req, res) => {
     try {
         const { date, search, page = 1, limit = 10 } = req.query;
@@ -648,6 +1338,92 @@ exports.getApprovedPosts = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Video Management
 exports.getAllVideos = async (req, res) => {
     try {
@@ -668,6 +1444,92 @@ exports.getAllVideos = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching videos'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -728,6 +1590,92 @@ exports.registerApprover = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.removeApprover = async (req, res) => {
     try {
         const { id } = req.params;
@@ -742,6 +1690,92 @@ exports.removeApprover = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error removing approver'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -776,6 +1810,92 @@ exports.sendMessageToAllUsers = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.sendMessageToApprovers = async (req, res) => {
     try {
         const { message } = req.body;
@@ -801,6 +1921,92 @@ exports.sendMessageToApprovers = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error sending message'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -841,6 +2047,92 @@ exports.getAdminDashboardStats = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.uploadAd = async (req, res) => {
     try {
         const adminUsername = req.user.username;
@@ -868,6 +2160,92 @@ exports.uploadAd = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error uploading ad'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -939,6 +2317,92 @@ exports.getAllUsers = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getRecentActivity = async (req, res) => {
     try {
         const recentPosts = await Post.findAll({
@@ -975,6 +2439,92 @@ exports.getRecentActivity = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to get recent activity'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -1028,6 +2578,92 @@ exports.getApprovers = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch approvers'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -1136,6 +2772,92 @@ exports.getApproverDetails = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.updateApproverStatus = async (req, res) => {
     try {
         const { id } = req.params;
@@ -1171,6 +2893,92 @@ exports.updateApproverStatus = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Profile Management
 exports.getProfile = async (req, res) => {
     try {
@@ -1202,6 +3010,92 @@ exports.getProfile = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching admin profile'
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -1262,6 +3156,92 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.changePassword = async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -1304,6 +3284,92 @@ exports.changePassword = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Add these new methods
 exports.getRecentPosts = async (req, res) => {
     try {
@@ -1331,6 +3397,92 @@ exports.getRecentPosts = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getMostViewedPosts = async (req, res) => {
     try {
         const posts = await Post.findAll({
@@ -1353,6 +3505,92 @@ exports.getMostViewedPosts = async (req, res) => {
         res.status(500).json({ 
             status: 'error', 
             message: 'Failed to fetch most viewed posts' 
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -1417,6 +3655,92 @@ exports.searchByTraceId = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getRejectedPosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
@@ -1460,6 +3784,92 @@ exports.getRejectedPosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error getting rejected posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -1552,6 +3962,92 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getUsersStats = async (req, res) => {
     try {
         // Get total number of users
@@ -1612,6 +4108,92 @@ exports.getUsersStats = async (req, res) => {
     }
 };
 
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 exports.getUserStats = async (req, res) => {
     try {
         // Get user statistics
@@ -1656,6 +4238,92 @@ exports.getUserStats = async (req, res) => {
                     pending: 0
                 }
             }
+        });
+    }
+};
+
+// Get flagged posts (posts with 5+ reports)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    category: true,
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

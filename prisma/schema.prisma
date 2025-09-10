@@ -49,6 +49,7 @@ model User {
   shares                Share[]
   views                 View[]
   reports               PostReport[]
+  appeals               PostAppeal[]
   preferences           UserPreference[]
   country               Country? @relation(fields: [country_id], references: [id])
 
@@ -106,6 +107,7 @@ model Post {
   postShares            Share[]
   postViews             View[]
   reports               PostReport[]
+  appeals               PostAppeal[]
   featuredPosts         FeaturedPost[]
 
   @@map("posts")
@@ -257,6 +259,7 @@ model Admin {
   // Relations
   posts     Post[]
   reports   PostReport[]
+  appeals   PostAppeal[]
   featuredPosts FeaturedPost[]
 
   @@map("admins")
@@ -317,6 +320,27 @@ model PostReport {
 
   @@unique([post_id, user_id])
   @@map("post_reports")
+}
+
+model PostAppeal {
+  id              String   @id @default(uuid()) @db.Uuid
+  post_id         String   @db.Uuid
+  user_id         String   @db.Uuid
+  appeal_reason   String   @db.Text
+  additional_info String?  @db.Text
+  status          AppealStatus @default(pending)
+  reviewed_by     String?  @db.Uuid
+  reviewed_at     DateTime?
+  admin_notes     String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+
+  // Relations
+  post            Post     @relation(fields: [post_id], references: [id])
+  user            User     @relation(fields: [user_id], references: [id])
+  reviewer        Admin?   @relation(fields: [reviewed_by], references: [id])
+
+  @@map("post_appeals")
 }
 
 model UserPreference {
@@ -382,4 +406,10 @@ enum ReportStatus {
   reviewed
   resolved
   dismissed
+}
+
+enum AppealStatus {
+  pending
+  approved
+  rejected
 }

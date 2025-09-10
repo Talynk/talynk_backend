@@ -18,6 +18,7 @@ router.put('/approve', authenticate, isAdmin, adminController.updatePostStatus);
 router.get('/approved/posts', authenticate, isAdmin, adminController.getApprovedPosts);
 router.get('/posts/pending', authenticate, isAdmin, adminController.getPendingPosts);
 router.get('/posts/rejected', authenticate, isAdmin, adminController.getRejectedPosts);
+router.get('/posts/flagged', authenticate, isAdmin, adminController.getFlaggedPosts);
 router.get('/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
 router.get('/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
 router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);

@@ -96,7 +96,7 @@ exports.createPost = async (req, res) => {
         const post = await prisma.post.create({
             data: {
             user_id: userId,
-            status: 'pending',
+            status: 'approved', // Posts are now active by default
             category_id: category.id,  // Use the category ID instead of name
             title,
             description: caption,
