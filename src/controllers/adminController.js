@@ -1443,10 +1443,10 @@ exports.getRejectedPosts = async (req, res) => {
             }
         });
 
-        // Add full URLs for files
+        // Add full URLs for files (Supabase URLs are already complete)
         const postsWithUrls = posts.map(post => {
             if (post.video_url) {
-                post.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}`;
+                post.fullUrl = post.video_url; // Supabase URL is already complete
             }
             return post;
         });
@@ -1517,11 +1517,11 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for files
+        // Add full URLs for files (Supabase URLs are already complete)
         const postsWithUrls = posts.map(post => {
             const postData = post.toJSON();
             if (postData.video_url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+                postData.fullUrl = postData.video_url; // Supabase URL is already complete
             }
             return postData;
         });

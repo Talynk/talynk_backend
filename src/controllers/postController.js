@@ -211,10 +211,10 @@ exports.getAllPosts = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for files
+        // Add full URLs for files (Supabase URLs are already complete)
         const postsWithUrls = posts.map(post => {
             if (post.video_url) {
-                post.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${post.video_url}`;
+                post.fullUrl = post.video_url; // Supabase URL is already complete
             }
             return post;
         });
@@ -670,11 +670,11 @@ exports.getUserPosts = async (req, res) => {
             }
         });
 
-        // Add full URLs for files
+        // Add full URLs for files (Supabase URLs are already complete)
         const postsWithUrls = posts.map(post => {
             const postData = { ...post };
             if (postData.video_url) {
-                postData.fullUrl = `${req.protocol}://${req.get('host')}${postData.video_url}`;
+                postData.fullUrl = postData.video_url; // Supabase URL is already complete
             }
             console.log(` Posts: ${JSON.stringify(postData)}`)
             return postData;
@@ -993,11 +993,10 @@ exports.getPost = async (req, res) => {
             });
         }
 
-        // Include the full URL for the file
+        // Include the full URL for the file (Supabase URLs are already complete)
         const postData = post.toJSON();
         if (postData.url) {
-            // Ensure the URL is properly formatted
-            postData.fullUrl = `${req.protocol}://${req.get('host')}${postData.url}`;
+            postData.fullUrl = postData.url; // Supabase URL is already complete
         }
 
         res.json({
@@ -1144,11 +1143,11 @@ exports.searchPosts = async (req, res) => {
             limit: 20
         });
 
-        // Add full URLs for videos
+        // Add full URLs for videos (Supabase URLs are already complete)
         const postsWithUrls = posts.map(post => {
             const postData = post.toJSON();
             if (postData.video_url) {
-                postData.fullUrl = `${process.env.API_BASE_URL || 'http://localhost:3000'}${postData.video_url}`;
+                postData.fullUrl = postData.video_url; // Supabase URL is already complete
             }
             return postData;
         });
