@@ -769,7 +769,8 @@ file: [song.mp4]
 }
 ```
 
-#### GET `/api/posts/user`
+#### GET `
+`
 **Headers:**
 ```
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
