@@ -4,6 +4,7 @@ const prisma = require('../lib/prisma');
 const adminController = require('../controllers/adminController');
 const { authenticate } = require('../middleware/auth');
 const { isAdmin } = require('../middleware/isAdmin');
+const seedController = require('../controllers/seedController');
 
 // Admin registration (no authentication required for initial setup)
 router.post('/register', adminController.registerAdmin);
@@ -23,5 +24,13 @@ router.get('/approvers/:approverId/approved-posts', authenticate, isAdmin, admin
 router.get('/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
 router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);
 router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
+
+// Seeding and reset endpoints (Admin only)
+router.post('/seed/countries', authenticate, isAdmin, seedController.seedCountries);
+router.post('/seed/categories', authenticate, isAdmin, seedController.seedCategories);
+router.post('/seed/all', authenticate, isAdmin, seedController.seedAll);
+router.delete('/reset/countries', authenticate, isAdmin, seedController.resetCountries);
+router.delete('/reset/categories', authenticate, isAdmin, seedController.resetCategories);
+router.delete('/reset/all', authenticate, isAdmin, seedController.resetAll);
 
 module.exports = router; 

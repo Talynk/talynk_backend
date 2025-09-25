@@ -992,6 +992,42 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/dashboard/stats` | Get dashboard statistics | ✅ Admin |
 | GET | `/users/stats` | Get user statistics | ✅ Admin |
 | GET | `/posts/search` | Search posts (admin) | ✅ Admin |
+### Seeding and Reset Routes (Admin)
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| POST | `/seed/countries` | Seed countries from `countries.json` | ✅ Admin |
+| POST | `/seed/categories` | Seed full category hierarchy | ✅ Admin |
+| POST | `/seed/all` | Seed countries and categories | ✅ Admin |
+| DELETE | `/reset/countries` | Delete all countries | ✅ Admin |
+| DELETE | `/reset/categories` | Delete all categories | ✅ Admin |
+| DELETE | `/reset/all` | Delete countries and categories | ✅ Admin |
+
+#### POST `/api/admin/seed/all`
+**Headers:**
+```
+Authorization: Bearer <ADMIN_TOKEN>
+```
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Seeded countries and categories"
+}
+```
+
+#### DELETE `/api/admin/reset/all`
+**Headers:**
+```
+Authorization: Bearer <ADMIN_TOKEN>
+```
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Reset countries and categories"
+}
+```
 
 ### Admin Search API Examples
 
