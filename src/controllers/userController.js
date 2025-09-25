@@ -1064,7 +1064,13 @@ exports.getUserApprovedPosts = async (req, res) => {
  */
 exports.updateUserCountry = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user?.id || req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Unauthorized: missing user context'
+            });
+        }
         const { country_id } = req.body;
 
         // Validate country_id if provided
@@ -1079,6 +1085,18 @@ exports.updateUserCountry = async (req, res) => {
                     message: 'Invalid country ID'
                 });
             }
+        }
+
+        // Ensure user exists
+        const existingUser = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true }
+        });
+        if (!existingUser) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
         }
 
         // Update user's country

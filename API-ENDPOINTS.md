@@ -993,6 +993,109 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | GET | `/users/stats` | Get user statistics | ✅ Admin |
 | GET | `/posts/search` | Search posts (admin) | ✅ Admin |
 
+### Admin Search API Examples
+
+#### GET `/api/admin/posts/search`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Query Parameters:**
+```
+?query=music&type=post_title&page=1&limit=10
+```
+
+**Search Types:**
+- `post_id` - Search by exact post ID
+- `post_title` - Search by post title (case-insensitive)
+- `user_id` - Search by user ID
+- `username` - Search by username (case-insensitive)
+- `date` - Search by creation date (YYYY-MM-DD format)
+- `status` - Search by post status (pending, approved, rejected, frozen)
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "My Music Video",
+        "description": "Check out my latest track!",
+        "status": "approved",
+        "video_url": "https://supabase.co/storage/v1/object/public/posts/video.mp4",
+        "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/thumb.jpg",
+        "likes": 45,
+        "views": 120,
+        "shares": 8,
+        "comments_count": 12,
+        "createdAt": "2025-01-07T10:00:00.000Z",
+        "updatedAt": "2025-01-07T10:00:00.000Z",
+        "user_id": "user-uuid-1",
+        "user": {
+          "id": "user-uuid-1",
+          "username": "musician123",
+          "email": "musician@talynk.com",
+          "status": "active",
+          "profile_picture": "https://supabase.co/storage/v1/object/public/profiles/profile.jpg"
+        },
+        "category": {
+          "id": 1,
+          "name": "Music"
+        }
+      }
+    ],
+    "pagination": {
+      "total": 25,
+      "page": 1,
+      "limit": 10,
+      "totalPages": 3,
+      "hasNext": true,
+      "hasPrev": false
+    },
+    "searchInfo": {
+      "query": "music",
+      "type": "post_title",
+      "resultsCount": 10
+    }
+  }
+}
+```
+
+**Error Response (400):**
+```json
+{
+  "status": "error",
+  "message": "Query and type parameters are required"
+}
+```
+
+**Error Response (400) - Invalid Type:**
+```json
+{
+  "status": "error",
+  "message": "Invalid search type. Must be one of: post_id, post_title, user_id, username, date, status"
+}
+```
+
+**Error Response (400) - Invalid Date:**
+```json
+{
+  "status": "error",
+  "message": "Invalid date format. Use YYYY-MM-DD"
+}
+```
+
+**Error Response (400) - Invalid Status:**
+```json
+{
+  "status": "error",
+  "message": "Invalid status. Must be one of: pending, approved, rejected, frozen"
+}
+```
+
 ---
 
 ## ✅ Approver Routes (`/api/approver`)
@@ -2379,7 +2482,7 @@ Register a new admin user.
   "email": "testuser@talynk.com",
   "password": "password123",
   "phone1": "+250788123456",
-  "country": "Rwanda"
+  "country_id": 1
 }
 ```
 
@@ -2508,33 +2611,63 @@ Register a new admin user.
 [
   {
     "id": 1,
-    "name": "Rwanda",
-    "code": "RW",
-    "flag_emoji": "🇷🇼"
+    "name": "Afghanistan",
+    "code": "AF",
+    "flag_emoji": "🇦🇫"
   },
   {
     "id": 2,
+    "name": "Albania",
+    "code": "AL",
+    "flag_emoji": "🇦🇱"
+  },
+  {
+    "id": 3,
+    "name": "Algeria",
+    "code": "DZ",
+    "flag_emoji": "🇩🇿"
+  },
+  {
+    "id": 31,
+    "name": "Canada",
+    "code": "CA",
+    "flag_emoji": "🇨🇦"
+  },
+  {
+    "id": 64,
+    "name": "Germany",
+    "code": "DE",
+    "flag_emoji": "🇩🇪"
+  },
+  {
+    "id": 76,
+    "name": "India",
+    "code": "IN",
+    "flag_emoji": "🇮🇳"
+  },
+  {
+    "id": 87,
     "name": "Kenya",
     "code": "KE",
     "flag_emoji": "🇰🇪"
   },
   {
-    "id": 3,
-    "name": "Uganda",
-    "code": "UG",
-    "flag_emoji": "🇺🇬"
-  },
-  {
-    "id": 4,
-    "name": "Tanzania",
-    "code": "TZ",
-    "flag_emoji": "🇹🇿"
-  },
-  {
-    "id": 5,
+    "id": 125,
     "name": "Nigeria",
     "code": "NG",
     "flag_emoji": "🇳🇬"
+  },
+  {
+    "id": 140,
+    "name": "Rwanda",
+    "code": "RW",
+    "flag_emoji": "🇷🇼"
+  },
+  {
+    "id": 183,
+    "name": "United States",
+    "code": "US",
+    "flag_emoji": "🇺🇸"
   }
 ]
 ```
@@ -2631,6 +2764,404 @@ Register a new admin user.
   "target_url": "https://example.com/course",
   "is_active": true,
   "expires_at": "2025-12-31T23:59:59.000Z"
+}
+```
+
+### Test Admin Search Data
+
+#### Search by Post Title
+```json
+{
+  "query": "music",
+  "type": "post_title",
+  "page": 1,
+  "limit": 10
+}
+```
+
+#### Search by Username
+```json
+{
+  "query": "musician",
+  "type": "username",
+  "page": 1,
+  "limit": 10
+}
+```
+
+#### Search by Date
+```json
+{
+  "query": "2025-01-07",
+  "type": "date",
+  "page": 1,
+  "limit": 10
+}
+```
+
+#### Search by Status
+```json
+{
+  "query": "approved",
+  "type": "status",
+  "page": 1,
+  "limit": 10
+}
+```
+
+#### Search by Post ID
+```json
+{
+  "query": "post-uuid-here",
+  "type": "post_id",
+  "page": 1,
+  "limit": 10
+}
+```
+
+#### Search by User ID
+```json
+{
+  "query": "user-uuid-here",
+  "type": "user_id",
+  "page": 1,
+  "limit": 10
+}
+```
+
+### Test Appeal Data
+
+#### Post Appeal
+```json
+{
+  "appeal_reason": "My post was flagged incorrectly. The content is appropriate and follows community guidelines.",
+  "additional_info": "I can provide more context if needed. The post shows my original music composition."
+}
+```
+
+#### Appeal Review (Admin)
+```json
+{
+  "status": "approved",
+  "admin_notes": "Content reviewed and found to be appropriate. Post restored."
+}
+```
+
+### Test Notification Data
+
+#### Post Flagged Notification
+```json
+{
+  "type": "post_flagged",
+  "message": "Your post has been flagged due to multiple reports. You can appeal this decision.",
+  "userID": "username"
+}
+```
+
+#### Appeal Submitted Notification
+```json
+{
+  "type": "post_appeal",
+  "message": "New appeal submitted for flagged post: My Music Video",
+  "userID": "admin_username"
+}
+```
+
+#### Appeal Approved Notification
+```json
+{
+  "type": "appeal_approved",
+  "message": "Your appeal has been approved and your post has been restored",
+  "userID": "username"
+}
+```
+
+#### Appeal Rejected Notification
+```json
+{
+  "type": "appeal_rejected",
+  "message": "Your appeal has been rejected. The post remains flagged.",
+  "userID": "username"
+}
+```
+
+### Test Report Data
+
+#### Post Report
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This post contains inappropriate content that violates community guidelines"
+}
+```
+
+#### Comment Report
+```json
+{
+  "reason": "spam",
+  "description": "This comment is spam and not relevant to the post"
+}
+```
+
+### Test Featured Post Data
+
+#### Feature a Post
+```json
+{
+  "reason": "High engagement and quality content",
+  "expiresAt": "2025-01-14T10:00:00.000Z"
+}
+```
+
+### Test Recommendation Data
+
+#### User Interaction
+```json
+{
+  "interaction_type": "like",
+  "duration": 45
+}
+```
+
+#### Category Preference
+```json
+{
+  "category_id": 1,
+  "preference_score": 0.8,
+  "interaction_count": 5
+}
+```
+
+### Test Subscription Data
+
+#### Subscribe to User
+```json
+{
+  "userId": "user-uuid-to-subscribe-to"
+}
+```
+
+### Test Follow Data
+
+#### Follow User
+```json
+{
+  "followingId": "user-uuid-to-follow"
+}
+```
+
+### Test Like Data
+
+#### Toggle Like
+```json
+{
+  "postId": "post-uuid-here"
+}
+```
+
+#### Batch Like Status
+```json
+{
+  "postIds": ["post-uuid-1", "post-uuid-2", "post-uuid-3"]
+}
+```
+
+### Test View Data
+
+#### Record View
+```json
+{
+  "postId": "post-uuid-here",
+  "userId": "user-uuid-here",
+  "duration": 30
+}
+```
+
+### Test Search Data
+
+#### User Search
+```json
+{
+  "term": "guitar lessons"
+}
+```
+
+#### Post Search
+```json
+{
+  "q": "music",
+  "category": "Music",
+  "page": 1,
+  "limit": 10
+}
+```
+
+### Test Interest Data
+
+#### Update Interests
+```json
+{
+  "interests": ["Music", "Arts", "Photography", "Dancing", "Cooking"]
+}
+```
+
+### Test Country Data
+
+#### Update Country
+```json
+{
+  "country_id": 2
+}
+```
+
+### Test Profile Data
+
+#### Update Profile
+```json
+{
+  "phone1": "+250788999888",
+  "phone2": "+250788777666"
+}
+```
+
+### Test Admin Data
+
+#### Admin Registration
+```json
+{
+  "email": "admin@talynk.com",
+  "username": "admin",
+  "password": "admin123"
+}
+```
+
+#### Approver Registration
+```json
+{
+  "email": "approver@talynk.com",
+  "username": "approver",
+  "password": "approver123"
+}
+```
+
+#### Post Status Update
+```json
+{
+  "postId": "post-uuid-here",
+  "status": "approved",
+  "adminNotes": "Content meets community guidelines"
+}
+```
+
+### Test Category Data
+
+#### Create Category
+```json
+{
+  "name": "Dance",
+  "description": "Dance-related content",
+  "parent_id": null,
+  "level": 1,
+  "sort_order": 4
+}
+```
+
+#### Update Category
+```json
+{
+  "name": "Modern Dance",
+  "description": "Modern dance styles and techniques"
+}
+```
+
+### Test Comment Data
+
+#### Add Comment
+```json
+{
+  "content": "Great post! Love the creativity 🔥"
+}
+```
+
+#### Report Comment
+```json
+{
+  "reason": "inappropriate_content",
+  "description": "This comment contains offensive language"
+}
+```
+
+### Test User Management Data
+
+#### Manage User Account
+```json
+{
+  "userId": "user-uuid-here",
+  "action": "suspend",
+  "reason": "Violation of community guidelines"
+}
+```
+
+### Test Statistics Data
+
+#### Dashboard Stats Response
+```json
+{
+  "totalUsers": 150,
+  "totalApprovers": 5,
+  "pendingVideos": 25,
+  "approvedVideos": 120,
+  "rejectedVideos": 15,
+  "flaggedVideos": 8,
+  "activeUsers": 140,
+  "frozenUsers": 10
+}
+```
+
+### Test Error Responses
+
+#### Validation Error
+```json
+{
+  "status": "error",
+  "message": "Validation failed",
+  "errors": [
+    {
+      "field": "email",
+      "message": "Email is required"
+    },
+    {
+      "field": "password",
+      "message": "Password must be at least 6 characters"
+    }
+  ]
+}
+```
+
+#### Unauthorized Error
+```json
+{
+  "status": "error",
+  "message": "Unauthorized",
+  "code": "UNAUTHORIZED"
+}
+```
+
+#### Not Found Error
+```json
+{
+  "status": "error",
+  "message": "Post not found",
+  "code": "NOT_FOUND"
+}
+```
+
+#### Server Error
+```json
+{
+  "status": "error",
+  "message": "Internal server error",
+  "code": "INTERNAL_SERVER_ERROR"
 }
 ```
 

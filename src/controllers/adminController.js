@@ -175,34 +175,52 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.searchPosts = async (req, res) => {
     try {
         const { query, type, page = 1, limit = 10 } = req.query;
+
+        // Validate required parameters
         if (!query || !type) {
             return res.status(400).json({
-                success: false,
-                error: {
-                    code: 'MISSING_PARAMETERS',
-                    message: 'Query and type parameters are required'
-                }
+                status: 'error',
+                message: 'Query and type parameters are required'
             });
         }
+
+        // Validate search type
         const validTypes = ['post_id', 'post_title', 'user_id', 'username', 'date', 'status'];
         if (!validTypes.includes(type)) {
             return res.status(400).json({
-                success: false,
-                error: {
-                    code: 'INVALID_SEARCH_TYPE',
-                    message: `Invalid search type. Must be one of: ${validTypes.join(', ')}`
-                }
+                status: 'error',
+                message: `Invalid search type. Must be one of: ${validTypes.join(', ')}`
             });
         }
+
+        // Build where clause based on search type
         let whereClause = {};
+        let includeClause = {
+            user: {
+                select: {
+                    id: true,
+                    username: true,
+                    email: true,
+                    status: true,
+                    profile_picture: true
+                }
+            },
+            category: {
+                select: {
+                    id: true,
+                    name: true
+                }
+            }
+        };
+
         switch (type) {
             case 'post_id':
                 whereClause.id = query;
                 break;
             case 'post_title':
-                whereClause.title = { 
-                    mode: 'insensitive',
-                    contains: query 
+                whereClause.title = {
+                    contains: query,
+                    mode: 'insensitive'
                 };
                 break;
             case 'user_id':
@@ -211,8 +229,8 @@ exports.searchPosts = async (req, res) => {
             case 'username':
                 whereClause.user = {
                     username: {
-                        mode: 'insensitive',
-                        contains: query
+                        contains: query,
+                        mode: 'insensitive'
                     }
                 };
                 break;
@@ -220,88 +238,92 @@ exports.searchPosts = async (req, res) => {
                 const searchDate = new Date(query);
                 if (isNaN(searchDate.getTime())) {
                     return res.status(400).json({
-                        success: false,
-                        error: {
-                            code: 'INVALID_DATE',
-                            message: 'Invalid date format. Use YYYY-MM-DD'
-                        }
+                        status: 'error',
+                        message: 'Invalid date format. Use YYYY-MM-DD'
                     });
                 }
+                const nextDay = new Date(searchDate.getTime() + 24 * 60 * 60 * 1000);
                 whereClause.createdAt = {
                     gte: searchDate,
-                    lt: new Date(searchDate.getTime() + 24 * 60 * 60 * 1000)
+                    lt: nextDay
                 };
                 break;
             case 'status':
-                const validStatuses = ['pending', 'approved', 'rejected'];
+                const validStatuses = ['pending', 'approved', 'rejected', 'frozen'];
                 if (!validStatuses.includes(query.toLowerCase())) {
                     return res.status(400).json({
-                        success: false,
-                        error: {
-                            code: 'INVALID_STATUS',
-                            message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
-                        }
+                        status: 'error',
+                        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
                     });
                 }
                 whereClause.status = query.toLowerCase();
                 break;
         }
-        const offset = (page - 1) * limit;
-        const [posts, count] = await Promise.all([
+
+        // Calculate pagination
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        // Perform the search with pagination using Prisma
+        const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: whereClause,
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            username: true,
-                            email: true,
-                            status: true,
-                            profile_picture: true
-                        }
-                    }
-                },
+                include: includeClause,
                 orderBy: {
                     createdAt: 'desc'
                 },
                 take: parseInt(limit),
-                skip: parseInt(offset)
+                skip: offset
             }),
             prisma.post.count({
                 where: whereClause
             })
         ]);
-        
+
+        // Format the response
         const formattedPosts = posts.map(post => ({
             id: post.id,
             title: post.title,
             description: post.description,
             status: post.status,
-            created_at: post.createdAt,
-            updated_at: post.updatedAt,
+            video_url: post.video_url,
+            thumbnail_url: post.thumbnail_url,
+            likes: post.likes,
+            views: post.views,
+            shares: post.shares,
+            comments_count: post.comment_count,
+            createdAt: post.createdAt,
+            updatedAt: post.updatedAt,
             user_id: post.user_id,
-            user: post.user
+            user: post.user,
+            category: post.category
         }));
+
         res.json({
-            success: true,
+            status: 'success',
             data: {
                 posts: formattedPosts,
                 pagination: {
-                    total: count,
+                    total: totalCount,
                     page: parseInt(page),
                     limit: parseInt(limit),
-                    total_pages: Math.ceil(count / limit)
+                    totalPages: Math.ceil(totalCount / limit),
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                },
+                searchInfo: {
+                    query,
+                    type,
+                    resultsCount: formattedPosts.length
                 }
             }
         });
+
     } catch (error) {
         console.error('Error searching posts:', error);
         res.status(500).json({
-            success: false,
-            error: {
-                code: 'INTERNAL_SERVER_ERROR',
-                message: 'An error occurred while searching posts'
-            }
+            status: 'error',
+            message: 'An error occurred while searching posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
