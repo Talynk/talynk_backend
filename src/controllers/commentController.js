@@ -158,30 +158,72 @@ exports.getPostComments = async (req, res) => {
 exports.deleteComment = async (req, res) => {
     try {
         const { commentId } = req.params;
+        console.log('Delete comment request:', { commentId, userId: req.user?.id });
+        
         // Validate UUID format (basic)
         const uuidRegex = /^[0-9a-fA-F-]{36}$/;
         if (!uuidRegex.test(String(commentId))) {
+            console.log('Invalid UUID format:', commentId);
             return res.status(400).json({ status: 'error', message: 'Invalid comment ID' });
         }
+        
         const userId = req.user?.id || req.user?.userId;
+        
+        console.log('Full req.user object:', req.user);
+        console.log('Extracted userId:', userId);
+        console.log('req.user.id:', req.user?.id);
+        console.log('req.user.userId:', req.user?.userId);
 
         if (!userId) {
+            console.log('No user ID found in request');
             return res.status(401).json({
                 status: 'error',
                 message: 'Unauthorized: missing user context'
             });
         }
 
-        // Fetch the comment using Prisma and ensure ownership
+        // Fetch the comment with post owner info
         const comment = await prisma.comment.findUnique({
             where: { id: commentId },
-            select: { id: true, post_id: true, commentor_id: true }
+            select: { 
+                id: true, 
+                post_id: true, 
+                commentor_id: true,
+                post: {
+                    select: {
+                        user_id: true
+                    }
+                }
+            }
         });
 
-        if (!comment || comment.commentor_id !== userId) {
+        console.log('Comment found:', comment);
+
+        if (!comment) {
+            console.log('Comment not found:', commentId);
             return res.status(404).json({
                 status: 'error',
-                message: 'Comment not found or unauthorized'
+                message: 'Comment not found'
+            });
+        }
+
+        // Check if user is comment owner OR post owner
+        const isCommentOwner = comment.commentor_id === userId;
+        const isPostOwner = comment.post.user_id === userId;
+        
+        console.log('Permission check:', { 
+            isCommentOwner, 
+            isPostOwner, 
+            commentorId: comment.commentor_id, 
+            postOwnerId: comment.post.user_id,
+            currentUserId: userId 
+        });
+
+        if (!isCommentOwner && !isPostOwner) {
+            console.log('User not authorized to delete comment');
+            return res.status(403).json({
+                status: 'error',
+                message: 'You can only delete your own comments or comments on your posts'
             });
         }
 
@@ -191,6 +233,8 @@ exports.deleteComment = async (req, res) => {
         await prisma.comment.delete({
             where: { id: commentId }
         });
+
+        console.log('Comment deleted successfully, updating post count');
 
         // Decrement post's comment count safely with Prisma
         await prisma.post.update({
@@ -202,6 +246,8 @@ exports.deleteComment = async (req, res) => {
             }
         });
 
+        console.log('Post comment count decremented');
+
         res.json({
             status: 'success',
             message: 'Comment deleted successfully'
@@ -210,7 +256,8 @@ exports.deleteComment = async (req, res) => {
         console.error('Comment deletion error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error deleting comment'
+            message: 'Error deleting comment',
+            details: error.message
         });
     }
 };
@@ -219,7 +266,12 @@ exports.reportComment = async (req, res) => {
     try {
         const { commentId } = req.params;
         const { reason, description } = req.body || {};
+        const userId = req.user?.id || req.user?.userId;
+        
+        console.log('Report comment request:', { commentId, userId, reason });
+        
         if (!reason || !String(reason).trim()) {
+            console.log('Missing report reason');
             return res.status(400).json({
                 status: 'error',
                 message: 'Reason is required'
@@ -229,9 +281,13 @@ exports.reportComment = async (req, res) => {
         // Ensure comment exists (via Prisma)
         const comment = await prisma.comment.findUnique({
             where: { id: commentId },
-            select: { id: true, post_id: true }
+            select: { id: true, post_id: true, commentor_id: true }
         });
+        
+        console.log('Comment found for reporting:', comment);
+        
         if (!comment) {
+            console.log('Comment not found for reporting:', commentId);
             return res.status(404).json({
                 status: 'error',
                 message: 'Comment not found'
@@ -244,8 +300,12 @@ exports.reportComment = async (req, res) => {
             data: { comment_reports: { increment: 1 } }
         });
 
+        console.log('Comment report count incremented');
+
         // Optional: notify admins with reason
         const admins = await prisma.admin.findMany({ select: { username: true } });
+        console.log('Notifying admins:', admins.length);
+        
         for (const admin of admins) {
             await prisma.notification.create({
                 data: {
@@ -257,6 +317,8 @@ exports.reportComment = async (req, res) => {
             });
         }
 
+        console.log('Admin notifications sent');
+
         res.json({
             status: 'success',
             message: 'Comment reported successfully',
@@ -266,7 +328,8 @@ exports.reportComment = async (req, res) => {
         console.error('Comment report error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error reporting comment'
+            message: 'Error reporting comment',
+            details: error.message
         });
     }
 };
