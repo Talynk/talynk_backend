@@ -132,16 +132,16 @@ model Category {
 }
 
 model Comment {
-  comment_id      Int      @id @default(autoincrement())
-  commentor_id    String   @db.Uuid
-  comment_date    DateTime @default(now())
-  post_id         String   @db.Uuid
-  comment_text    String?  @db.Text
-  comment_reports Int      @default(0)
+  id               String   @id @default(uuid()) @db.Uuid
+  commentor_id     String   @db.Uuid
+  comment_date     DateTime @default(now())
+  post_id          String   @db.Uuid
+  comment_text     String?  @db.Text
+  comment_reports  Int      @default(0)
 
   // Relations
-  user            User     @relation(fields: [commentor_id], references: [id])
-  post            Post     @relation(fields: [post_id], references: [id])
+  user             User     @relation(fields: [commentor_id], references: [id])
+  post             Post     @relation(fields: [post_id], references: [id])
 
   @@map("comments")
 }

@@ -118,9 +118,9 @@ exports.getPostComments = async (req, res) => {
 
         const [comments, total] = await Promise.all([
             prisma.comment.findMany({
-            where: { post_id: postId },
+                where: { post_id: postId },
                 select: {
-                    comment_id: true,
+                    id: true,
                     commentor_id: true,
                     comment_date: true,
                     post_id: true,
@@ -158,8 +158,9 @@ exports.getPostComments = async (req, res) => {
 exports.deleteComment = async (req, res) => {
     try {
         const { commentId } = req.params;
-        const commentKey = Number(commentId);
-        if (!Number.isInteger(commentKey)) {
+        // Validate UUID format (basic)
+        const uuidRegex = /^[0-9a-fA-F-]{36}$/;
+        if (!uuidRegex.test(String(commentId))) {
             return res.status(400).json({ status: 'error', message: 'Invalid comment ID' });
         }
         const userId = req.user?.id || req.user?.userId;
@@ -173,8 +174,8 @@ exports.deleteComment = async (req, res) => {
 
         // Fetch the comment using Prisma and ensure ownership
         const comment = await prisma.comment.findUnique({
-            where: { comment_id: commentKey },
-            select: { comment_id: true, post_id: true, commentor_id: true }
+            where: { id: commentId },
+            select: { id: true, post_id: true, commentor_id: true }
         });
 
         if (!comment || comment.commentor_id !== userId) {
@@ -188,7 +189,7 @@ exports.deleteComment = async (req, res) => {
 
         // Delete the comment with Prisma
         await prisma.comment.delete({
-            where: { comment_id: commentKey }
+            where: { id: commentId }
         });
 
         // Decrement post's comment count safely with Prisma
@@ -227,8 +228,8 @@ exports.reportComment = async (req, res) => {
 
         // Ensure comment exists (via Prisma)
         const comment = await prisma.comment.findUnique({
-            where: { comment_id: commentId },
-            select: { comment_id: true, post_id: true }
+            where: { id: commentId },
+            select: { id: true, post_id: true }
         });
         if (!comment) {
             return res.status(404).json({
@@ -239,7 +240,7 @@ exports.reportComment = async (req, res) => {
 
         // Increment comment report count (via Prisma)
         await prisma.comment.update({
-            where: { comment_id: commentId },
+            where: { id: commentId },
             data: { comment_reports: { increment: 1 } }
         });
 
@@ -320,7 +321,7 @@ exports.getUserPostComments = async (req, res) => {
         ]);
 
         const formattedComments = comments.map(c => ({
-            id: c.comment_id,
+            id: c.id,
             postId: c.post.id,
             postTitle: c.post.title,
             postThumbnail: c.post.video_url,

@@ -85,7 +85,7 @@ exports.commentValidations = {
     
     report: [
         param('commentId')
-            .isInt()
+            .isUUID()
             .withMessage('Invalid comment ID'),
         body('reason')
             .trim()
