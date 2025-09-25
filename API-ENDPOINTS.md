@@ -32,7 +32,7 @@ http://localhost:3000/api
   "email": "newuser@talynk.com",
   "password": "password123",
   "phone1": "+250788123456",
-  "country": "Rwanda"
+  "country_id": 1
 }
 ```
 
@@ -162,7 +162,7 @@ Content-Type: application/json
 ```json
 {
   "phone1": "+250788999888",
-  "country": "Kenya"
+  "country_id": 2
 }
 ```
 
@@ -317,7 +317,7 @@ Content-Type: application/json
 **Request Body:**
 ```json
 {
-  "country": "Kenya"
+  "country_id": 2
 }
 ```
 
