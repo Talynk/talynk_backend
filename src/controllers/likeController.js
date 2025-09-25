@@ -19,6 +19,7 @@ exports.toggleLike = async (req, res) => {
             });
 
             if (!post) {
+                console.log(`Post not found --------->  + ${post}`);
                 throw new Error('Post not found');
             }
 

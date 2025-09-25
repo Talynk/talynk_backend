@@ -65,20 +65,52 @@ const handleSupabaseUpload = async (req, res, next) => {
     console.log(`[UPLOAD] Uploading to Supabase bucket: ${bucketName}`);
     console.log(`[UPLOAD] File path: ${filePath}`);
     
-    // Upload file to Supabase
-    const { data, error } = await supabase.storage
-      .from(bucketName)
-      .upload(filePath, fileBuffer, {
-        contentType: file.mimetype,
-        upsert: false
-      });
+    // Upload file to Supabase with retry logic
+    let uploadAttempts = 0;
+    const maxAttempts = 3;
+    let uploadError = null;
+    
+    while (uploadAttempts < maxAttempts) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, fileBuffer, {
+            contentType: file.mimetype,
+            upsert: false
+          });
 
-    if (error) {
-      console.error('[UPLOAD] Supabase upload error:', error);
+        if (error) {
+          uploadError = error;
+          uploadAttempts++;
+          console.log(`[UPLOAD] Attempt ${uploadAttempts} failed:`, error.message);
+          
+          if (uploadAttempts < maxAttempts) {
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 1000 * uploadAttempts));
+            continue;
+          }
+        } else {
+          uploadError = null;
+          break;
+        }
+      } catch (err) {
+        uploadError = err;
+        uploadAttempts++;
+        console.log(`[UPLOAD] Attempt ${uploadAttempts} failed with exception:`, err.message);
+        
+        if (uploadAttempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * uploadAttempts));
+          continue;
+        }
+      }
+    }
+
+    if (uploadError) {
+      console.error('[UPLOAD] All upload attempts failed:', uploadError);
       return res.status(500).json({
         status: 'error',
-        message: 'Error uploading file to storage',
-        details: error.message
+        message: 'Error uploading file to storage after multiple attempts',
+        details: uploadError.message
       });
     }
 

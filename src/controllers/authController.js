@@ -11,17 +11,29 @@ const {
 
 exports.register = async (req, res) => {
     try {
-        const { username, email, password, phone1, phone2 } = req.body;
+        const { username, email, password, phone1, phone2, country_id } = req.body;
         
         // Sanitize inputs
         const sanitizedEmail = email ? sanitizeLoginInput(email, 'email') : null;
         const sanitizedUsername = username ? sanitizeLoginInput(username, 'username') : null;
 
         // Validate required fields
-        if (!password || !phone1) {
+        if (!password || !phone1 || !country_id) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Password and primary phone number are required'
+                message: 'Password, primary phone number, and country are required'
+            });
+        }
+
+        // Validate country_id exists
+        const country = await prisma.country.findUnique({
+            where: { id: parseInt(country_id) }
+        });
+
+        if (!country) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid country selected'
             });
         }
 
@@ -60,6 +72,7 @@ exports.register = async (req, res) => {
             password: hashedPassword,
             phone1,
             phone2: phone2 || null,
+            country_id: parseInt(country_id),
             createdAt: new Date(),
             updatedAt: new Date()
         };
@@ -76,6 +89,15 @@ exports.register = async (req, res) => {
                 email: true,
                 phone1: true,
                 phone2: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
                 createdAt: true,
                 updatedAt: true
             }
