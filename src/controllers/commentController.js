@@ -4,15 +4,65 @@ exports.addComment = async (req, res) => {
     try {
         const { postId } = req.params;
         const { comment_text } = req.body;
-        const username = req.user.id;
-        const commentorName = req.user.username;
+        const authId = req.user?.id || req.user?.userId;
+        const authUsername = req.user?.username || null;
+        const authRole = req.user?.role || 'user';
+
+        if (!authId && !authUsername) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Unauthorized: missing user context'
+            });
+        }
+        // Only regular users can comment
+        if (authRole && authRole !== 'user') {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Only regular users can add comments'
+            });
+        }
+        if (!comment_text || !comment_text.trim()) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Comment text is required'
+            });
+        }
+
+        // Ensure post exists
+        const existingPost = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { id: true, user_id: true, title: true }
+        });
+        if (!existingPost) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        // Resolve authenticated user to a real users table record
+        const resolvedUser = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    ...(authId ? [{ id: authId }] : []),
+                    ...(authUsername ? [{ username: authUsername }] : [])
+                ]
+            },
+            select: { id: true, username: true }
+        });
+        if (!resolvedUser) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Authenticated user not found'
+            });
+        }
 
         // Create comment using Prisma
         const comment = await prisma.comment.create({
             data: {
-                commentor_id: username,
+                commentor_id: resolvedUser.id,
                 post_id: postId,
-                comment_text: comment_text,
+                comment_text: comment_text.trim(),
                 comment_date: new Date()
             }
         });
@@ -28,17 +78,17 @@ exports.addComment = async (req, res) => {
         });
 
         // Get post owner's username for notification
-        const post = await prisma.post.findUnique({
-            where: { id: postId },
-            select: { user_id: true }
-        });
-
-        if (post) {
+        if (existingPost) {
             // Create notification using Prisma
+            const postOwner = await prisma.user.findUnique({
+                where: { id: existingPost.user_id },
+                select: { username: true }
+            });
+
             await prisma.notification.create({
                 data: {
-                    userID: post.user_id,
-                    message: `${commentorName} commented on your post`,
+                    userID: postOwner?.username || '',
+                    message: `${resolvedUser.username || 'Someone'} commented on your post`,
                     type: 'comment',
                     isRead: false
                 }
