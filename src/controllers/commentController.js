@@ -112,21 +112,38 @@ exports.addComment = async (req, res) => {
 exports.getPostComments = async (req, res) => {
     try {
         const { postId } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
 
-        const comments = await Comment.findAll({
-            attributes: ['comment_id', 'commentor_id', 'comment_date', 'post_id', 'comment_text', 'comment_reports'],
+        const [comments, total] = await Promise.all([
+            prisma.comment.findMany({
             where: { post_id: postId },
-            include: [{
-                model: User,
-                attributes: ['id', 'username'],
-                required: false
-            }],
-            order: [['comment_date', 'DESC']]
-        });
+                select: {
+                    comment_id: true,
+                    commentor_id: true,
+                    comment_date: true,
+                    post_id: true,
+                    comment_text: true,
+                    comment_reports: true,
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true
+                        }
+                    }
+                },
+                orderBy: { comment_date: 'desc' },
+                take: limit,
+                skip: offset
+            }),
+            prisma.comment.count({ where: { post_id: postId } })
+        ]);
 
         res.json({
             status: 'success',
-            data: { comments }
+            data: { comments, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } }
         });
     } catch (error) {
         console.error('Comments fetch error:', error);
@@ -141,17 +158,26 @@ exports.getPostComments = async (req, res) => {
 exports.deleteComment = async (req, res) => {
     try {
         const { commentId } = req.params;
-        const username = req.user.username;
+        const commentKey = Number(commentId);
+        if (!Number.isInteger(commentKey)) {
+            return res.status(400).json({ status: 'error', message: 'Invalid comment ID' });
+        }
+        const userId = req.user?.id || req.user?.userId;
 
-        // First get the comment to know which post it belongs to
-        const comment = await Comment.findOne({
-            where: {
-                comment_id: commentId,
-                commentor_id: username
-            }
+        if (!userId) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Unauthorized: missing user context'
+            });
+        }
+
+        // Fetch the comment using Prisma and ensure ownership
+        const comment = await prisma.comment.findUnique({
+            where: { comment_id: commentKey },
+            select: { comment_id: true, post_id: true, commentor_id: true }
         });
 
-        if (!comment) {
+        if (!comment || comment.commentor_id !== userId) {
             return res.status(404).json({
                 status: 'error',
                 message: 'Comment not found or unauthorized'
@@ -160,17 +186,20 @@ exports.deleteComment = async (req, res) => {
 
         const postId = comment.post_id;
 
-        // Delete the comment
-        await comment.destroy();
+        // Delete the comment with Prisma
+        await prisma.comment.delete({
+            where: { comment_id: commentKey }
+        });
 
-        // Decrement post's comment count
-        await sequelize.query(
-            `UPDATE posts SET comment_count = GREATEST(comment_count - 1, 0) WHERE id = $1`,
-            {
-                bind: [postId],
-                type: sequelize.QueryTypes.UPDATE
+        // Decrement post's comment count safely with Prisma
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                comment_count: {
+                    decrement: 1
+                }
             }
-        );
+        });
 
         res.json({
             status: 'success',
@@ -188,14 +217,49 @@ exports.deleteComment = async (req, res) => {
 exports.reportComment = async (req, res) => {
     try {
         const { commentId } = req.params;
+        const { reason, description } = req.body || {};
+        if (!reason || !String(reason).trim()) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Reason is required'
+            });
+        }
 
-        await Comment.increment('comment_reports', {
-            where: { commentID: commentId }
+        // Ensure comment exists (via Prisma)
+        const comment = await prisma.comment.findUnique({
+            where: { comment_id: commentId },
+            select: { comment_id: true, post_id: true }
         });
+        if (!comment) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Comment not found'
+            });
+        }
+
+        // Increment comment report count (via Prisma)
+        await prisma.comment.update({
+            where: { comment_id: commentId },
+            data: { comment_reports: { increment: 1 } }
+        });
+
+        // Optional: notify admins with reason
+        const admins = await prisma.admin.findMany({ select: { username: true } });
+        for (const admin of admins) {
+            await prisma.notification.create({
+                data: {
+                    userID: admin.username,
+                    message: `Comment ${commentId} reported: ${reason}${description ? ` - ${description}` : ''}`,
+                    type: 'comment_report',
+                    isRead: false
+                }
+            });
+        }
 
         res.json({
             status: 'success',
-            message: 'Comment reported successfully'
+            message: 'Comment reported successfully',
+            data: { reason: String(reason).trim(), description: description ? String(description) : null }
         });
     } catch (error) {
         console.error('Comment report error:', error);
@@ -211,71 +275,70 @@ exports.reportComment = async (req, res) => {
  */
 exports.getUserPostComments = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user?.id || req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ status: 'error', message: 'Unauthorized' });
+        }
 
-        // Optional query parameters for pagination and filtering
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 20;
         const offset = (page - 1) * limit;
-        const fromDate = req.query.from || null;
+        const fromDate = req.query.from ? new Date(req.query.from) : null;
 
-        // Prepare date condition for SQL
-        const dateCondition = fromDate ? `AND c.comment_date >= $3` : '';
-        
-        // Set up bind parameters
-        const bindParams = [userId, limit];
-        if (fromDate) {
-            bindParams.push(fromDate);
-        }
-        bindParams.push(offset); // This will be $3 or $4 depending on dateCondition
-        
-        // Use raw SQL with explicit type casts to avoid type mismatch issues
-        const comments = await sequelize.query(
-            `SELECT 
-                c.comment_id as id,
-                c.post_id as "postId",
-                p.title as "postTitle",
-                p.video_url as "postThumbnail",
-                c.comment_text as content,
-                c.comment_date as "createdAt",
-                u.id as "user.id",
-                u.username as "user.name",
-                u.username as "user.username",
-                u.profile_picture as "user.avatar"
-            FROM comments c
-            JOIN posts p ON c.post_id::uuid = p.id::uuid
-            JOIN users u ON c.commentor_id::uuid = u.id::uuid
-            WHERE p.user_id::uuid = $1::uuid
-            ${dateCondition}
-            ORDER BY c.comment_date DESC
-            LIMIT $2 OFFSET $${fromDate ? '4' : '3'}`,
-            {
-                bind: bindParams,
-                type: sequelize.QueryTypes.SELECT,
-                nest: true
-            }
-        );
+        const whereClause = {
+            post: { user_id: userId },
+            ...(fromDate && !isNaN(fromDate.getTime()) ? { comment_date: { gte: fromDate } } : {})
+        };
 
-        // Format the response
-        const formattedComments = comments.map(comment => ({
-            id: comment.id.toString(),
-            postId: comment.postId,
-            postTitle: comment.postTitle,
-            postThumbnail: comment.postThumbnail,
-            content: comment.content,
-            createdAt: new Date(comment.createdAt).toISOString(),
+        const [comments, total] = await Promise.all([
+            prisma.comment.findMany({
+                where: whereClause,
+                select: {
+                    comment_id: true,
+                    comment_date: true,
+                    comment_text: true,
+                    post: {
+                        select: {
+                            id: true,
+                            title: true,
+                            video_url: true
+                        }
+                    },
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true
+                        }
+                    }
+                },
+                orderBy: { comment_date: 'desc' },
+                take: limit,
+                skip: offset
+            }),
+            prisma.comment.count({ where: whereClause })
+        ]);
+
+        const formattedComments = comments.map(c => ({
+            id: c.comment_id,
+            postId: c.post.id,
+            postTitle: c.post.title,
+            postThumbnail: c.post.video_url,
+            content: c.comment_text,
+            createdAt: c.comment_date,
             user: {
-                id: comment.user.id,
-                name: comment.user.name,
-                username: comment.user.username,
-                avatar: comment.user.avatar || null
+                id: c.user.id,
+                name: c.user.username,
+                username: c.user.username,
+                avatar: c.user.profile_picture || null
             }
         }));
 
         res.json({
             status: 'success',
             data: {
-                comments: formattedComments
+                comments: formattedComments,
+                pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
             }
         });
     } catch (error) {
