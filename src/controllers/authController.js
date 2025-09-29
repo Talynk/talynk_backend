@@ -11,12 +11,13 @@ const {
 
 exports.register = async (req, res) => {
     try {
-        const { username, email, password, phone1, phone2, country_id } = req.body;
+        const { username, display_name, email, password, phone1, phone2, country_id } = req.body;
         
         // Sanitize inputs
         const sanitizedEmail = email ? sanitizeLoginInput(email, 'email') : null;
         const sanitizedUsername = username ? sanitizeLoginInput(username, 'username') : null;
-
+        const sanitizedDisplayName = display_name ? String(display_name).trim() : null;
+        
         // Validate required fields
         if (!password || !phone1 || !country_id) {
             return res.status(400).json({
@@ -79,6 +80,7 @@ exports.register = async (req, res) => {
 
         // Add username and email if provided
         if (sanitizedUsername) userData.username = sanitizedUsername;
+        if (sanitizedDisplayName) userData.display_name = sanitizedDisplayName;
         if (sanitizedEmail) userData.email = sanitizedEmail;
 
         const user = await prisma.user.create({
@@ -86,6 +88,7 @@ exports.register = async (req, res) => {
             select: {
                 id: true,
                 username: true,
+                display_name: true,
                 email: true,
                 phone1: true,
                 phone2: true,
@@ -424,13 +427,17 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Remove sensitive fields that shouldn't be updated directly
-    const { password, role, country, ...safeUpdateData } = updateData;
+    const { password, role, country, display_name, ...safeUpdateData } = updateData;
     
     // Handle country update if provided
     let userUpdateData = {
       ...safeUpdateData,
       updatedAt: new Date()
     };
+
+    if (typeof display_name !== 'undefined') {
+      userUpdateData.display_name = display_name ? String(display_name).trim() : null;
+    }
     
     if (country) {
       // Find country by name to get the ID
@@ -461,6 +468,7 @@ exports.updateProfile = async (req, res) => {
       select: {
         id: true,
         username: true,
+            display_name: true,
         email: true,
         phone1: true,
         phone2: true,

@@ -25,16 +25,34 @@ http://localhost:3000/api
 ### Authentication API Examples
 
 #### POST `/api/auth/register`
-**Request Body:**
+
+**Fields:**
+
+- **password** (string) — required; min 6 chars
+- **phone1** (string) — required; primary phone
+- **country_id** (integer) — required; must reference an existing `Country.id`
+- **username** (string) — optional; unique if provided
+- **display_name** (string) — optional; public-facing display name
+- **email** (string) — optional; unique if provided; must be valid email if provided
+- **phone2** (string) — optional; secondary phone
+
+**Request Body (example):**
 ```json
 {
   "username": "newuser",
   "email": "newuser@talynk.com",
+  "display_name": "New User",
   "password": "password123",
   "phone1": "+250788123456",
+  "phone2": "+250788000000",
   "country_id": 1
 }
 ```
+
+**Validation notes:**
+- Either or both of `username` and `email` may be provided; at least one is recommended for login by those fields.
+- `country_id` must exist in `countries` (seed via admin seed routes if empty).
+- On success, response includes selected `country` details.
 
 **Response (201):**
 ```json
