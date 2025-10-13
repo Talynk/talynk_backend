@@ -7,13 +7,8 @@ metadata:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
 spec:
-  tls:
-  - hosts:
-    - talynkbackend-8fkrb.sevalla.app
-    secretName: talynk-tls # create cert via cert-manager or manually
   rules:
-  - host: talynkbackend-8fkrb.sevalla.app
-    http:
+  - http:
       paths:
       - path: /
         pathType: Prefix
