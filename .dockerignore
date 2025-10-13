@@ -1,0 +1,25 @@
+node_modules
+npm-debug.log
+Dockerfile*
+.dockerignore
+.git
+.gitignore
+.env
+.env.*
+coverage
+logs
+*.sqlite
+.prisma
+src/tests
+.tmp
+**/*.md
+**/*.MD
+
+# OS/IDE
+.DS_Store
+.vscode
+.idea
+Thumbs.db
+
+# Prisma build artifacts
+prisma/*.db

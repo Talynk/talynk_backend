@@ -1,8 +1,8 @@
 # Talynk Backend API Endpoints Documentation
 
-## Base URL
+## Base URLs
 ```
-http://localhost:3000/api
+Hosted: https://talynkbackend-8fkrb.sevalla.app/
 ```
 
 ## Authentication
@@ -82,10 +82,16 @@ http://localhost:3000/api
 **Request Body:**
 ```json
 {
-  "email": "newuser@talynk.com",
-  "password": "password123"
+  "email": "newuser@talynk.com",   
+  "username": "newuser",           
+  "loginField": "newuser@talynk.com", 
+  "password": "password123",
+  "role": "user"                   
 }
 ```
+Notes:
+- Provide either `email` or `username`, or a single `loginField` (auto-detected).
+- `role` is required and must be one of: `user`, `admin`, `approver`.
 
 **Response (200):**
 ```json
@@ -96,6 +102,7 @@ http://localhost:3000/api
     "user": {
       "id": "uuid-here",
       "username": "newuser",
+      "display_name": "New User",
       "email": "newuser@talynk.com",
       "role": "user",
       "status": "active",
@@ -145,6 +152,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
   "data": {
     "id": "uuid-here",
     "username": "newuser",
+    "display_name": "New User",
     "email": "newuser@talynk.com",
     "phone1": "+250788123456",
     "phone2": null,
@@ -180,7 +188,8 @@ Content-Type: application/json
 ```json
 {
   "phone1": "+250788999888",
-  "country_id": 2
+  "country_id": 2,
+  "display_name": "New User Updated"
 }
 ```
 
