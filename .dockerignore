@@ -1,9 +1,10 @@
 node_modules
-npm-debug.log
+npm-debug.log*
 Dockerfile*
 .dockerignore
 .git
 .gitignore
+.
 .env
 .env.*
 coverage
@@ -11,9 +12,14 @@ logs
 *.sqlite
 .prisma
 src/tests
+tests
+**/__tests__/
 .tmp
 **/*.md
 **/*.MD
+postman
+k8s
+uploads
 
 # OS/IDE
 .DS_Store
