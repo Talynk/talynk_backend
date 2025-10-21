@@ -11,8 +11,9 @@ const postController = require('../controllers/postController');
 // Post routes (all protected)
 router.post('/', authenticate, ...upload.single('file'), postController.createPost);
 router.get('/user', authenticate, postController.getUserPosts);
+router.get('/following', authenticate, postController.getFollowingPosts);
+router.get('/feed', authenticate, postController.getOptimizedFeed);
 router.delete('/:postId', authenticate, postController.deletePost);
-
 
 // Public post routes
 router.get('/all', postController.getAllPosts); // only approved

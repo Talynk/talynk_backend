@@ -17,6 +17,7 @@ model User {
   email                 String?  @unique @db.VarChar(255)
   phone1                String?  @db.VarChar(15)
   phone2                String?  @db.VarChar(15)
+  date_of_birth         DateTime?
   posts_count           Int      @default(0)
   total_profile_views   Int      @default(0)
   user_facial_image     Bytes?
@@ -61,6 +62,7 @@ model Country {
   id          Int      @id @default(autoincrement())
   name        String   @unique @db.VarChar(100)
   code        String   @unique @db.VarChar(3) // ISO 3166-1 alpha-3 code
+  phone_code  String?  @db.VarChar(10) // Phone number code (e.g., "1", "44", "91")
   flag_emoji  String?  @db.VarChar(10) // Flag emoji
   is_active   Boolean  @default(true)
   createdAt   DateTime @default(now())

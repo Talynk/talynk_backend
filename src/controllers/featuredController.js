@@ -1,20 +1,48 @@
 const prisma = require('../lib/prisma');
+const { 
+    CACHE_KEYS, 
+    getFeaturedPostsCache, 
+    setFeaturedPostsCache 
+} = require('../utils/cache');
 
-// Get featured posts
+// Get featured posts with optimized queries and caching
 exports.getFeaturedPosts = async (req, res) => {
     try {
-        const { page = 1, limit = 10 } = req.query;
+        const { page = 1, limit = 10, sort = 'newest' } = req.query;
         const offset = (page - 1) * limit;
+        const currentDate = new Date();
+
+        // Create cache key
+        const cacheKey = `${CACHE_KEYS.FEATURED_POSTS}_${sort}_${page}_${limit}`;
+        
+        // Try to get from cache first
+        const cachedData = getFeaturedPostsCache(cacheKey);
+        if (cachedData) {
+            console.log('Serving featured posts from cache');
+            return res.json({
+                status: 'success',
+                data: cachedData,
+                cached: true
+            });
+        }
+
+        // Build optimized where clause
+        const whereClause = {
+            is_active: true,
+            OR: [
+                { expires_at: null },
+                { expires_at: { gt: currentDate } }
+            ]
+        };
+
+        // Determine sort order
+        const orderBy = sort === 'oldest' 
+            ? { createdAt: 'asc' } 
+            : { createdAt: 'desc' };
 
         const [featuredPosts, totalCount] = await Promise.all([
             prisma.featuredPost.findMany({
-                where: {
-                    is_active: true,
-                    OR: [
-                        { expires_at: null },
-                        { expires_at: { gt: new Date() } }
-                    ]
-                },
+                where: whereClause,
                 include: {
                     post: {
                         include: {
@@ -22,19 +50,29 @@ exports.getFeaturedPosts = async (req, res) => {
                                 select: {
                                     id: true,
                                     username: true,
-                                    profile_picture: true
+                                    profile_picture: true,
+                                    country: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                            code: true,
+                                            flag_emoji: true
+                                        }
+                                    }
                                 }
                             },
                             category: {
                                 select: {
                                     id: true,
-                                    name: true
+                                    name: true,
+                                    description: true
                                 }
                             },
                             _count: {
                                 select: {
                                     comments: true,
-                                    postLikes: true
+                                    postLikes: true,
+                                    postViews: true
                                 }
                             }
                         }
@@ -46,42 +84,55 @@ exports.getFeaturedPosts = async (req, res) => {
                         }
                     }
                 },
-                orderBy: {
-                    createdAt: 'desc'
-                },
+                orderBy,
                 take: parseInt(limit),
                 skip: parseInt(offset)
             }),
             prisma.featuredPost.count({
-                where: {
-                    is_active: true,
-                    OR: [
-                        { expires_at: null },
-                        { expires_at: { gt: new Date() } }
-                    ]
-                }
+                where: whereClause
             })
         ]);
 
-        res.json({
-            status: 'success',
-            data: {
-                featuredPosts: featuredPosts.map(featured => ({
-                    id: featured.id,
-                    post: featured.post,
-                    reason: featured.reason,
+        // Process posts to add full URLs and optimize response
+        const processedPosts = featuredPosts.map(featured => {
+            const post = featured.post;
+            return {
+                id: featured.id,
+                post: {
+                    ...post,
+                    fullUrl: post.video_url, // Supabase URLs are already complete
+                    isFeatured: true,
                     featuredAt: featured.createdAt,
                     expiresAt: featured.expires_at,
-                    featuredBy: featured.admin.username
-                })),
-                pagination: {
-                    currentPage: parseInt(page),
-                    totalPages: Math.ceil(totalCount / limit),
-                    totalCount,
-                    hasNext: page * limit < totalCount,
-                    hasPrev: page > 1
+                    featuredBy: featured.admin.username,
+                    featuredReason: featured.reason
                 }
+            };
+        });
+
+        const responseData = {
+            featuredPosts: processedPosts,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / limit),
+                totalCount,
+                hasNext: page * limit < totalCount,
+                hasPrev: page > 1,
+                limit: parseInt(limit)
+            },
+            filters: {
+                sort,
+                activeOnly: true
             }
+        };
+
+        // Cache the response
+        setFeaturedPostsCache(cacheKey, responseData);
+
+        res.json({
+            status: 'success',
+            data: responseData,
+            cached: false
         });
 
     } catch (error) {
