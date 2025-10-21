@@ -25,6 +25,25 @@ router.get('/dashboard/stats', authenticate, isAdmin, adminController.getDashboa
 router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);
 router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
 
+// ===== NEW ADMIN ANALYTICS & MANAGEMENT ROUTES =====
+
+// Analytics & Reports
+router.get('/analytics', authenticate, isAdmin, adminController.getAnalytics);
+router.get('/content-management/stats', authenticate, isAdmin, adminController.getContentManagementStats);
+
+// Post Management
+router.put('/posts/:postId/featured', authenticate, isAdmin, adminController.setPostFeatured);
+router.put('/posts/:postId/freeze', authenticate, isAdmin, adminController.freezePost);
+router.put('/posts/:postId/unfreeze', authenticate, isAdmin, adminController.unfreezePost);
+router.get('/posts/:postId/reports', authenticate, isAdmin, adminController.getPostReports);
+router.get('/posts/analytics', authenticate, isAdmin, adminController.getAdminPosts);
+
+// Appeals Management
+router.get('/appeals', authenticate, isAdmin, adminController.getAllAppeals);
+
+// Broadcast Notifications
+router.post('/notifications/broadcast', authenticate, isAdmin, adminController.sendBroadcastNotification);
+
 // Seeding and reset endpoints (Admin only)
 router.post('/seed/countries', authenticate, isAdmin, seedController.seedCountries);
 router.post('/seed/categories', authenticate, isAdmin, seedController.seedCategories);
