@@ -11,7 +11,7 @@ const {
 
 exports.register = async (req, res) => {
     try {
-        const { username, display_name, email, password, phone1, phone2, country_id } = req.body;
+        const { username, display_name, email, password, phone1, phone2, country_id, date_of_birth } = req.body;
         
         // Sanitize inputs
         const sanitizedEmail = email ? sanitizeLoginInput(email, 'email') : null;
@@ -74,6 +74,7 @@ exports.register = async (req, res) => {
             phone1,
             phone2: phone2 || null,
             country_id: parseInt(country_id),
+            date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
             createdAt: new Date(),
             updatedAt: new Date()
         };

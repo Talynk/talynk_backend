@@ -82,6 +82,24 @@ exports.loggers = {
     },
 
     access: (req, res, responseTime) => {
+        const userAgent = req.get('user-agent') || '';
+        
+        // Extract device information from user agent
+        const deviceInfo = {
+            isMobile: /mobile|android|iphone|ipod|blackberry|iemobile|opera mini/i.test(userAgent),
+            isTablet: /tablet|ipad|playbook|silk/i.test(userAgent),
+            isDesktop: !/mobile|android|iphone|ipod|blackberry|iemobile|opera mini|tablet|ipad|playbook|silk/i.test(userAgent),
+            browser: userAgent.includes('Chrome') ? 'Chrome' : 
+                    userAgent.includes('Firefox') ? 'Firefox' : 
+                    userAgent.includes('Safari') ? 'Safari' : 
+                    userAgent.includes('Edge') ? 'Edge' : 'Other',
+            os: userAgent.includes('Windows') ? 'Windows' : 
+                userAgent.includes('Mac') ? 'Mac' : 
+                userAgent.includes('Linux') ? 'Linux' : 
+                userAgent.includes('Android') ? 'Android' : 
+                userAgent.includes('iOS') ? 'iOS' : 'Other'
+        };
+
         logger.info({
             type: 'access',
             timestamp: new Date().toISOString(),
@@ -90,7 +108,8 @@ exports.loggers = {
             status: res.statusCode,
             responseTime,
             ip: req.ip,
-            userAgent: req.get('user-agent')
+            userAgent,
+            deviceInfo
         });
     },
 

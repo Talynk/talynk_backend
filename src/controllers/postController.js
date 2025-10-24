@@ -5,6 +5,18 @@ const { addWatermarkToVideo } = require('../utils/videoProcessor');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
 const fs = require('fs').promises;
+const { 
+    CACHE_KEYS, 
+    getFollowingPostsCache, 
+    setFollowingPostsCache,
+    getAllPostsCache,
+    setAllPostsCache,
+    getSinglePostCache,
+    setSinglePostCache,
+    getSearchCache,
+    setSearchCache,
+    clearCacheByPattern 
+} = require('../utils/cache');
 
 // Remove the applyWatermarkAsync function and all calls to it
 
@@ -119,6 +131,12 @@ exports.createPost = async (req, res) => {
             }
         });
 
+        // Clear relevant caches
+        clearCacheByPattern('following_posts');
+        clearCacheByPattern('featured_posts');
+        clearCacheByPattern('all_posts');
+        clearCacheByPattern('search_posts');
+
         res.status(201).json({
             status: 'success',
             data: { 
@@ -161,6 +179,20 @@ exports.getAllPosts = async (req, res) => {
         const { country_id, page = 1, limit = 20 } = req.query;
         const offset = (page - 1) * limit;
 
+        // Create cache key
+        const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${country_id || 'all'}`;
+        
+        // Try to get from cache first
+        const cachedData = getAllPostsCache(cacheKey);
+        if (cachedData) {
+            console.log('Serving all posts from cache');
+            return res.json({
+                status: 'success',
+                data: cachedData,
+                cached: true
+            });
+        }
+
         // Build where clause - simplified to avoid country filter issues
         const whereClause = {
             status: 'approved',
@@ -194,6 +226,13 @@ exports.getAllPosts = async (req, res) => {
                             id: true,
                             name: true
                         }
+                    },
+                    _count: {
+                        select: {
+                            comments: true,
+                            postLikes: true,
+                            postViews: true
+                        }
                     }
                 },
                 orderBy: {
@@ -215,20 +254,26 @@ exports.getAllPosts = async (req, res) => {
             return post;
         });
 
+        const responseData = {
+            posts: postsWithUrls,
+            pagination: {
+                total,
+                page: parseInt(page),
+                limit: parseInt(limit),
+                totalPages: Math.ceil(total / limit)
+            },
+            filters: {
+                country_id: null // Disabled for now
+            }
+        };
+
+        // Cache the response
+        setAllPostsCache(cacheKey, responseData);
+
         res.json({
             status: 'success',
-            data: {
-                posts: postsWithUrls,
-                pagination: {
-                    total,
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    totalPages: Math.ceil(total / limit)
-                },
-                filters: {
-                    country_id: null // Disabled for now
-                }
-            }
+            data: responseData,
+            cached: false
         });
     } catch (error) {
         console.error('Error getting posts:', error);
@@ -246,6 +291,20 @@ exports.getPostById = async (req, res) => {
         console.log("postId ----->", postId);
         console.log(`Attempting to find post with ID: ${postId}`);
         
+        // Create cache key
+        const cacheKey = `${CACHE_KEYS.SINGLE_POST}_${postId}`;
+        
+        // Try to get from cache first
+        const cachedData = getSinglePostCache(cacheKey);
+        if (cachedData) {
+            console.log('Serving single post from cache');
+            return res.json({
+                status: 'success',
+                data: cachedData,
+                cached: true
+            });
+        }
+        
         const post = await prisma.post.findUnique({
             where: { id: postId },
             include: {
@@ -254,7 +313,15 @@ exports.getPostById = async (req, res) => {
                         id: true,
                         username: true,
                         email: true,
-                        profile_picture: true
+                        profile_picture: true,
+                        country: {
+                            select: {
+                                id: true,
+                                name: true,
+                                code: true,
+                                flag_emoji: true
+                            }
+                        }
                     }
                 },
                 category: {
@@ -281,7 +348,8 @@ exports.getPostById = async (req, res) => {
                 _count: {
                     select: {
                         postLikes: true,
-                        comments: true
+                        comments: true,
+                        postViews: true
                     }
                 }
             }
@@ -295,10 +363,22 @@ exports.getPostById = async (req, res) => {
             });
         }
 
+        // Add full URL for media
+        const postWithUrl = {
+            ...post,
+            fullUrl: post.video_url // Supabase URL is already complete
+        };
+
+        const responseData = { post: postWithUrl };
+
+        // Cache the response
+        setSinglePostCache(cacheKey, responseData);
+
         console.log(`Post with associations retrieved successfully`);
         res.json({
             status: 'success',
-            data: { post }
+            data: responseData,
+            cached: false
         });
     } catch (error) {
         console.error('Error getting post:', error);
@@ -1097,67 +1177,176 @@ exports.checkLikeStatus = async (req, res) => {
 
 exports.searchPosts = async (req, res) => {
     try {
-        const { q } = req.query;
+        const { q, page = 1, limit = 20 } = req.query;
+        const offset = (page - 1) * limit;
         
         if (!q || q.trim() === '') {
             return res.json({
                 status: 'success',
-                data: []
+                data: {
+                    posts: [],
+                    pagination: {
+                        currentPage: parseInt(page),
+                        totalPages: 0,
+                        totalCount: 0,
+                        hasNext: false,
+                        hasPrev: false,
+                        limit: parseInt(limit)
+                    }
+                }
+            });
+        }
+
+        // Create cache key
+        const cacheKey = `${CACHE_KEYS.SEARCH_POSTS}_${q.toLowerCase()}_${page}_${limit}`;
+        
+        // Try to get from cache first
+        const cachedData = getSearchCache(cacheKey);
+        if (cachedData) {
+            console.log('Serving search results from cache');
+            return res.json({
+                status: 'success',
+                data: cachedData,
+                cached: true
             });
         }
 
         // Search posts by title or description, only return approved posts
-        const posts = await Post.findAll({
-            where: {
-                status: 'approved',
-                [Op.or]: [
-                    {
-                        title: {
-                            [Op.iLike]: `%${q}%`
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: {
+                    status: 'approved',
+                    is_frozen: false,
+                    OR: [
+                        {
+                            title: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        },
+                        {
+                            description: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        },
+                        {
+                            content: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        }
+                    ]
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
                         }
                     },
-                    {
-                        description: {
-                            [Op.iLike]: `%${q}%`
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            comments: true,
+                            postLikes: true,
+                            postViews: true
                         }
                     }
-                ]
-            },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email']
                 },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: {
+                    status: 'approved',
+                    is_frozen: false,
+                    OR: [
+                        {
+                            title: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        },
+                        {
+                            description: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        },
+                        {
+                            content: {
+                                contains: q,
+                                mode: 'insensitive'
+                            }
+                        }
+                    ]
                 }
-            ],
-            order: [['createdAt', 'DESC']],
-            limit: 20
-        });
+            })
+        ]);
 
         // Add full URLs for videos (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
-            const postData = post.toJSON();
-            if (postData.video_url) {
-                postData.fullUrl = postData.video_url; // Supabase URL is already complete
-            }
-            return postData;
-        });
+        const postsWithUrls = posts.map(post => ({
+            ...post,
+            fullUrl: post.video_url // Supabase URL is already complete
+        }));
+
+        const responseData = {
+            posts: postsWithUrls,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / limit),
+                totalCount,
+                hasNext: page * limit < totalCount,
+                hasPrev: page > 1,
+                limit: parseInt(limit)
+            },
+            searchQuery: q
+        };
+
+        // Cache the response
+        setSearchCache(cacheKey, responseData);
 
         res.json({
             status: 'success',
-            data: postsWithUrls
+            data: responseData,
+            cached: false
         });
     } catch (error) {
         console.error('Error searching posts:', error);
         res.status(500).json({
             status: 'error',
             message: 'Error searching posts',
-            data: []
+            data: {
+                posts: [],
+                pagination: {
+                    currentPage: parseInt(req.query.page) || 1,
+                    totalPages: 0,
+                    totalCount: 0,
+                    hasNext: false,
+                    hasPrev: false,
+                    limit: parseInt(req.query.limit) || 20
+                }
+            }
         });
     }
 };
@@ -1169,4 +1358,300 @@ exports.getLikedPosts = async (req, res) => {
         status: 'deprecated',
         message: 'This endpoint is deprecated. Please use /api/likes/user/liked instead'
     });
+};
+
+// Get posts from users that the current user follows (optimized with caching)
+exports.getFollowingPosts = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { page = 1, limit = 20, sort = 'newest' } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Create cache key
+        const cacheKey = `${CACHE_KEYS.FOLLOWING_POSTS}_${userId}_${sort}_${page}_${limit}`;
+        
+        // Try to get from cache first
+        const cachedData = getFollowingPostsCache(cacheKey);
+        if (cachedData) {
+            console.log('Serving following posts from cache');
+            return res.json({
+                status: 'success',
+                data: cachedData,
+                cached: true
+            });
+        }
+
+        // Determine sort order
+        const orderBy = sort === 'oldest' 
+            ? { createdAt: 'asc' } 
+            : { createdAt: 'desc' };
+
+        // Get posts from users that the current user follows
+        const [followingPosts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: {
+                    status: 'approved',
+                    is_frozen: false,
+                    user: {
+                        followers: {
+                            some: {
+                                followerId: userId
+                            }
+                        }
+                    }
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            comments: true,
+                            postLikes: true,
+                            postViews: true
+                        }
+                    }
+                },
+                orderBy,
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: {
+                    status: 'approved',
+                    is_frozen: false,
+                    user: {
+                        followers: {
+                            some: {
+                                followerId: userId
+                            }
+                        }
+                    }
+                }
+            })
+        ]);
+
+        // Process posts to add full URLs and optimize response
+        const processedPosts = followingPosts.map(post => ({
+            ...post,
+            fullUrl: post.video_url, // Supabase URLs are already complete
+            isFromFollowing: true
+        }));
+
+        const responseData = {
+            posts: processedPosts,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(totalCount / limit),
+                totalCount,
+                hasNext: page * limit < totalCount,
+                hasPrev: page > 1,
+                limit: parseInt(limit)
+            },
+            filters: {
+                sort,
+                fromFollowing: true
+            }
+        };
+
+        // Cache the response
+        setFollowingPostsCache(cacheKey, responseData);
+
+        res.json({
+            status: 'success',
+            data: responseData,
+            cached: false
+        });
+
+    } catch (error) {
+        console.error('Error fetching following posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching posts from users you follow',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get optimized feed with featured and following posts
+exports.getOptimizedFeed = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { page = 1, limit = 20, includeFeatured = true, includeFollowing = true } = req.query;
+        const offset = (page - 1) * limit;
+
+        const feedPosts = [];
+
+        // Get featured posts if requested
+        if (includeFeatured === 'true') {
+            const featuredPosts = await prisma.featuredPost.findMany({
+                where: {
+                    is_active: true,
+                    OR: [
+                        { expires_at: null },
+                        { expires_at: { gt: new Date() } }
+                    ]
+                },
+                include: {
+                    post: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    profile_picture: true,
+                                    country: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                            code: true,
+                                            flag_emoji: true
+                                        }
+                                    }
+                                }
+                            },
+                            category: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    description: true
+                                }
+                            },
+                            _count: {
+                                select: {
+                                    comments: true,
+                                    postLikes: true,
+                                    postViews: true
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: Math.floor(parseInt(limit) * 0.3) // 30% featured posts
+            });
+
+            featuredPosts.forEach(featured => {
+                feedPosts.push({
+                    ...featured.post,
+                    fullUrl: featured.post.video_url,
+                    isFeatured: true,
+                    featuredAt: featured.createdAt,
+                    expiresAt: featured.expires_at,
+                    featuredBy: featured.admin?.username,
+                    featuredReason: featured.reason
+                });
+            });
+        }
+
+        // Get following posts if requested
+        if (includeFollowing === 'true') {
+            const followingPosts = await prisma.post.findMany({
+                where: {
+                    status: 'approved',
+                    is_frozen: false,
+                    user: {
+                        followers: {
+                            some: {
+                                followerId: userId
+                            }
+                        }
+                    }
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            comments: true,
+                            postLikes: true,
+                            postViews: true
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: Math.floor(parseInt(limit) * 0.7) // 70% following posts
+            });
+
+            followingPosts.forEach(post => {
+                feedPosts.push({
+                    ...post,
+                    fullUrl: post.video_url,
+                    isFromFollowing: true
+                });
+            });
+        }
+
+        // Sort combined feed by creation date
+        feedPosts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+        // Apply pagination to combined results
+        const paginatedPosts = feedPosts.slice(offset, offset + parseInt(limit));
+
+        res.json({
+            status: 'success',
+            data: {
+                posts: paginatedPosts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(feedPosts.length / limit),
+                    totalCount: feedPosts.length,
+                    hasNext: offset + parseInt(limit) < feedPosts.length,
+                    hasPrev: page > 1,
+                    limit: parseInt(limit)
+                },
+                filters: {
+                    includeFeatured: includeFeatured === 'true',
+                    includeFollowing: includeFollowing === 'true'
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching optimized feed:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching optimized feed',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
 }; 
