@@ -1367,6 +1367,29 @@ exports.getFollowingPosts = async (req, res) => {
         const { page = 1, limit = 20, sort = 'newest' } = req.query;
         const offset = (page - 1) * limit;
 
+        // Debug logging
+        console.log('getFollowingPosts - User ID:', userId, 'Type:', typeof userId);
+        console.log('getFollowingPosts - User object:', req.user);
+
+        // Validate userId is a valid UUID
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID'
+            });
+        }
+
+        // Additional UUID format validation
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(userId)) {
+            console.error('Invalid UUID format:', userId);
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID format. Please log in again.',
+                details: `Expected UUID format, got: ${userId}`
+            });
+        }
+
         // Create cache key
         const cacheKey = `${CACHE_KEYS.FOLLOWING_POSTS}_${userId}_${sort}_${page}_${limit}`;
         
@@ -1387,6 +1410,8 @@ exports.getFollowingPosts = async (req, res) => {
             : { createdAt: 'desc' };
 
         // Get posts from users that the current user follows
+        console.log('About to query database with userId:', userId);
+        
         const [followingPosts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
@@ -1484,10 +1509,26 @@ exports.getFollowingPosts = async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching following posts:', error);
+        
+        // Check if it's a UUID-related error
+        if (error.message && error.message.includes('UUID')) {
+            console.error('UUID Error Details:', {
+                userId: req.user?.id,
+                userIdType: typeof req.user?.id,
+                error: error.message
+            });
+            
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid user ID format. Please log in again.',
+                details: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+        
         res.status(500).json({
             status: 'error',
             message: 'Error fetching posts from users you follow',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
