@@ -1351,6 +1351,7 @@ exports.searchPosts = async (req, res) => {
     }
 };
 
+
 // Liked posts functionality moved to likeController.js
 // Use /api/likes/user/liked endpoint instead
 exports.getLikedPosts = async (req, res) => {
@@ -1359,6 +1360,8 @@ exports.getLikedPosts = async (req, res) => {
         message: 'This endpoint is deprecated. Please use /api/likes/user/liked instead'
     });
 };
+
+
 
 // Get posts from users that the current user follows (optimized with caching)
 exports.getFollowingPosts = async (req, res) => {
@@ -1378,6 +1381,7 @@ exports.getFollowingPosts = async (req, res) => {
                 message: 'Invalid user ID'
             });
         }
+        
 
         // Additional UUID format validation
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
