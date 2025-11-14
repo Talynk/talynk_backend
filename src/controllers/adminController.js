@@ -1145,7 +1145,7 @@ exports.getFlaggedPosts = async (req, res) => {
 // Account Management
 exports.manageUserAccount = async (req, res) => {
     try {
-        const { id, action } = req.body;
+        const { id, action, reason } = req.body;
 
         // First, get the current user status
         const user = await prisma.user.findUnique({
@@ -2285,7 +2285,15 @@ exports.getAllUsers = async (req, res) => {
                 status: true,
                 posts_count: true,
                 phone1: true,
-                phone2: true
+                phone2: true,
+                last_active_date: true,
+                profile_picture: true,
+                last_login: true,
+                date_of_birth: true,
+                country_id: true,
+                follower_count: true,
+                interests: true,
+                role: true
             }
         });
 
@@ -2328,6 +2336,7 @@ exports.getAllUsers = async (req, res) => {
         });
 
         res.json({
+            message:'Users fetched successfully',
             status: 'success',
             data: { users: enhancedUsers }
         });

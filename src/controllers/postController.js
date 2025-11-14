@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { v4: uuidv4, validate: isUuid } = require('uuid');
 const path = require('path');
 const prisma = require('../lib/prisma');
 const { addWatermarkToVideo } = require('../utils/videoProcessor');
@@ -290,6 +290,16 @@ exports.getPostById = async (req, res) => {
         const postId = req.params.postId;
         console.log("postId ----->", postId);
         console.log(`Attempting to find post with ID: ${postId}`);
+        
+        // Validate UUID format before querying Prisma
+        if (!isUuid(postId)) {
+            console.error('Invalid UUID format:', postId);
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format',
+                details: `Expected UUID format, got: ${postId}`
+            });
+        }
         
         // Create cache key
         const cacheKey = `${CACHE_KEYS.SINGLE_POST}_${postId}`;

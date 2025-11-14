@@ -38,9 +38,19 @@ exports.generateReport = async (req, res) => {
     }
 };
 
+// ---------------- GATHER REPORT DATA (Prisma-based) ----------------
 async function gatherReportData(approverUsername, dateRange, metrics) {
+    // Find approver
+    const approver = await prisma.approver.findFirst({
+        where: { username: approverUsername }
+    });
+
+    if (!approver) {
+        throw new Error('Approver not found');
+    }
+
     const data = {
-        approver: await Approver.findUnique({ where: { id: approverUsername),
+        approver,
         period: {
             start: dateRange.startDate,
             end: dateRange.endDate
@@ -48,40 +58,44 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
         metrics: {}
     };
 
-    const baseQuery = {
-        where: {
-            approverID: approverUsername,
-            updatedAt: {
-                { gte: : [dateRange.startDate, dateRange.endDate]
-            }
+    // Base query filter
+    const baseFilter = {
+        approverID: approverUsername,
+        updatedAt: {
+            gte: new Date(dateRange.startDate),
+            lte: new Date(dateRange.endDate)
         }
     };
 
-    // Gather requested metrics
+    // Loop through requested metrics
     for (const metric of metrics) {
         switch (metric) {
             case 'approvals':
-                data.metrics.approvals = await Post.count({
-                    ...baseQuery,
+                data.metrics.approvals = await prisma.post.count({
                     where: {
-                        ...baseQuery.where,
+                        ...baseFilter,
                         post_status: 'approved'
                     }
                 });
                 break;
+
             case 'rejections':
-                data.metrics.rejections = await Post.count({
-                    ...baseQuery,
+                data.metrics.rejections = await prisma.post.count({
                     where: {
-                        ...baseQuery.where,
+                        ...baseFilter,
                         post_status: 'rejected'
                     }
                 });
                 break;
+
             case 'response_time':
-                const posts = await Post.findMany({
-                    ...baseQuery,
-                    select: { 'uploadDate', 'approvedDate', 'rejectedDate' }
+                const posts = await prisma.post.findMany({
+                    where: baseFilter,
+                    select: {
+                        uploadDate: true,
+                        approvedDate: true,
+                        rejectedDate: true
+                    }
                 });
                 data.metrics.response_time = calculateAverageResponseTime(posts);
                 break;
@@ -91,4 +105,51 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
     return data;
 }
 
-// Helper functions for report generation... 
+// ---------------- HELPER FUNCTIONS ----------------
+
+// Dummy function: you should already have this in your utils
+function getDateRange(reportType, startDate, endDate) {
+    if (reportType === 'custom') {
+        return { startDate, endDate };
+    }
+
+    const now = new Date();
+    let start;
+    switch (reportType) {
+        case 'weekly':
+            start = new Date(now);
+            start.setDate(now.getDate() - 7);
+            break;
+        case 'monthly':
+            start = new Date(now);
+            start.setMonth(now.getMonth() - 1);
+            break;
+        default:
+            start = new Date(now);
+            start.setDate(now.getDate() - 30);
+            break;
+    }
+    return { startDate: start, endDate: now };
+}
+
+// Calculate average response time
+function calculateAverageResponseTime(posts) {
+    let total = 0;
+    let count = 0;
+
+    posts.forEach(post => {
+        const endDate = post.approvedDate || post.rejectedDate;
+        if (post.uploadDate && endDate) {
+            const diff = new Date(endDate) - new Date(post.uploadDate);
+            total += diff;
+            count++;
+        }
+    });
+
+    return count > 0 ? total / count / (1000 * 60 * 60) : 0; // avg hours
+}
+
+// TODO: Implement the PDF/CSV/Excel generation methods
+async function generatePDFReport(res, reportData, reportType) { /* ... */ }
+async function generateCSVReport(res, reportData, reportType) { /* ... */ }
+async function generateExcelReport(res, reportData, reportType) { /* ... */ }

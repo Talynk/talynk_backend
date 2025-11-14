@@ -1,4 +1,5 @@
 // Script to help set up DATABASE_URL for Prisma introspection
+//I will be using this script to run the db url in different environments accordingly 
 require('dotenv').config();
 
 const DB_NAME = process.env.DB_NAME;
@@ -20,7 +21,7 @@ if (DB_NAME && DB_USER && DB_PASSWORD && DB_HOST && DB_PORT) {
     console.log(DATABASE_URL.replace(/\/\/.*@/, '//***:***@'));
     
     // Set environment variable for current session
-    process.env.DATABASE_URL = DATABASE_URL;
+    process.env.DATABASE_LOCAL = DATABASE_URL;
     console.log('\n✅ DATABASE_URL set for current session');
     
     // Export for use in other scripts

@@ -13,7 +13,6 @@ router.post('/', authenticate, ...upload.single('file'), postController.createPo
 
 // SPECIFIC ROUTES FIRST - before parameterized routes
 router.get('/user', authenticate, postController.getUserPosts);
-router.get('/following', authenticate, postController.getFollowingPosts);
 router.get('/feed', authenticate, postController.getOptimizedFeed);
 router.get('/all', postController.getAllPosts); // only approved
 router.get('/search', postController.searchPosts);
