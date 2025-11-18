@@ -220,7 +220,13 @@ exports.reviewReport = async (req, res) => {
                     select: {
                         id: true,
                         title: true,
-                        user_id: true
+                        user_id: true,
+                        user: {
+                            select: {
+                                id: true,
+                                username: true
+                            }
+                        }
                     }
                 },
                 user: {
@@ -243,15 +249,17 @@ exports.reviewReport = async (req, res) => {
                 }
             });
 
-            // Notify post owner
-            await prisma.notification.create({
-                data: {
-                    userID: report.post.user_id,
-                    message: 'Your post has been reviewed and unfrozen',
-                    type: 'post_unfrozen',
-                    isRead: false
-                }
-            });
+            // Notify post owner (userID must be username, not user ID)
+            if (report.post.user?.username) {
+                await prisma.notification.create({
+                    data: {
+                        userID: report.post.user.username,
+                        message: 'Your post has been reviewed and unfrozen',
+                        type: 'post_unfrozen',
+                        isRead: false
+                    }
+                });
+            }
         }
 
         res.json({

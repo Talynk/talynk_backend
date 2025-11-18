@@ -238,15 +238,17 @@ exports.featurePost = async (req, res) => {
             }
         });
 
-        // Notify post owner
-        await prisma.notification.create({
-            data: {
-                userID: post.user_id,
-                message: 'Your post has been featured!',
-                type: 'post_featured',
-                isRead: false
-            }
-        });
+        // Notify post owner (userID must be username, not user ID)
+        if (featuredPost.post.user?.username) {
+            await prisma.notification.create({
+                data: {
+                    userID: featuredPost.post.user.username,
+                    message: 'Your post has been featured!',
+                    type: 'post_featured',
+                    isRead: false
+                }
+            });
+        }
 
         res.status(201).json({
             status: 'success',

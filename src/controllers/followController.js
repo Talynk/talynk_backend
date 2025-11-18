@@ -14,17 +14,25 @@ const createFollowNotification = async (followerId, followingId) => {
     
     if (!follower) return;
     
+    // Get the username of the user being followed (userID must be username, not user ID)
+    const followingUser = await prisma.user.findUnique({
+      where: { id: followingId },
+      select: { id: true, username: true }
+    });
+    
+    if (!followingUser?.username) return;
+    
     // Create notification for the followed user with additional context data
     await prisma.notification.create({
       data: {
-        userID: followingId,
+        userID: followingUser.username,
         message: `${follower.username} started following you`,
         type: 'follow',
         isRead: false
       }
     });
     
-    console.log(`Notification created: ${follower.username} followed user ${followingId}`);
+    console.log(`Notification created: ${follower.username} followed user ${followingUser.username}`);
   } catch (error) {
     console.error('Error creating follow notification:', error);
   }

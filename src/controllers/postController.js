@@ -291,13 +291,24 @@ exports.getPostById = async (req, res) => {
         console.log("postId ----->", postId);
         console.log(`Attempting to find post with ID: ${postId}`);
         
+        // Check for common non-UUID route conflicts
+        const reservedRoutes = ['following', 'feed', 'user', 'all', 'search'];
+        if (reservedRoutes.includes(postId)) {
+            console.error('Reserved route used as post ID:', postId);
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID',
+                details: `"${postId}" is a reserved route. Please use the correct endpoint: /api/follows/posts for following posts.`
+            });
+        }
+        
         // Validate UUID format before querying Prisma
         if (!isUuid(postId)) {
             console.error('Invalid UUID format:', postId);
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid post ID format',
-                details: `Expected UUID format, got: ${postId}`
+                details: `Expected UUID format, got: ${postId}. If you're trying to fetch posts from followed users, use: /api/follows/posts`
             });
         }
         
@@ -392,10 +403,28 @@ exports.getPostById = async (req, res) => {
         });
     } catch (error) {
         console.error('Error getting post:', error);
+        
+        // Handle Prisma UUID parsing errors
+        if (error.message && error.message.includes('UUID') && error.message.includes('invalid character')) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format',
+                details: `The provided post ID is not a valid UUID. If you're trying to fetch posts from followed users, use: /api/follows/posts`
+            });
+        }
+        
+        // Handle Prisma not found errors
+        if (error.code === 'P2025') {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+        
         res.status(500).json({
             status: 'error',
             message: 'Error fetching post',
-            details: error.message
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

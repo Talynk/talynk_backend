@@ -904,15 +904,17 @@ exports.updatePostStatus = async (req, res) => {
                 notificationText = `Your post "${post.title}" has been rejected. Reason: ${rejectionReason}`;
             }
 
-            // Insert notification
-            await prisma.notification.create({
-                data: {
-                    userID: post.user.id,
-                    message: notificationText,
-                    type: 'post_status_update',
-                    isRead: false
-                }
-            });
+            // Insert notification (userID must be username, not user ID)
+            if (post.user?.username) {
+                await prisma.notification.create({
+                    data: {
+                        userID: post.user.username,
+                        message: notificationText,
+                        type: 'post_status_update',
+                        isRead: false
+                    }
+                });
+            }
             
             console.log(`Notification sent to user ${post.user.id} for post ${post.id} with status ${status}`);
         }
