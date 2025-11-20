@@ -23,18 +23,23 @@ exports.toggleLike = async (req, res) => {
                 throw new Error('Post not found');
             }
 
-            // Fast existence query using utility function
-            const likeExists = await userHasLikedPost(userId, postId);
+            // Check if like exists INSIDE the transaction to avoid race conditions
+            // Use findFirst with the unique constraint fields
+            const existingLike = await tx.postLike.findFirst({
+                where: {
+                    user_id: userId,
+                    post_id: postId
+                }
+            });
 
             let isLiked = false;
             let newLikeCount = post.likes;
 
-            if (likeExists) {
+            if (existingLike) {
                 // Unlike: Remove the like and decrement count
-                await tx.postLike.deleteMany({
+                await tx.postLike.delete({
                     where: {
-                        user_id: userId,
-                        post_id: postId
+                        id: existingLike.id
                     }
                 });
                 
@@ -42,15 +47,42 @@ exports.toggleLike = async (req, res) => {
                 isLiked = false;
             } else {
                 // Like: Create the like and increment count
-                await tx.postLike.create({
-                    data: {
-                        user_id: userId,
-                        post_id: postId
+                // Use try-catch to handle potential race condition if another request creates it simultaneously
+                try {
+                    await tx.postLike.create({
+                        data: {
+                            user_id: userId,
+                            post_id: postId
+                        }
+                    });
+                    newLikeCount = post.likes + 1;
+                    isLiked = true;
+                } catch (error) {
+                    // If unique constraint error, it means another request already created the like
+                    // Re-check and treat as if it was already liked
+                    if (error.code === 'P2002') {
+                        const recheckLike = await tx.postLike.findFirst({
+                            where: {
+                                user_id: userId,
+                                post_id: postId
+                            }
+                        });
+                        if (recheckLike) {
+                            // Like already exists, so unlike it
+                            await tx.postLike.delete({
+                                where: {
+                                    id: recheckLike.id
+                                }
+                            });
+                            newLikeCount = Math.max(0, post.likes - 1);
+                            isLiked = false;
+                        } else {
+                            throw error; // Re-throw if it's a different error
+                        }
+                    } else {
+                        throw error; // Re-throw if it's not a unique constraint error
                     }
-                });
-                
-                newLikeCount = post.likes + 1;
-                isLiked = true;
+                }
             }
 
             // Update the post's like count
