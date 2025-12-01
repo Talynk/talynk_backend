@@ -72,21 +72,37 @@ const corsOptions = {
 app.use((req, res, next) => {
     const origin = req.headers.origin;
     
-    // Check if origin is in allowed list
+    // Debug logging (remove in production)
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[CORS] ${req.method} ${req.path} - Origin: ${origin}`);
+    }
+    
+    // For OPTIONS requests, always set CORS headers
+    if (req.method === 'OPTIONS') {
+        if (origin && corsOptions.origin.includes(origin)) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+        res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+        res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+        res.setHeader('Access-Control-Max-Age', '86400');
+        
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[CORS] OPTIONS response headers:`, {
+                'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
+                'Access-Control-Allow-Credentials': res.getHeader('Access-Control-Allow-Credentials'),
+                'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
+            });
+        }
+        
+        return res.status(204).end();
+    }
+    
+    // For non-OPTIONS requests, set CORS headers if origin is allowed
     if (origin && corsOptions.origin.includes(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
-    
-    // Always set these headers for preflight
-    if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
-        res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
-        res.setHeader('Access-Control-Max-Age', '86400');
-        return res.status(204).end();
-    }
-    
-    // For non-OPTIONS requests, set methods and headers headers
     res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
     res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
     
