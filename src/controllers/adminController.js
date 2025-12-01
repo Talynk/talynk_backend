@@ -1563,14 +1563,38 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.registerApprover = async (req, res) => {
     try {
         const { username, email, password } = req.body;
-        const adminUsername = req.user.username;
+
+        // Validate required fields
+        if (!email || !username || !password) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email, username, and password are required'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Validate password strength
+        if (password.length < 6) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password must be at least 6 characters long'
+            });
+        }
 
         // Check if approver exists with the same email or username
-        const existingApprover = await Approver.findOne({
+        const existingApprover = await prisma.approver.findFirst({
             where: {
-                [Op.or]: [
-                    { email: email },
-                    { username: username }
+                OR: [
+                    { email: email.toLowerCase() },
+                    { username: username.toLowerCase() }
                 ]
             }
         });
@@ -1581,7 +1605,7 @@ exports.registerApprover = async (req, res) => {
                 message: 'Approver already exists',
                 data: {
                     exists: true,
-                    field: existingApprover.email === email ? 'email' : 'username'
+                    field: existingApprover.email === email.toLowerCase() ? 'email' : 'username'
                 }
             });
         }
@@ -1589,28 +1613,36 @@ exports.registerApprover = async (req, res) => {
         // Hash password before storing
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create new approver using Sequelize model
-        await Approver.create({
-            username,
-            email,
-            password: hashedPassword,
-            registeredBy: adminUsername,
-            role: 'approver',
-            status: 'active',
-            can_view_approved: true,
-            can_view_pending: true,
-            can_view_all_accounts: true
+        // Create new approver using Prisma
+        const approver = await prisma.approver.create({
+            data: {
+                username: username.toLowerCase(),
+                email: email.toLowerCase(),
+                password: hashedPassword,
+                status: 'active'
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                createdAt: true
+            }
         });
 
         res.status(201).json({
             status: 'success',
-            message: 'Approver registered successfully'
+            message: 'Approver registered successfully',
+            data: {
+                approver
+            }
         });
     } catch (error) {
         console.error('Error registering approver:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error registering approver'
+            message: 'Error registering approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -1704,17 +1736,186 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.removeApprover = async (req, res) => {
     try {
         const { id } = req.params;
-        await Approver.destroy({
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: {
+                        posts: true
+                    }
+                }
+            }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Check if approver has any posts - warn but still allow deletion
+        const hasPosts = approver._count.posts > 0;
+
+        // Delete approver
+        await prisma.approver.delete({
             where: { id }
         });
+
         res.json({
             status: 'success',
-            message: 'Approver removed successfully'
+            message: 'Approver deleted successfully',
+            data: {
+                deletedApprover: {
+                    id: approver.id,
+                    username: approver.username,
+                    email: approver.email
+                },
+                warning: hasPosts ? 'Approver had associated posts. Posts remain but approver reference removed.' : null
+            }
         });
     } catch (error) {
+        console.error('Error removing approver:', error);
+        
+        // Handle foreign key constraint errors
+        if (error.code === 'P2003') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Cannot delete approver. They have associated records that need to be handled first.',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+
         res.status(500).json({
             status: 'error',
-            message: 'Error removing approver'
+            message: 'Error removing approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Deactivate approver (soft delete by setting status to inactive)
+exports.deactivateApprover = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: {
+                        posts: true
+                    }
+                }
+            }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Check if already inactive
+        if (approver.status === 'inactive') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Approver is already inactive'
+            });
+        }
+
+        // Update approver status to inactive
+        const updatedApprover = await prisma.approver.update({
+            where: { id },
+            data: {
+                status: 'inactive',
+                updatedAt: new Date()
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                updatedAt: true
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Approver deactivated successfully',
+            data: {
+                approver: updatedApprover,
+                totalPosts: approver._count.posts
+            }
+        });
+    } catch (error) {
+        console.error('Error deactivating approver:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error deactivating approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Activate approver (reactivate a deactivated approver)
+exports.activateApprover = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Check if already active
+        if (approver.status === 'active') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Approver is already active'
+            });
+        }
+
+        // Update approver status to active
+        const updatedApprover = await prisma.approver.update({
+            where: { id },
+            data: {
+                status: 'active',
+                updatedAt: new Date()
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                updatedAt: true
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Approver activated successfully',
+            data: {
+                approver: updatedApprover
+            }
+        });
+    } catch (error) {
+        console.error('Error activating approver:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error activating approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -2575,7 +2776,7 @@ exports.getApprovers = async (req, res) => {
                 last_login: true,
                 _count: {
                     select: {
-                        approvedPosts: true
+                        posts: true
                     }
                 }
             },
@@ -2584,17 +2785,33 @@ exports.getApprovers = async (req, res) => {
             }
         });
 
+        // Get approved post counts for each approver
+        const approverIds = approvers.map(a => a.id);
+        const approvedCounts = await Promise.all(
+            approverIds.map(approverId =>
+                prisma.post.count({
+                    where: {
+                        approver_id: approverId,
+                        status: 'approved'
+                    }
+                })
+            )
+        );
+
         // Process approvers data
-        const processedApprovers = approvers.map(approver => ({
+        const processedApprovers = approvers.map((approver, index) => ({
             id: approver.id,
             username: approver.username,
             email: approver.email,
             status: approver.status,
             joinedDate: approver.createdAt,
             lastActive: approver.last_login,
-            totalApprovedPosts: approver._count.approvedPosts || 0,
+            totalApprovedPosts: approvedCounts[index] || 0,
+            totalPosts: approver._count.posts || 0,
             performance: {
-                approvalRate: 0,
+                approvalRate: approver._count.posts > 0 
+                    ? ((approvedCounts[index] || 0) / approver._count.posts * 100).toFixed(2) 
+                    : 0,
                 averageResponseTime: 0
             }
         }));
@@ -2611,7 +2828,8 @@ exports.getApprovers = async (req, res) => {
         console.error('Error fetching approvers:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Failed to fetch approvers'
+            message: 'Failed to fetch approvers',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -3912,9 +4130,20 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.getAllApprovedPostsByApprover = async (req, res) => {
     try {
         const { approverId } = req.params;
+        const { page = 1, limit = 10, status } = req.query;
+        const offset = (page - 1) * limit;
 
         // Check if the approver exists
-        const approver = await Approver.findByPk(approverId);
+        const approver = await prisma.approver.findUnique({
+            where: { id: approverId },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true
+            }
+        });
+
         if (!approver) {
             return res.status(404).json({
                 status: 'error',
@@ -3922,53 +4151,63 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
             });
         }
 
-        // Get all approved and rejected posts by this approver
-        const posts = await Post.findAll({
-            where: {
-                status: {
-                    [Op.in]: ['approved', 'rejected']
-                },
-                approver_id: approverId
-            },
-            include: [
-                {
-                    model: User,
-                    as: 'user',
-                    attributes: ['id', 'username', 'email']
-                },
-                {
-                    model: Category,
-                    as: 'category',
-                    attributes: ['id', 'name']
-                }
-            ],
-            order: [['updated_at', 'DESC']]
-        });
+        // Build where clause
+        const whereClause = {
+            approver_id: approverId
+        };
 
-        // Get the counts for both approved and rejected posts
-        const [approvedCount, rejectedCount] = await Promise.all([
-            Post.count({
+        // Filter by status if provided
+        if (status === 'approved' || status === 'rejected') {
+            whereClause.status = status;
+        } else {
+            // Default: get both approved and rejected
+            whereClause.status = {
+                in: ['approved', 'rejected']
+            };
+        }
+
+        // Get posts with pagination
+        const [posts, totalCount, approvedCount, rejectedCount] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    }
+                },
+                orderBy: {
+                    updatedAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            }),
+            prisma.post.count({
                 where: {
-                    status: 'approved',
-                    approver_id: approverId
+                    approver_id: approverId,
+                    status: 'approved'
                 }
             }),
-            Post.count({
+            prisma.post.count({
                 where: {
-                    status: 'rejected',
-                    approver_id: approverId
+                    approver_id: approverId,
+                    status: 'rejected'
                 }
             })
         ]);
-
-        // Add full URLs for files (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
-            const postData = post.toJSON();
-            if (postData.video_url) {
-                postData.fullUrl = postData.video_url; // Supabase URL is already complete
-            }
-            return postData;
-        });
 
         res.json({
             status: 'success',
@@ -3976,9 +4215,17 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
                 approver: {
                     id: approver.id,
                     username: approver.username,
-                    email: approver.email
+                    email: approver.email,
+                    status: approver.status
                 },
-                posts: postsWithUrls,
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                },
                 statistics: {
                     totalApproved: approvedCount,
                     totalRejected: rejectedCount,
@@ -4443,9 +4690,9 @@ exports.getDashboardStats = async (req, res) => {
             // Total Engagements (likes + comments + shares)
             prisma.$queryRaw`
                 SELECT 
-                    (SELECT COUNT(*) FROM "PostLikes" WHERE "createdAt" >= ${startDate}) +
-                    (SELECT COUNT(*) FROM "Comment" WHERE "createdAt" >= ${startDate}) +
-                    (SELECT COUNT(*) FROM "Share" WHERE "createdAt" >= ${startDate}) as total_engagements
+                    (SELECT COUNT(*) FROM "post_likes" WHERE "createdAt" >= ${startDate}) +
+                    (SELECT COUNT(*) FROM "comments" WHERE "comment_date" >= ${startDate}) +
+                    (SELECT COUNT(*) FROM "shares" WHERE "createdAt" >= ${startDate}) as total_engagements
             `,
             
             // Recent Content (last 10 posts)
@@ -4565,9 +4812,9 @@ exports.getAnalytics = async (req, res) => {
             // Total Engagements
             prisma.$queryRaw`
                 SELECT 
-                    (SELECT COUNT(*) FROM "PostLikes" WHERE "createdAt" >= ${startDate}) +
-                    (SELECT COUNT(*) FROM "Comment" WHERE "createdAt" >= ${startDate}) +
-                    (SELECT COUNT(*) FROM "Share" WHERE "createdAt" >= ${startDate}) as total_engagements
+                    (SELECT COUNT(*) FROM "post_likes" WHERE "createdAt" >= ${startDate}) +
+                    (SELECT COUNT(*) FROM "comments" WHERE "comment_date" >= ${startDate}) +
+                    (SELECT COUNT(*) FROM "shares" WHERE "createdAt" >= ${startDate}) as total_engagements
             `,
             
             // User Demographics (age groups based on date_of_birth)

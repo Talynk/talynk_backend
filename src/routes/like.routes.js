@@ -2,15 +2,18 @@ const express = require('express');
 const router = express.Router();
 
 // Import middleware
-const { authenticate } = require('../middleware/auth');
+const { authenticate, optionalAuthenticate } = require('../middleware/auth');
 
 // Import controllers
 const likeController = require('../controllers/likeController');
 
-// Like routes (all require authentication)
+// Like routes
+// Toggle like requires authentication
 router.post('/posts/:postId/toggle', authenticate, likeController.toggleLike);
-router.get('/posts/:postId/status', authenticate, likeController.checkLikeStatus);
-router.post('/posts/batch-status', authenticate, likeController.batchCheckLikeStatus);
+// Status endpoints support optional authentication (for unauthenticated users)
+router.get('/posts/:postId/status', optionalAuthenticate, likeController.checkLikeStatus);
+router.post('/posts/batch-status', optionalAuthenticate, likeController.batchCheckLikeStatus);
+// Other routes
 router.get('/posts/:postId/stats', likeController.getPostLikeStats);
 router.get('/user/liked', authenticate, likeController.getLikedPosts);
 

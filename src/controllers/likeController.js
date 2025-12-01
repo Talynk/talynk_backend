@@ -10,92 +10,168 @@ exports.toggleLike = async (req, res) => {
         const { postId } = req.params;
         const userId = req.user.id;
 
-        // Use transaction to ensure atomicity
-        const result = await prisma.$transaction(async (tx) => {
-            // Check if post exists
-            const post = await tx.post.findUnique({
-                where: { id: postId },
-                select: { id: true, likes: true }
+        // First, verify user exists in database (JWT might be valid but user deleted)
+        const userExists = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true }
+        });
+
+        if (!userExists) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found. Please log in again.'
             });
+        }
 
-            if (!post) {
-                console.log(`Post not found --------->  + ${post}`);
-                throw new Error('Post not found');
-            }
+        // Retry mechanism for handling race conditions
+        const maxRetries = 3;
+        let lastError;
+        let result;
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                // Use transaction to ensure atomicity
+                result = await prisma.$transaction(async (tx) => {
+                    // Check if post exists
+                    const post = await tx.post.findUnique({
+                        where: { id: postId },
+                        select: { id: true, likes: true }
+                    });
 
-            // Check if like exists INSIDE the transaction to avoid race conditions
-            // Use findFirst with the unique constraint fields
-            const existingLike = await tx.postLike.findFirst({
-                where: {
-                    user_id: userId,
-                    post_id: postId
-                }
-            });
-
-            let isLiked = false;
-            let newLikeCount = post.likes;
-
-            if (existingLike) {
-                // Unlike: Remove the like and decrement count
-                await tx.postLike.delete({
-                    where: {
-                        id: existingLike.id
+                    if (!post) {
+                        throw new Error('Post not found');
                     }
-                });
-                
-                newLikeCount = Math.max(0, post.likes - 1);
-                isLiked = false;
-            } else {
-                // Like: Create the like and increment count
-                // Use try-catch to handle potential race condition if another request creates it simultaneously
-                try {
-                    await tx.postLike.create({
-                        data: {
+
+                    // Use delete-first approach to avoid unique constraint errors
+                    // This is idempotent and handles race conditions gracefully
+                    // Try to delete the like first (safe even if it doesn't exist)
+                    const deleteResult = await tx.postLike.deleteMany({
+                        where: {
                             user_id: userId,
                             post_id: postId
                         }
                     });
-                    newLikeCount = post.likes + 1;
-                    isLiked = true;
-                } catch (error) {
-                    // If unique constraint error, it means another request already created the like
-                    // Re-check and treat as if it was already liked
-                    if (error.code === 'P2002') {
-                        const recheckLike = await tx.postLike.findFirst({
-                            where: {
+
+                    let isLiked = false;
+                    let newLikeCount = post.likes;
+
+                    if (deleteResult.count > 0) {
+                        // Like existed and was deleted (unlike action)
+                        newLikeCount = Math.max(0, post.likes - 1);
+                        isLiked = false;
+                    } else {
+                        // Like didn't exist, so create it (like action)
+                        await tx.postLike.create({
+                            data: {
                                 user_id: userId,
                                 post_id: postId
                             }
                         });
-                        if (recheckLike) {
-                            // Like already exists, so unlike it
-                            await tx.postLike.delete({
+                        newLikeCount = post.likes + 1;
+                        isLiked = true;
+                    }
+
+                    // Update the post's like count
+                    await tx.post.update({
+                        where: { id: postId },
+                        data: { likes: newLikeCount }
+                    });
+
+                    return {
+                        isLiked,
+                        likeCount: newLikeCount
+                    };
+                });
+
+                // Success - break out of retry loop
+                break;
+                
+            } catch (error) {
+                lastError = error;
+                
+                // Handle foreign key constraint error (user or post doesn't exist)
+                if (error.code === 'P2003') {
+                    if (error.meta?.constraint === 'post_likes_user_id_fkey') {
+                        return res.status(404).json({
+                            status: 'error',
+                            message: 'User not found. Please log in again.'
+                        });
+                    } else if (error.meta?.constraint === 'post_likes_post_id_fkey') {
+                        return res.status(404).json({
+                            status: 'error',
+                            message: 'Post not found'
+                        });
+                    }
+                    // Unknown foreign key error, throw it
+                    throw error;
+                }
+                
+                // If it's a unique constraint error, another request created the like
+                // Start a fresh transaction to delete it (toggle behavior)
+                if (error.code === 'P2002') {
+                    try {
+                        // Fresh transaction to handle the toggle
+                        result = await prisma.$transaction(async (tx) => {
+                            const post = await tx.post.findUnique({
+                                where: { id: postId },
+                                select: { id: true, likes: true }
+                            });
+
+                            if (!post) {
+                                throw new Error('Post not found');
+                            }
+
+                            // Delete the like that was created by the other request
+                            const deleteResult = await tx.postLike.deleteMany({
                                 where: {
-                                    id: recheckLike.id
+                                    user_id: userId,
+                                    post_id: postId
                                 }
                             });
-                            newLikeCount = Math.max(0, post.likes - 1);
-                            isLiked = false;
-                        } else {
-                            throw error; // Re-throw if it's a different error
+
+                            const newLikeCount = Math.max(0, post.likes - (deleteResult.count > 0 ? 1 : 0));
+
+                            await tx.post.update({
+                                where: { id: postId },
+                                data: { likes: newLikeCount }
+                            });
+
+                            return {
+                                isLiked: false,
+                                likeCount: newLikeCount
+                            };
+                        });
+                        // Success - break out of retry loop
+                        break;
+                    } catch (retryError) {
+                        // If the retry also fails, continue with normal retry logic
+                        lastError = retryError;
+                        if (attempt < maxRetries - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+                            continue;
                         }
-                    } else {
-                        throw error; // Re-throw if it's not a unique constraint error
                     }
                 }
+                
+                // If it's not a retryable error, break and throw
+                if (error.message === 'Post not found') {
+                    throw error;
+                }
+                
+                // For other errors, retry if we have attempts left
+                if (attempt < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+                    continue;
+                }
+                
+                throw error;
             }
-
-            // Update the post's like count
-            await tx.post.update({
-                where: { id: postId },
-                data: { likes: newLikeCount }
-            });
-
-            return {
-                isLiked,
-                likeCount: newLikeCount
-            };
-        });
+        }
+        
+        // If we exhausted all retries without success, throw the last error
+        if (!result) {
+            throw lastError;
+        }
 
         res.json({
             status: 'success',
@@ -112,14 +188,15 @@ exports.toggleLike = async (req, res) => {
         if (error.message === 'Post not found') {
             return res.status(404).json({
                 status: 'error',
-                message: 'Post not found'
+                message: 'Post not found',
+                data: {}
             });
         }
 
         res.status(500).json({
             status: 'error',
             message: 'Error processing like/unlike',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            data: {}
         });
     }
 };
@@ -127,26 +204,48 @@ exports.toggleLike = async (req, res) => {
 /**
  * Check if a user has liked a specific post (Fast existence query)
  * Uses count() for boolean response instead of fetching full records
+ * Supports both authenticated and unauthenticated users
  */
 exports.checkLikeStatus = async (req, res) => {
     try {
         const { postId } = req.params;
-        const userId = req.user.id;
+        const userId = req.user?.id;
 
-        // Fast existence query using utility function
-        const [likeExists, post] = await Promise.all([
-            userHasLikedPost(userId, postId),
-            prisma.post.findUnique({
-                where: { id: postId },
-                select: { likes: true }
-            })
-        ]);
+        // Check if post exists
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { likes: true }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found',
+                data: {}
+            });
+        }
+
+        // If user is not authenticated, return isLiked: false with actual like count
+        if (!userId) {
+            return res.json({
+                status: 'success',
+                message: 'Like status retrieved',
+                data: {
+                    isLiked: false,
+                    likeCount: post.likes || 0
+                }
+            });
+        }
+
+        // Fast existence query using utility function for authenticated users
+        const likeExists = await userHasLikedPost(userId, postId);
 
         res.json({
             status: 'success',
+            message: 'Like status retrieved',
             data: {
                 isLiked: likeExists, // Already a boolean
-                likeCount: post?.likes || 0
+                likeCount: post.likes || 0
             }
         });
 
@@ -154,7 +253,8 @@ exports.checkLikeStatus = async (req, res) => {
         console.error('Check like status error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error checking like status'
+            message: 'Error checking like status',
+            data: {}
         });
     }
 };
@@ -241,30 +341,31 @@ exports.getLikedPosts = async (req, res) => {
 /**
  * Batch check like status for multiple posts
  * Efficient for checking multiple posts at once
+ * Supports both authenticated and unauthenticated users
+ * Omits non-existent posts from response
  */
 exports.batchCheckLikeStatus = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user?.id;
         const { postIds } = req.body;
 
         if (!Array.isArray(postIds) || postIds.length === 0) {
             return res.status(400).json({
                 status: 'error',
-                message: 'postIds must be a non-empty array'
+                message: 'postIds must be a non-empty array',
+                data: {}
             });
         }
 
         if (postIds.length > 100) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Maximum 100 posts can be checked at once'
+                message: 'Maximum 100 posts can be checked at once',
+                data: {}
             });
         }
 
-        // Batch existence check for user likes
-        const likeStatuses = await batchUserLikes(userId, postIds);
-
-        // Get like counts for all posts
+        // Get like counts for all posts (only existing posts will be returned)
         const posts = await prisma.post.findMany({
             where: {
                 id: {
@@ -277,22 +378,39 @@ exports.batchCheckLikeStatus = async (req, res) => {
             }
         });
 
+        // Create a set of existing post IDs for quick lookup
+        const existingPostIds = new Set(posts.map(post => post.id));
+        
+        // Create a map of post ID to like count
         const likeCounts = {};
         posts.forEach(post => {
-            likeCounts[post.id] = post.likes;
+            likeCounts[post.id] = post.likes || 0;
         });
 
-        // Combine results
+        // If user is authenticated, get their like statuses
+        let likeStatuses = {};
+        if (userId) {
+            // Only check likes for existing posts
+            const existingIds = Array.from(existingPostIds);
+            if (existingIds.length > 0) {
+                likeStatuses = await batchUserLikes(userId, existingIds);
+            }
+        }
+
+        // Build result object - only include existing posts
         const result = {};
-        postIds.forEach(postId => {
+        existingPostIds.forEach(postId => {
             result[postId] = {
-                isLiked: likeStatuses[postId] || false,
+                isLiked: userId ? (likeStatuses[postId] || false) : false,
                 likeCount: likeCounts[postId] || 0
             };
         });
 
+        // Non-existent posts are automatically omitted from the result
+
         res.json({
             status: 'success',
+            message: 'Like statuses retrieved',
             data: result
         });
 
@@ -300,7 +418,8 @@ exports.batchCheckLikeStatus = async (req, res) => {
         console.error('Batch check like status error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error checking like statuses'
+            message: 'Error checking like statuses',
+            data: {}
         });
     }
 };

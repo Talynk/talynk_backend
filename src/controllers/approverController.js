@@ -456,3 +456,261 @@ exports.searchPosts = async (req, res) => {
         });
     }
 };
+
+// Get all posts (for approvers to view all posts)
+exports.getAllPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10, status } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Build where clause
+        const whereClause = {};
+        
+        // Filter by status if provided (all, pending, approved, rejected, frozen)
+        if (status && status !== 'all') {
+            whereClause.status = status;
+        }
+
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    approver: {
+                        select: {
+                            id: true,
+                            username: true
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / limit),
+                    totalCount: total,
+                    hasNext: page * limit < total,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get all posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get flagged posts (for approvers to review flagged posts)
+exports.getFlaggedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true
+                                }
+                            }
+                        },
+                        orderBy: {
+                            createdAt: 'desc'
+                        }
+                    }
+                },
+                orderBy: {
+                    frozen_at: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'frozen',
+                    is_frozen: true
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get flagged posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching flagged posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Review flagged post (approve or reject after review)
+exports.reviewFlaggedPost = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { action, notes } = req.body; // action: 'approve' or 'reject'
+        const approverId = req.user.id;
+
+        // Validate action
+        if (!action || !['approve', 'reject'].includes(action)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Action must be either "approve" or "reject"'
+            });
+        }
+
+        // Find the flagged post
+        const post = await prisma.post.findFirst({
+            where: { 
+                id: postId,
+                status: 'frozen',
+                is_frozen: true
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
+                }
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Flagged post not found'
+            });
+        }
+
+        // Update post based on action
+        const updateData = {
+            approver_id: approverId,
+            updatedAt: new Date()
+        };
+
+        if (action === 'approve') {
+            updateData.status = 'approved';
+            updateData.is_frozen = false;
+            updateData.approved_at = new Date();
+            updateData.frozen_at = null;
+        } else if (action === 'reject') {
+            updateData.status = 'rejected';
+            updateData.is_frozen = false;
+            updateData.frozen_at = null;
+        }
+
+        await prisma.post.update({
+            where: { id: postId },
+            data: updateData
+        });
+
+        // Create notification for the user
+        if (post.user?.username) {
+            const notificationMessage = action === 'approve' 
+                ? 'Your flagged post has been reviewed and approved' 
+                : `Your flagged post has been reviewed and rejected. Reason: ${notes || 'Violation of community guidelines'}`;
+
+            await prisma.notification.create({
+                data: {
+                    userID: post.user.username,
+                    message: notificationMessage,
+                    type: 'post_review',
+                    isRead: false
+                }
+            });
+        }
+
+        res.json({
+            status: 'success',
+            message: `Flagged post ${action}d successfully`,
+            data: {
+                postId,
+                action,
+                reviewedBy: approverId
+            }
+        });
+    } catch (error) {
+        console.error('Review flagged post error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error reviewing flagged post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};

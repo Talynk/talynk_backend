@@ -111,10 +111,58 @@ const isApprover = (req, res, next) => {
     next();
 };
 
+/**
+ * Optional authentication middleware
+ * Sets req.user if token is valid, but doesn't fail if token is missing or invalid
+ * Used for endpoints that should work for both authenticated and unauthenticated users
+ */
+const optionalAuthenticate = (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        
+        // If no auth header, continue without setting req.user
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            req.user = undefined;
+            return next();
+        }
+
+        const token = authHeader.split(' ')[1];
+        
+        if (!token) {
+            req.user = undefined;
+            return next();
+        }
+
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            
+            // Check if account is frozen - this should still fail
+            if (decoded.status === 'frozen') {
+                return res.status(403).json({
+                    status: 'error',
+                    message: 'Your account has been frozen. Please contact support for assistance.'
+                });
+            }
+            
+            req.user = decoded;
+            next();
+        } catch (jwtError) {
+            // Token invalid or expired - continue without authentication
+            req.user = undefined;
+            next();
+        }
+    } catch (error) {
+        // On any error, continue without authentication
+        req.user = undefined;
+        next();
+    }
+};
+
 module.exports = {
     authenticate,
     requireRole,
     authorize,
     isAdmin,
-    isApprover
+    isApprover,
+    optionalAuthenticate
 }; 

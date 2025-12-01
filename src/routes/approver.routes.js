@@ -12,8 +12,11 @@ const approverController = require('../controllers/approverController');
 router.get('/stats', authenticate, isApprover, approverController.getApproverStats);
 router.get('/posts/pending', authenticate, isApprover, approverController.getPendingPosts);
 router.get('/posts/approved', authenticate, isApprover, approverController.getApprovedPosts);
+router.get('/posts/all', authenticate, isApprover, approverController.getAllPosts);
+router.get('/posts/flagged', authenticate, isApprover, approverController.getFlaggedPosts);
 router.put('/posts/:postId/approve', authenticate, isApprover, approverController.approvePost);
 router.put('/posts/:postId/reject', authenticate, isApprover, approverController.rejectPost);
+router.put('/posts/:postId/flagged/review', authenticate, isApprover, approverController.reviewFlaggedPost);
 router.get('/notifications', authenticate, isApprover, approverController.getApproverNotifications);
 router.get('/posts/search', authenticate, isApprover, approverController.searchPosts);
 

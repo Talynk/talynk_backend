@@ -7,6 +7,7 @@ const upload = require('../middleware/fileUpload');
 
 // Import controllers
 const postController = require('../controllers/postController');
+const likeController = require('../controllers/likeController');
 
 // Post routes (all protected)
 router.post('/', authenticate, ...upload.single('file'), postController.createPost);
@@ -19,6 +20,7 @@ router.get('/search', postController.searchPosts);
 
 // PARAMETERIZED ROUTES LAST - to avoid conflicts
 router.get('/:postId', postController.getPostById);
+router.post('/:postId/like', authenticate, likeController.toggleLike);
 router.delete('/:postId', authenticate, postController.deletePost);
 
 module.exports = router;

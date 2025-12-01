@@ -13,6 +13,10 @@ router.post('/register', adminController.registerAdmin);
 router.get('/users', authenticate, isAdmin, adminController.getAllUsers);
 router.post('/accounts/manage', authenticate, isAdmin, adminController.manageUserAccount);
 router.post('/approvers', authenticate, isAdmin, adminController.registerApprover);
+router.get('/approvers', authenticate, isAdmin, adminController.getApprovers);
+router.get('/approvers/:approverId/posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
+router.put('/approvers/:id/deactivate', authenticate, isAdmin, adminController.deactivateApprover);
+router.put('/approvers/:id/activate', authenticate, isAdmin, adminController.activateApprover);
 router.delete('/approvers/:id', authenticate, isAdmin, adminController.removeApprover);
 router.get('/videos', authenticate, isAdmin, adminController.getAllVideos);
 router.put('/approve', authenticate, isAdmin, adminController.updatePostStatus);
@@ -43,6 +47,11 @@ router.get('/appeals', authenticate, isAdmin, adminController.getAllAppeals);
 
 // Broadcast Notifications
 router.post('/notifications/broadcast', authenticate, isAdmin, adminController.sendBroadcastNotification);
+
+
+
+
+
 
 // Seeding and reset endpoints (Admin only)
 router.post('/seed/countries', authenticate, isAdmin, seedController.seedCountries);
