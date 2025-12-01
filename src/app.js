@@ -19,6 +19,10 @@ const prisma = require('./lib/prisma');
 
 const app = express();
 
+// Trust proxy - required when behind reverse proxy (Caddy)
+// This ensures Express correctly handles X-Forwarded-* headers
+app.set('trust proxy', true);
+
 // Initialize Supabase bucket check
 async function checkSupabaseBucket() {
   try {
@@ -48,13 +52,8 @@ async function checkSupabaseBucket() {
 // Check Supabase bucket on startup
 checkSupabaseBucket();
 
-// Basic middleware
-app.use(helmet({
-    contentSecurityPolicy: false // For development only
-}));
-
-// Apply CORS before any route definitions
-app.use(cors({
+// CORS configuration - must be before other middleware
+const corsOptions = {
   origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3001', 
            'http://127.0.0.1:3001', 'http://192.168.56.1:3001', 
            'https://talynk-user-frontend-git-main-ihirwepatricks-projects.vercel.app', 
@@ -64,14 +63,61 @@ app.use(cors({
            'https://talynk.vercel.app', 'https://talentix.net', 'https://admin.talentix.net'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+};
+
+// Manual CORS headers middleware - runs FIRST to ensure headers are always set
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    
+    // Check if origin is in allowed list
+    if (origin && corsOptions.origin.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    
+    // Always set these headers for preflight
+    if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+        res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+        res.setHeader('Access-Control-Max-Age', '86400');
+        return res.status(204).end();
+    }
+    
+    // For non-OPTIONS requests, set methods and headers headers
+    res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+    res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+    
+    next();
+});
+
+// Apply CORS middleware (as additional layer)
+app.use(cors(corsOptions));
+
+// Explicit OPTIONS handler (backup)
+app.options('*', (req, res) => {
+    const origin = req.headers.origin;
+    if (origin && corsOptions.origin.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
+    res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
+    res.setHeader('Access-Control-Max-Age', '86400');
+    res.status(204).end();
+});
+
+// Basic middleware - configure helmet to not interfere with CORS
+app.use(helmet({
+    contentSecurityPolicy: false, // For development only
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false
 }));
 
-// Add a preflight handler for all routes
-app.options('*', cors());
-
-// Add specific CORS handling for problematic routes
-app.use('/api/posts/all', cors());
+// Add specific CORS handling for problematic routes (using same config)
+app.use('/api/posts/all', cors(corsOptions));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

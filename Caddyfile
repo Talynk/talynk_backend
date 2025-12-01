@@ -1,0 +1,48 @@
+api.talentix.net {
+    # Handle OPTIONS preflight requests explicitly
+    @options {
+        method OPTIONS
+    }
+    handle @options {
+        # Forward OPTIONS to backend so Express can handle CORS
+        reverse_proxy http://localhost:3000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            header_up Origin {http.request.header.Origin}
+            header_up Access-Control-Request-Method {http.request.header.Access-Control-Request-Method}
+            header_up Access-Control-Request-Headers {http.request.header.Access-Control-Request-Headers}
+        }
+    }
+
+    # Handle all other requests
+    handle {
+        # Reverse proxy to backend
+        reverse_proxy http://localhost:3000 {
+            # Preserve original host
+            header_up Host {host}
+            
+            # Forward client information (important for trust proxy in Express)
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            
+            # Ensure Origin header is passed through (critical for CORS)
+            header_up Origin {http.request.header.Origin}
+            
+            # Caddy passes through all response headers from backend (including CORS headers)
+        }
+    }
+
+    # Gzip compression
+    encode gzip
+
+    # Logging
+    log {
+        output file /var/log/caddy/api.access.log
+    }
+}
+
