@@ -8,34 +8,386 @@ const {
     buildLoginWhereClause,
     createConflictMessage 
 } = require('../utils/authUtils');
+const { createAndSendOTP, verifyOTP } = require('../services/otpService');
 
+/**
+ * Step 1: Request OTP for email verification during registration
+ * User provides email, we send OTP
+ */
+exports.requestRegistrationOTP = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email is required'
+            });
+        }
+
+        // Sanitize and validate email
+        const sanitizedEmail = sanitizeLoginInput(email, 'email');
+        if (!sanitizedEmail) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Check if user already exists
+        const existingUser = await prisma.user.findUnique({
+            where: { email: sanitizedEmail }
+        });
+
+        if (existingUser) {
+            return res.status(409).json({
+                status: 'error',
+                message: 'An account with this email already exists'
+            });
+        }
+
+        // Create and send OTP
+        await createAndSendOTP(sanitizedEmail, 'EMAIL_VERIFICATION');
+
+        res.json({
+            status: 'success',
+            message: 'OTP code sent to your email. Please check your inbox.'
+        });
+    } catch (error) {
+        console.error('Request OTP error:', error);
+        
+        // Handle rate limiting error
+        if (error.code === 'RATE_LIMIT_EXCEEDED') {
+            return res.status(429).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    remainingSeconds: error.remainingSeconds,
+                    retryAfter: error.remainingSeconds
+                }
+            });
+        }
+        
+        // Handle email sending errors
+        if (error.message && error.message.includes('Failed to send email')) {
+            return res.status(500).json({
+                status: 'error',
+                message: 'Failed to send OTP code. Please try again later.'
+            });
+        }
+        
+        // Generic error
+        res.status(500).json({
+            status: 'error',
+            message: error.message || 'Failed to send OTP code'
+        });
+    }
+};
+
+/**
+ * Step 2: Verify OTP code
+ * User provides email and OTP code for verification
+ */
+exports.verifyRegistrationOTP = async (req, res) => {
+    try {
+        const { email, otpCode } = req.body;
+
+        if (!email || !otpCode) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email and OTP code are required'
+            });
+        }
+
+        // Sanitize email
+        const sanitizedEmail = sanitizeLoginInput(email, 'email');
+        if (!sanitizedEmail) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Verify OTP
+        const otp = await verifyOTP(sanitizedEmail, otpCode, 'EMAIL_VERIFICATION');
+
+        // Return a temporary token or session identifier for completing registration
+        // This token will be used in the next step to verify the user completed OTP
+        const verificationToken = jwt.sign(
+            {
+                email: sanitizedEmail,
+                otpId: otp.id,
+                purpose: 'registration_verification'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' } // Short-lived token for completing registration
+        );
+
+        res.json({
+            status: 'success',
+            message: 'Email verified successfully',
+            data: {
+                verificationToken,
+                email: sanitizedEmail
+            }
+        });
+    } catch (error) {
+        console.error('Verify OTP error:', error);
+        
+        // Handle specific OTP error types
+        if (error.code === 'OTP_EXPIRED') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: 'OTP_EXPIRED',
+                    action: 'request_new'
+                }
+            });
+        }
+
+        if (error.code === 'OTP_ALREADY_USED') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: 'OTP_ALREADY_USED',
+                    action: 'request_new'
+                }
+            });
+        }
+
+        if (error.code === 'INVALID_OTP') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: 'INVALID_OTP'
+                }
+            });
+        }
+
+        // Generic error
+        res.status(400).json({
+            status: 'error',
+            message: error.message || 'Invalid or expired OTP code'
+        });
+    }
+};
+
+/**
+ * Step 3: Complete registration after OTP verification
+ * User provides password, username, and other details
+ */
+exports.completeRegistration = async (req, res) => {
+    try {
+        const { verificationToken, username, display_name, password, country_id, date_of_birth } = req.body;
+
+        if (!verificationToken || !username || !password) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Verification token, username, and password are required'
+            });
+        }
+
+        // Verify the verification token
+        let decoded;
+        try {
+            decoded = jwt.verify(verificationToken, process.env.JWT_SECRET);
+            if (decoded.purpose !== 'registration_verification') {
+                throw new Error('Invalid token purpose');
+            }
+        } catch (error) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid or expired verification token. Please verify your email again.'
+            });
+        }
+
+        const email = decoded.email;
+
+        // Verify OTP was actually verified
+        const otp = await prisma.otp.findUnique({
+            where: { id: decoded.otpId }
+        });
+
+        if (!otp || !otp.verified) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Email verification not completed. Please verify your email again.'
+            });
+        }
+
+        // Sanitize inputs
+        const sanitizedUsername = sanitizeLoginInput(username, 'username');
+        const sanitizedDisplayName = display_name ? String(display_name).trim() : null;
+
+        // Validate username
+        if (!sanitizedUsername || sanitizedUsername.length < 3) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Username must be at least 3 characters long'
+            });
+        }
+
+        // Validate password
+        if (password.length < 6) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Check if username is already taken
+        const existingUser = await prisma.user.findFirst({
+            where: {
+                OR: [
+                    { username: sanitizedUsername },
+                    { email: email }
+                ]
+            }
+        });
+
+        if (existingUser) {
+            if (existingUser.username === sanitizedUsername) {
+                return res.status(409).json({
+                    status: 'error',
+                    message: 'Username is already taken'
+                });
+            }
+            if (existingUser.email === email) {
+                return res.status(409).json({
+                    status: 'error',
+                    message: 'Email is already registered'
+                });
+            }
+        }
+
+        // Validate country if provided
+        let countryId = null;
+        if (country_id) {
+            const country = await prisma.country.findUnique({
+                where: { id: parseInt(country_id) }
+            });
+
+            if (!country) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid country selected'
+                });
+            }
+            countryId = parseInt(country_id);
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Create user
+        const user = await prisma.user.create({
+            data: {
+                email: email,
+                email_verified: true,
+                username: sanitizedUsername,
+                display_name: sanitizedDisplayName,
+                password: hashedPassword,
+                country_id: countryId,
+                date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            },
+            select: {
+                id: true,
+                username: true,
+                display_name: true,
+                email: true,
+                email_verified: true,
+                country_id: true,
+                country: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        flag_emoji: true
+                    }
+                },
+                createdAt: true,
+                updatedAt: true
+            }
+        });
+
+        // Clean up the OTP record
+        await prisma.otp.delete({
+            where: { id: otp.id }
+        });
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Registration completed successfully',
+            data: {
+                user
+            }
+        });
+    } catch (error) {
+        console.error('Complete registration error:', error);
+        
+        // Handle unique constraint errors
+        if (error.code === 'P2002') {
+            return res.status(409).json({
+                status: 'error',
+                message: 'Username or email already exists'
+            });
+        }
+
+        res.status(500).json({
+            status: 'error',
+            message: 'Error during registration'
+        });
+    }
+};
+
+/**
+ * Legacy register endpoint - kept for backward compatibility but deprecated
+ * @deprecated Use requestRegistrationOTP -> verifyRegistrationOTP -> completeRegistration flow instead
+ */
 exports.register = async (req, res) => {
     try {
-        const { username, display_name, email, password, phone1, phone2, country_id, date_of_birth } = req.body;
+        const { username, display_name, email, password, country_id, date_of_birth } = req.body;
         
         // Sanitize inputs
         const sanitizedEmail = email ? sanitizeLoginInput(email, 'email') : null;
         const sanitizedUsername = username ? sanitizeLoginInput(username, 'username') : null;
         const sanitizedDisplayName = display_name ? String(display_name).trim() : null;
         
-        // Validate required fields
-        if (!password || !phone1 || !country_id) {
+        // Validate required fields (phone no longer required)
+        if (!password) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Password, primary phone number, and country are required'
+                message: 'Password is required'
             });
         }
 
-        // Validate country_id exists
-        const country = await prisma.country.findUnique({
-            where: { id: parseInt(country_id) }
-        });
-
-        if (!country) {
+        // Validate email and username
+        if (!sanitizedEmail || !sanitizedUsername) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Invalid country selected'
+                message: 'Email and username are required'
             });
+        }
+
+        // Validate country_id if provided
+        let countryId = null;
+        if (country_id) {
+            const country = await prisma.country.findUnique({
+                where: { id: parseInt(country_id) }
+            });
+
+            if (!country) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid country selected'
+                });
+            }
+            countryId = parseInt(country_id);
         }
 
         // Validate login fields using utility function
@@ -51,8 +403,8 @@ exports.register = async (req, res) => {
         const existingUser = await prisma.user.findFirst({
             where: {
                 OR: [
-                    ...(sanitizedUsername ? [{ username: sanitizedUsername }] : []),
-                    ...(sanitizedEmail ? [{ email: sanitizedEmail }] : [])
+                    { username: sanitizedUsername },
+                    { email: sanitizedEmail }
                 ]
             }
         });
@@ -68,21 +420,19 @@ exports.register = async (req, res) => {
         // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // Create user with provided fields
+        // Create user with provided fields (no phone required)
         const userData = {
+            email: sanitizedEmail,
+            username: sanitizedUsername,
             password: hashedPassword,
-            phone1,
-            phone2: phone2 || null,
-            country_id: parseInt(country_id),
+            email_verified: false, // Legacy registration doesn't verify email
+            country_id: countryId,
             date_of_birth: date_of_birth ? new Date(date_of_birth) : null,
             createdAt: new Date(),
             updatedAt: new Date()
         };
 
-        // Add username and email if provided
-        if (sanitizedUsername) userData.username = sanitizedUsername;
         if (sanitizedDisplayName) userData.display_name = sanitizedDisplayName;
-        if (sanitizedEmail) userData.email = sanitizedEmail;
 
         const user = await prisma.user.create({
             data: userData,
@@ -91,8 +441,7 @@ exports.register = async (req, res) => {
                 username: true,
                 display_name: true,
                 email: true,
-                phone1: true,
-                phone2: true,
+                email_verified: true,
                 country_id: true,
                 country: {
                     select: {
@@ -109,7 +458,7 @@ exports.register = async (req, res) => {
    
         res.status(201).json({
             status: 'success',
-            message: 'User registered successfully',
+            message: 'User registered successfully (Note: Email verification recommended)',
             data: {
                 user
             }

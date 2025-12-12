@@ -7,7 +7,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = env("DATABASE_LOCAL")
 }
 
 model User {
@@ -15,6 +15,7 @@ model User {
   username              String?  @unique @db.VarChar(255)
   display_name          String?  @db.VarChar(255)
   email                 String?  @unique @db.VarChar(255)
+  email_verified        Boolean  @default(false)
   phone1                String?  @db.VarChar(15)
   phone2                String?  @db.VarChar(15)
   date_of_birth         DateTime?
@@ -22,7 +23,7 @@ model User {
   total_profile_views   Int      @default(0)
   user_facial_image     Bytes?
   selected_category     String?  @db.VarChar(255)
-  password              String   @db.VarChar(255)
+  password              String?  @db.VarChar(255) // Made optional for OTP flow
   notification          Boolean  @default(true)
   recent_searches       Json?
   likes                 Int      @default(0)
@@ -54,6 +55,7 @@ model User {
   appeals               PostAppeal[]
   preferences           UserPreference[]
   country               Country? @relation(fields: [country_id], references: [id])
+  otps                   Otp[]
 
   @@map("users")
 }
@@ -415,4 +417,29 @@ enum AppealStatus {
   pending
   approved
   rejected
+}
+
+model Otp {
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String   @db.VarChar(255)
+  code        String   @db.VarChar(6)
+  type        OtpType  @default(EMAIL_VERIFICATION)
+  expires_at  DateTime
+  verified    Boolean  @default(false)
+  user_id     String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([email, code])
+  @@index([email, type, verified])
+  @@map("otps")
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  LOGIN
 }
