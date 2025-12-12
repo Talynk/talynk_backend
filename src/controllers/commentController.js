@@ -1,4 +1,6 @@
 const prisma = require('../lib/prisma');
+const { clearCacheByPattern } = require('../utils/cache');
+const { emitEvent } = require('../lib/realtime');
 
 exports.addComment = async (req, res) => {
     try {
@@ -94,6 +96,17 @@ exports.addComment = async (req, res) => {
                 }
             });
         }
+
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('comment:created', {
+            postId,
+            commentId: comment.id,
+            userId: resolvedUser.id,
+        });
 
         res.status(201).json({
             status: 'success',
@@ -247,6 +260,13 @@ exports.deleteComment = async (req, res) => {
         });
 
         console.log('Post comment count decremented');
+
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('comment:deleted', { postId, commentId });
 
         res.json({
             status: 'success',

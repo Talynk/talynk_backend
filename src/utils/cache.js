@@ -1,41 +1,25 @@
 const NodeCache = require('node-cache');
+const { getClient, redisReady } = require('../lib/redis');
 
-// Create cache instances for different data types
-const featuredPostsCache = new NodeCache({ 
-    stdTTL: 300, // 5 minutes
-    checkperiod: 60, // Check for expired keys every minute
-    useClones: false // Don't clone objects for better performance
-});
+// Redis-aware helpers
+const redisClient = () => (redisReady() ? getClient() : null);
+const toJson = (value) => JSON.stringify(value);
+const fromJson = (value) => {
+    try {
+        return value ? JSON.parse(value) : null;
+    } catch (err) {
+        console.warn('[Cache] failed to parse cached JSON', err);
+        return null;
+    }
+};
 
-const followingPostsCache = new NodeCache({ 
-    stdTTL: 180, // 3 minutes
-    checkperiod: 60,
-    useClones: false
-});
-
-const allPostsCache = new NodeCache({ 
-    stdTTL: 120, // 2 minutes for all posts (frequently updated)
-    checkperiod: 60,
-    useClones: false
-});
-
-const singlePostCache = new NodeCache({ 
-    stdTTL: 600, // 10 minutes for individual posts
-    checkperiod: 120,
-    useClones: false
-});
-
-const searchCache = new NodeCache({ 
-    stdTTL: 300, // 5 minutes for search results
-    checkperiod: 60,
-    useClones: false
-});
-
-const userCache = new NodeCache({ 
-    stdTTL: 600, // 10 minutes
-    checkperiod: 120,
-    useClones: false
-});
+// Create cache instances for different data types as local fallback
+const featuredPostsCache = new NodeCache({ stdTTL: 300, checkperiod: 60, useClones: false });
+const followingPostsCache = new NodeCache({ stdTTL: 180, checkperiod: 60, useClones: false });
+const allPostsCache = new NodeCache({ stdTTL: 120, checkperiod: 60, useClones: false });
+const singlePostCache = new NodeCache({ stdTTL: 600, checkperiod: 120, useClones: false });
+const searchCache = new NodeCache({ stdTTL: 300, checkperiod: 60, useClones: false });
+const userCache = new NodeCache({ stdTTL: 600, checkperiod: 120, useClones: false });
 
 // Cache keys
 const CACHE_KEYS = {
@@ -53,7 +37,12 @@ const CACHE_KEYS = {
  * @param {string} key - Cache key
  * @returns {Array|null} Cached data or null
  */
-const getFeaturedPostsCache = (key) => {
+const getFeaturedPostsCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return featuredPostsCache.get(key);
 };
 
@@ -63,7 +52,11 @@ const getFeaturedPostsCache = (key) => {
  * @param {Array} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setFeaturedPostsCache = (key, data, ttl = 300) => {
+const setFeaturedPostsCache = async (key, data, ttl = 300) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     featuredPostsCache.set(key, data, ttl);
 };
 
@@ -72,7 +65,12 @@ const setFeaturedPostsCache = (key, data, ttl = 300) => {
  * @param {string} key - Cache key
  * @returns {Array|null} Cached data or null
  */
-const getFollowingPostsCache = (key) => {
+const getFollowingPostsCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return followingPostsCache.get(key);
 };
 
@@ -82,7 +80,11 @@ const getFollowingPostsCache = (key) => {
  * @param {Array} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setFollowingPostsCache = (key, data, ttl = 180) => {
+const setFollowingPostsCache = async (key, data, ttl = 180) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     followingPostsCache.set(key, data, ttl);
 };
 
@@ -91,7 +93,12 @@ const setFollowingPostsCache = (key, data, ttl = 180) => {
  * @param {string} key - Cache key
  * @returns {Object|null} Cached data or null
  */
-const getUserCache = (key) => {
+const getUserCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return userCache.get(key);
 };
 
@@ -101,7 +108,11 @@ const getUserCache = (key) => {
  * @param {Object} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setUserCache = (key, data, ttl = 600) => {
+const setUserCache = async (key, data, ttl = 600) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     userCache.set(key, data, ttl);
 };
 
@@ -110,7 +121,12 @@ const setUserCache = (key, data, ttl = 600) => {
  * @param {string} key - Cache key
  * @returns {Array|null} Cached data or null
  */
-const getAllPostsCache = (key) => {
+const getAllPostsCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return allPostsCache.get(key);
 };
 
@@ -120,7 +136,11 @@ const getAllPostsCache = (key) => {
  * @param {Array} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setAllPostsCache = (key, data, ttl = 120) => {
+const setAllPostsCache = async (key, data, ttl = 120) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     allPostsCache.set(key, data, ttl);
 };
 
@@ -129,7 +149,12 @@ const setAllPostsCache = (key, data, ttl = 120) => {
  * @param {string} key - Cache key
  * @returns {Object|null} Cached data or null
  */
-const getSinglePostCache = (key) => {
+const getSinglePostCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return singlePostCache.get(key);
 };
 
@@ -139,7 +164,11 @@ const getSinglePostCache = (key) => {
  * @param {Object} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setSinglePostCache = (key, data, ttl = 600) => {
+const setSinglePostCache = async (key, data, ttl = 600) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     singlePostCache.set(key, data, ttl);
 };
 
@@ -148,7 +177,12 @@ const setSinglePostCache = (key, data, ttl = 600) => {
  * @param {string} key - Cache key
  * @returns {Array|null} Cached data or null
  */
-const getSearchCache = (key) => {
+const getSearchCache = async (key) => {
+    const redis = redisClient();
+    if (redis) {
+        const cached = await redis.get(key);
+        if (cached) return fromJson(cached);
+    }
     return searchCache.get(key);
 };
 
@@ -158,7 +192,11 @@ const getSearchCache = (key) => {
  * @param {Array} data - Data to cache
  * @param {number} ttl - Time to live in seconds
  */
-const setSearchCache = (key, data, ttl = 300) => {
+const setSearchCache = async (key, data, ttl = 300) => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.set(key, toJson(data), 'EX', ttl);
+    }
     searchCache.set(key, data, ttl);
 };
 
@@ -166,48 +204,39 @@ const setSearchCache = (key, data, ttl = 300) => {
  * Clear cache by pattern
  * @param {string} pattern - Pattern to match cache keys
  */
-const clearCacheByPattern = (pattern) => {
-    featuredPostsCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            featuredPostsCache.del(key);
-        }
-    });
-    
-    followingPostsCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            followingPostsCache.del(key);
-        }
-    });
-    
-    allPostsCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            allPostsCache.del(key);
-        }
-    });
-    
-    singlePostCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            singlePostCache.del(key);
-        }
-    });
-    
-    searchCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            searchCache.del(key);
-        }
-    });
-    
-    userCache.keys().forEach(key => {
-        if (key.includes(pattern)) {
-            userCache.del(key);
-        }
-    });
+const clearCacheByPattern = async (pattern) => {
+    const redis = redisClient();
+    if (redis) {
+        const stream = redis.scanStream({ match: `*${pattern}*`, count: 100 });
+        const deletes = [];
+        stream.on('data', (keys) => {
+            if (keys.length) {
+                deletes.push(redis.del(...keys));
+            }
+        });
+        await new Promise((resolve, reject) => {
+            stream.on('end', resolve);
+            stream.on('error', reject);
+        });
+        await Promise.all(deletes);
+    }
+
+    featuredPostsCache.keys().forEach(key => key.includes(pattern) && featuredPostsCache.del(key));
+    followingPostsCache.keys().forEach(key => key.includes(pattern) && followingPostsCache.del(key));
+    allPostsCache.keys().forEach(key => key.includes(pattern) && allPostsCache.del(key));
+    singlePostCache.keys().forEach(key => key.includes(pattern) && singlePostCache.del(key));
+    searchCache.keys().forEach(key => key.includes(pattern) && searchCache.del(key));
+    userCache.keys().forEach(key => key.includes(pattern) && userCache.del(key));
 };
 
 /**
  * Clear all caches
  */
-const clearAllCaches = () => {
+const clearAllCaches = async () => {
+    const redis = redisClient();
+    if (redis) {
+        await redis.flushall();
+    }
     featuredPostsCache.flushAll();
     followingPostsCache.flushAll();
     allPostsCache.flushAll();

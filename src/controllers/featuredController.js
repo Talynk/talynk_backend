@@ -16,7 +16,7 @@ exports.getFeaturedPosts = async (req, res) => {
         const cacheKey = `${CACHE_KEYS.FEATURED_POSTS}_${sort}_${page}_${limit}`;
         
         // Try to get from cache first
-        const cachedData = getFeaturedPostsCache(cacheKey);
+        const cachedData = await getFeaturedPostsCache(cacheKey);
         if (cachedData) {
             console.log('Serving featured posts from cache');
             return res.json({
@@ -127,7 +127,7 @@ exports.getFeaturedPosts = async (req, res) => {
         };
 
         // Cache the response
-        setFeaturedPostsCache(cacheKey, responseData);
+        await setFeaturedPostsCache(cacheKey, responseData);
 
         res.json({
             status: 'success',

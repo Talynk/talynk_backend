@@ -1,5 +1,7 @@
 const prisma = require('../lib/prisma');
 const { userHasLikedPost, batchUserLikes } = require('../utils/existenceQueries');
+const { clearCacheByPattern } = require('../utils/cache');
+const { emitEvent } = require('../lib/realtime');
 
 /**
  * Like or unlike a post with atomic operations
@@ -172,6 +174,14 @@ exports.toggleLike = async (req, res) => {
         if (!result) {
             throw lastError;
         }
+
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:likeToggled', { postId, userId, isLiked: result.isLiked, likeCount: result.likeCount });
 
         res.json({
             status: 'success',

@@ -17,6 +17,7 @@ const {
     setSearchCache,
     clearCacheByPattern 
 } = require('../utils/cache');
+const { emitEvent } = require('../lib/realtime');
 
 // Remove the applyWatermarkAsync function and all calls to it
 
@@ -132,10 +133,12 @@ exports.createPost = async (req, res) => {
         });
 
         // Clear relevant caches
-        clearCacheByPattern('following_posts');
-        clearCacheByPattern('featured_posts');
-        clearCacheByPattern('all_posts');
-        clearCacheByPattern('search_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:created', { postId: post.id, userId: userId });
 
         res.status(201).json({
             status: 'success',
@@ -183,7 +186,7 @@ exports.getAllPosts = async (req, res) => {
         const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${country_id || 'all'}`;
         
         // Try to get from cache first
-        const cachedData = getAllPostsCache(cacheKey);
+        const cachedData = await getAllPostsCache(cacheKey);
         if (cachedData) {
             console.log('Serving all posts from cache');
             return res.json({
@@ -268,7 +271,7 @@ exports.getAllPosts = async (req, res) => {
         };
 
         // Cache the response
-        setAllPostsCache(cacheKey, responseData);
+        await setAllPostsCache(cacheKey, responseData);
 
         res.json({
             status: 'success',
@@ -316,7 +319,7 @@ exports.getPostById = async (req, res) => {
         const cacheKey = `${CACHE_KEYS.SINGLE_POST}_${postId}`;
         
         // Try to get from cache first
-        const cachedData = getSinglePostCache(cacheKey);
+        const cachedData = await getSinglePostCache(cacheKey);
         if (cachedData) {
             console.log('Serving single post from cache');
             return res.json({
@@ -393,7 +396,7 @@ exports.getPostById = async (req, res) => {
         const responseData = { post: postWithUrl };
 
         // Cache the response
-        setSinglePostCache(cacheKey, responseData);
+        await setSinglePostCache(cacheKey, responseData);
 
         console.log(`Post with associations retrieved successfully`);
         res.json({
@@ -469,6 +472,14 @@ exports.updatePost = async (req, res) => {
             }
         });
 
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:updated', { postId, userId });
+
         res.json({
             status: 'success',
             data: { post: updatedPost }
@@ -516,6 +527,14 @@ exports.deletePost = async (req, res) => {
                 }
             }
         });
+
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:deleted', { postId, userId: userID });
 
         res.json({
             status: 'success',
@@ -1240,7 +1259,7 @@ exports.searchPosts = async (req, res) => {
         const cacheKey = `${CACHE_KEYS.SEARCH_POSTS}_${q.toLowerCase()}_${page}_${limit}`;
         
         // Try to get from cache first
-        const cachedData = getSearchCache(cacheKey);
+        const cachedData = await getSearchCache(cacheKey);
         if (cachedData) {
             console.log('Serving search results from cache');
             return res.json({
@@ -1363,7 +1382,7 @@ exports.searchPosts = async (req, res) => {
         };
 
         // Cache the response
-        setSearchCache(cacheKey, responseData);
+        await setSearchCache(cacheKey, responseData);
 
         res.json({
             status: 'success',
@@ -1437,7 +1456,7 @@ exports.getFollowingPosts = async (req, res) => {
         const cacheKey = `${CACHE_KEYS.FOLLOWING_POSTS}_${userId}_${sort}_${page}_${limit}`;
         
         // Try to get from cache first
-        const cachedData = getFollowingPostsCache(cacheKey);
+        const cachedData = await getFollowingPostsCache(cacheKey);
         if (cachedData) {
             console.log('Serving following posts from cache');
             return res.json({
@@ -1542,7 +1561,7 @@ exports.getFollowingPosts = async (req, res) => {
         };
 
         // Cache the response
-        setFollowingPostsCache(cacheKey, responseData);
+        await setFollowingPostsCache(cacheKey, responseData);
 
         res.json({
             status: 'success',

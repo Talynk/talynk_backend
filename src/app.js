@@ -5,6 +5,8 @@ const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const http = require('http');
+const { initRealtime } = require('./lib/realtime');
 
 // Initialize Supabase client
 const supabaseUrl = process.env.SUPABASE_URL || 'https://putkiapvvlebelkafwbe.supabase.co';
@@ -201,8 +203,11 @@ const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
     try {
-        // Check if port is in use
-        const server = app.listen(PORT, () => {
+        const server = http.createServer(app);
+
+        await initRealtime(server, corsOptions.origin);
+
+        server.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);
         });
 

@@ -18,6 +18,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: talynk-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     # Use image from GHCR to allow Watchtower auto-updates; uncomment build for local builds
     image: ghcr.io/ihirwepatrick/talynk-backend:latest
@@ -38,10 +52,13 @@ services:
       SUPABASE_URL: ${SUPABASE_URL:-https://example.supabase.co}
       SUPABASE_KEY: ${SUPABASE_KEY:-anon_key}
       SUPABASE_BUCKET_NAME: ${SUPABASE_BUCKET_NAME:-posts}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
       - "3000:3000"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
@@ -62,5 +79,6 @@ services:
 volumes:
   db_data:
   uploads_data:
+  redis_data:
 
 
