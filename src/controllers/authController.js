@@ -377,15 +377,15 @@ exports.register = async (req, res) => {
         // Validate country_id if provided
         let countryId = null;
         if (country_id) {
-            const country = await prisma.country.findUnique({
-                where: { id: parseInt(country_id) }
-            });
+        const country = await prisma.country.findUnique({
+            where: { id: parseInt(country_id) }
+        });
 
-            if (!country) {
-                return res.status(400).json({
-                    status: 'error',
-                    message: 'Invalid country selected'
-                });
+        if (!country) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid country selected'
+            });
             }
             countryId = parseInt(country_id);
         }
@@ -1032,6 +1032,407 @@ exports.refreshToken = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to refresh token'
+        });
+    }
+};
+
+/**
+ * Password Reset Flow
+ * Step 1: Request OTP for password reset
+ */
+exports.requestPasswordResetOTP = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email is required'
+            });
+        }
+
+        // Sanitize and validate email
+        const sanitizedEmail = sanitizeLoginInput(email, 'email');
+        if (!sanitizedEmail) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Check if user exists
+        const user = await prisma.user.findUnique({
+            where: { email: sanitizedEmail },
+            select: { id: true, email: true }
+        });
+
+        if (!user) {
+            // Don't reveal if email exists or not (security best practice)
+            return res.json({
+                status: 'success',
+                message: 'If an account exists with this email, a password reset code has been sent.'
+            });
+        }
+
+        // Create and send OTP
+        await createAndSendOTP(sanitizedEmail, 'PASSWORD_RESET', user.id);
+
+        res.json({
+            status: 'success',
+            message: 'If an account exists with this email, a password reset code has been sent.'
+        });
+    } catch (error) {
+        console.error('Request password reset OTP error:', error);
+        
+        // Handle rate limiting
+        if (error.code === 'RATE_LIMIT_EXCEEDED') {
+            return res.status(429).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    remainingSeconds: error.remainingSeconds,
+                    retryAfter: error.remainingSeconds
+                }
+            });
+        }
+        
+        res.status(500).json({
+            status: 'error',
+            message: error.message || 'Failed to send password reset code'
+        });
+    }
+};
+
+/**
+ * Password Reset Flow
+ * Step 2: Verify OTP for password reset
+ */
+exports.verifyPasswordResetOTP = async (req, res) => {
+    try {
+        const { email, otpCode } = req.body;
+
+        if (!email || !otpCode) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email and OTP code are required'
+            });
+        }
+
+        // Sanitize email
+        const sanitizedEmail = sanitizeLoginInput(email, 'email');
+        if (!sanitizedEmail) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid email format'
+            });
+        }
+
+        // Verify OTP
+        const otp = await verifyOTP(sanitizedEmail, otpCode, 'PASSWORD_RESET');
+
+        // Get user
+        const user = await prisma.user.findUnique({
+            where: { email: sanitizedEmail },
+            select: { id: true, email: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Create a temporary token for password reset
+        const resetToken = jwt.sign(
+            {
+                userId: user.id,
+                email: sanitizedEmail,
+                otpId: otp.id,
+                purpose: 'password_reset'
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' } // Short-lived token
+        );
+
+        res.json({
+            status: 'success',
+            message: 'OTP verified successfully',
+            data: {
+                resetToken,
+                email: sanitizedEmail
+            }
+        });
+    } catch (error) {
+        console.error('Verify password reset OTP error:', error);
+        
+        // Handle specific OTP errors
+        if (error.code === 'OTP_EXPIRED') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: 'OTP_EXPIRED',
+                    action: 'request_new'
+                }
+            });
+        }
+
+        if (error.code === 'OTP_ALREADY_USED' || error.code === 'INVALID_OTP') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: error.code
+                }
+            });
+        }
+
+        res.status(400).json({
+            status: 'error',
+            message: error.message || 'Invalid or expired OTP code'
+        });
+    }
+};
+
+/**
+ * Password Reset Flow
+ * Step 3: Reset password with verified token
+ */
+exports.resetPassword = async (req, res) => {
+    try {
+        const { resetToken, newPassword } = req.body;
+
+        if (!resetToken || !newPassword) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Reset token and new password are required'
+            });
+        }
+
+        // Validate password strength
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Verify the reset token
+        let decoded;
+        try {
+            decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+            if (decoded.purpose !== 'password_reset') {
+                throw new Error('Invalid token purpose');
+            }
+        } catch (error) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid or expired reset token. Please request a new password reset.'
+            });
+        }
+
+        // Verify OTP was actually verified
+        const otp = await prisma.otp.findUnique({
+            where: { id: decoded.otpId }
+        });
+
+        if (!otp || !otp.verified) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'OTP verification not completed. Please verify your email again.'
+            });
+        }
+
+        // Get user
+        const user = await prisma.user.findUnique({
+            where: { id: decoded.userId }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Update password
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                password: hashedPassword,
+                updatedAt: new Date()
+            }
+        });
+
+        // Clean up the OTP record
+        await prisma.otp.delete({
+            where: { id: otp.id }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Password reset successfully. You can now login with your new password.'
+        });
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error resetting password'
+        });
+    }
+};
+
+/**
+ * Account Deletion Flow
+ * Requires: Password verification + Email OTP verification
+ */
+exports.requestAccountDeletionOTP = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { password } = req.body;
+
+        if (!password) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password is required'
+            });
+        }
+
+        // Get user
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, password: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Verify password
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid password'
+            });
+        }
+
+        // Create and send OTP for account deletion
+        await createAndSendOTP(user.email, 'EMAIL_VERIFICATION', user.id);
+
+        res.json({
+            status: 'success',
+            message: 'OTP code sent to your email. Please verify to confirm account deletion.'
+        });
+    } catch (error) {
+        console.error('Request account deletion OTP error:', error);
+        
+        if (error.code === 'RATE_LIMIT_EXCEEDED') {
+            return res.status(429).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    remainingSeconds: error.remainingSeconds,
+                    retryAfter: error.remainingSeconds
+                }
+            });
+        }
+        
+        res.status(500).json({
+            status: 'error',
+            message: error.message || 'Failed to send OTP code'
+        });
+    }
+};
+
+/**
+ * Account Deletion Flow
+ * Step 2: Verify OTP and delete account
+ */
+exports.deleteAccount = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { password, otpCode } = req.body;
+
+        if (!password || !otpCode) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password and OTP code are required'
+            });
+        }
+
+        // Get user
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, email: true, password: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Verify password again
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        if (!isValidPassword) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid password'
+            });
+        }
+
+        // Verify OTP
+        const otp = await verifyOTP(user.email, otpCode, 'EMAIL_VERIFICATION');
+
+        // Verify OTP belongs to this user
+        if (otp.user_id !== user.id) {
+            return res.status(401).json({
+                status: 'error',
+                message: 'Invalid OTP code'
+            });
+        }
+
+        // Delete user account (Cascade will handle related records)
+        await prisma.user.delete({
+            where: { id: user.id }
+        });
+
+        // Clean up OTP
+        await prisma.otp.delete({
+            where: { id: otp.id }
+        }).catch(() => {
+            // Ignore if already deleted
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Account deleted successfully'
+        });
+    } catch (error) {
+        console.error('Delete account error:', error);
+        
+        if (error.code === 'OTP_EXPIRED' || error.code === 'OTP_ALREADY_USED' || error.code === 'INVALID_OTP') {
+            return res.status(400).json({
+                status: 'error',
+                message: error.message,
+                data: {
+                    code: error.code
+                }
+            });
+        }
+        
+        res.status(500).json({
+            status: 'error',
+            message: 'Error deleting account'
         });
     }
 }; 
