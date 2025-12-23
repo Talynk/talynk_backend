@@ -64,7 +64,8 @@ model Country {
   id          Int      @id @default(autoincrement())
   name        String   @unique @db.VarChar(100)
   code        String   @unique @db.VarChar(3) // ISO 3166-1 alpha-3 code
-  phone_code  String?  @db.VarChar(10) // Phone number code (e.g., "1", "44", "91")
+  // International calling code, including '+' and multi-digit values
+  phone_code  String?  @db.VarChar(20)
   flag_emoji  String?  @db.VarChar(10) // Flag emoji
   is_active   Boolean  @default(true)
   createdAt   DateTime @default(now())

@@ -131,7 +131,8 @@ exports.seedCountries = async (req, res) => {
         const countriesPath = path.join(process.cwd(), 'countries.json');
         const raw = fs.readFileSync(countriesPath, 'utf8');
         const json = JSON.parse(raw);
-        const countries = json?.data?.countries || [];
+        // New format: { success: 1, data: [ { name, code, callingCode } ] }
+        const countries = Array.isArray(json?.data) ? json.data : (json?.data?.countries || []);
 
         if (!countries.length) {
             return res.status(400).json({ status: 'error', message: 'No countries in countries.json' });
@@ -141,11 +142,14 @@ exports.seedCountries = async (req, res) => {
         await prisma.country.deleteMany({});
         await prisma.country.createMany({
             data: countries.map(c => ({
-                id: c.id,
+                // Let DB autoincrement IDs if not provided
                 name: c.name,
-                code: c.code,
-                flag_emoji: c.flag_emoji,
-                is_active: c.is_active
+                // Store ISO alpha-2 codes in uppercase for consistency
+                code: (c.code || '').toUpperCase(),
+                // Store calling code (keep the + prefix if present)
+                phone_code: c.callingCode || c.phone_code || null,
+                // Default to active
+                is_active: typeof c.is_active === 'boolean' ? c.is_active : true
             })),
             skipDuplicates: true
         });

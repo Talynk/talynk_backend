@@ -44,6 +44,7 @@ services:
     environment:
       # Force container DB in compose regardless of host env
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public
+      DATABASE_LOCAL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public
       # Fallbacks for others if .env not present
       PORT: ${PORT:-3000}
       NODE_ENV: ${NODE_ENV:-production}

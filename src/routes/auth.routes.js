@@ -23,7 +23,6 @@ router.post('/password-reset/verify-otp', authController.verifyPasswordResetOTP)
 router.post('/password-reset/reset', authController.resetPassword);
 
 router.post('/refresh-token', authController.refreshToken);
-
 // Protected auth routes
 router.get('/profile', authenticate, authController.getProfile);
 router.put('/profile', authenticate, authController.updateProfile);
