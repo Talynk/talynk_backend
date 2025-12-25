@@ -84,17 +84,32 @@ exports.addComment = async (req, res) => {
             // Create notification using Prisma
             const postOwner = await prisma.user.findUnique({
                 where: { id: existingPost.user_id },
-                select: { username: true }
+                select: { id: true, username: true }
             });
 
-            await prisma.notification.create({
-                data: {
-                    userID: postOwner?.username || '',
-                    message: `${resolvedUser.username || 'Someone'} commented on your post`,
-                    type: 'comment',
-                    isRead: false
-                }
-            });
+            if (postOwner) {
+                const notification = await prisma.notification.create({
+                    data: {
+                        userID: postOwner.username || '',
+                        message: `${resolvedUser.username || 'Someone'} commented on your post`,
+                        type: 'comment',
+                        isRead: false
+                    }
+                });
+
+                // Emit notification event
+                emitEvent('notification:created', {
+                    userId: postOwner.id,
+                    userID: postOwner.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt
+                    }
+                });
+            }
         }
 
         await clearCacheByPattern('single_post');
@@ -261,12 +276,22 @@ exports.deleteComment = async (req, res) => {
 
         console.log('Post comment count decremented');
 
+        // Get updated comment count
+        const updatedPost = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { comment_count: true }
+        });
+
         await clearCacheByPattern('single_post');
         await clearCacheByPattern('all_posts');
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('search_posts');
 
-        emitEvent('comment:deleted', { postId, commentId });
+        emitEvent('comment:deleted', { 
+            postId, 
+            commentId,
+            commentCount: updatedPost?.comment_count || 0
+        });
 
         res.json({
             status: 'success',
