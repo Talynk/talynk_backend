@@ -352,14 +352,25 @@ exports.reportComment = async (req, res) => {
         console.log('Notifying admins:', admins.length);
         
         for (const admin of admins) {
-            await prisma.notification.create({
-                data: {
-                    userID: admin.username,
-                    message: `Comment ${commentId} reported: ${reason}${description ? ` - ${description}` : ''}`,
-                    type: 'comment_report',
-                    isRead: false
-                }
+            // Check if admin username exists in users table before creating notification
+            const user = await prisma.user.findUnique({
+                where: { username: admin.username },
+                select: { username: true }
             });
+            
+            // Only create notification if admin has a corresponding user record
+            if (user) {
+                await prisma.notification.create({
+                    data: {
+                        userID: admin.username,
+                        message: `Comment ${commentId} reported: ${reason}${description ? ` - ${description}` : ''}`,
+                        type: 'comment_report',
+                        isRead: false
+                    }
+                });
+            } else {
+                console.log(`Skipping notification for admin ${admin.username} - no corresponding user record found`);
+            }
         }
 
         console.log('Admin notifications sent');
