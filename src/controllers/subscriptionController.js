@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { validate } = require('uuid');
+const { emitEvent } = require('../lib/realtime');
 
 exports.subscribe = async (req, res) => {
     try {
@@ -84,14 +85,36 @@ exports.subscribe = async (req, res) => {
             console.log(`Incremented subscriber count for ${subscribedToId}`);
 
             // 7. Notify user
-            await prisma.notification.create({
-                data: {
-                    user_id: subscribedToId,
-                    notification_text: `${req.user.username} subscribed to your channel`,
-                    notification_date: creationTime
-                }
+            const subscribedToUser = await prisma.user.findUnique({
+                where: { id: subscribedToId },
+                select: { id: true, username: true }
             });
-            console.log(`Notification created for ${subscribedToId}`);
+            
+            if (subscribedToUser?.username) {
+                const notification = await prisma.notification.create({
+                    data: {
+                        userID: subscribedToUser.username,
+                        message: `${req.user.username} subscribed to your channel`,
+                        type: 'subscription',
+                        isRead: false
+                    }
+                });
+                
+                // Emit real-time notification event
+                emitEvent('notification:created', {
+                    userId: subscribedToUser.id,
+                    userID: subscribedToUser.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt
+                    }
+                });
+                
+                console.log(`Notification created for ${subscribedToId}`);
+            }
 
         } else {
             console.log('Subscription already exists.');

@@ -4,6 +4,7 @@ const {
     getFeaturedPostsCache, 
     setFeaturedPostsCache 
 } = require('../utils/cache');
+const { emitEvent } = require('../lib/realtime');
 
 // Get featured posts with optimized queries and caching
 exports.getFeaturedPosts = async (req, res) => {
@@ -240,12 +241,25 @@ exports.featurePost = async (req, res) => {
 
         // Notify post owner (userID must be username, not user ID)
         if (featuredPost.post.user?.username) {
-            await prisma.notification.create({
+            const notification = await prisma.notification.create({
                 data: {
                     userID: featuredPost.post.user.username,
                     message: 'Your post has been featured!',
                     type: 'post_featured',
                     isRead: false
+                }
+            });
+            
+            // Emit real-time notification event
+            emitEvent('notification:created', {
+                userId: featuredPost.post.user.id,
+                userID: featuredPost.post.user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt
                 }
             });
         }

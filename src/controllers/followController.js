@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { updateFollowerCount } = require('./suggestionController');
+const { emitEvent } = require('../lib/realtime');
 
 /**
  * Create a notification for the followed user
@@ -23,12 +24,25 @@ const createFollowNotification = async (followerId, followingId) => {
     if (!followingUser?.username) return;
     
     // Create notification for the followed user with additional context data
-    await prisma.notification.create({
+    const notification = await prisma.notification.create({
       data: {
         userID: followingUser.username,
         message: `${follower.username} started following you`,
         type: 'follow',
         isRead: false
+      }
+    });
+    
+    // Emit real-time notification event
+    emitEvent('notification:created', {
+      userId: followingUser.id,
+      userID: followingUser.username,
+      notification: {
+        id: notification.id,
+        type: notification.type,
+        message: notification.message,
+        isRead: notification.isRead,
+        createdAt: notification.createdAt
       }
     });
     

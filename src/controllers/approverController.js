@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const {validate, parse} = require('uuid');
+const { emitEvent } = require('../lib/realtime');
 
 exports.getApproverStats = async (req, res) => {
     try {
@@ -219,14 +220,29 @@ exports.approvePost = async (req, res) => {
         });
 
         // Create notification
-        await prisma.notification.create({
-            data: {
-                user_id: post.user?.id,
-                notification_text: 'Your post has been approved',
-                notification_date: new Date(),
-                is_read: false
-            }
-        });
+        if (post.user?.username) {
+            const notification = await prisma.notification.create({
+                data: {
+                    userID: post.user.username,
+                    message: 'Your post has been approved',
+                    type: 'post_approved',
+                    isRead: false
+                }
+            });
+            
+            // Emit real-time notification event
+            emitEvent('notification:created', {
+                userId: post.user.id,
+                userID: post.user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt
+                }
+            });
+        }
 
         res.json({
             status: 'success',
@@ -277,14 +293,29 @@ exports.rejectPost = async (req, res) => {
         });
 
         // Create notification
-        await prisma.notification.create({
-            data: {
-                user_id: post.user.id,
-                notification_text: `Your post has been rejected. Reason: ${notes}`,
-                notification_date: new Date(),
-                is_read: false
-            }
-        });
+        if (post.user?.username) {
+            const notification = await prisma.notification.create({
+                data: {
+                    userID: post.user.username,
+                    message: `Your post has been rejected. Reason: ${notes}`,
+                    type: 'post_rejected',
+                    isRead: false
+                }
+            });
+            
+            // Emit real-time notification event
+            emitEvent('notification:created', {
+                userId: post.user.id,
+                userID: post.user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt
+                }
+            });
+        }
 
         res.json({
             status: 'success',

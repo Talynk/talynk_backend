@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { emitEvent } = require('../lib/realtime');
 
 // Report a post
 exports.reportPost = async (req, res) => {
@@ -82,7 +83,12 @@ exports.reportPost = async (req, res) => {
             });
             
             if (postOwner) {
-                await prisma.notification.create({
+                const postOwnerUser = await prisma.user.findUnique({
+                    where: { username: postOwner.username },
+                    select: { id: true }
+                });
+                
+                const notification = await prisma.notification.create({
                     data: {
                         userID: postOwner.username,
                         message: 'Your post has been flagged due to multiple reports. You can appeal this decision.',
@@ -90,6 +96,21 @@ exports.reportPost = async (req, res) => {
                         isRead: false
                     }
                 });
+                
+                // Emit real-time notification event
+                if (postOwnerUser) {
+                    emitEvent('notification:created', {
+                        userId: postOwnerUser.id,
+                        userID: postOwner.username,
+                        notification: {
+                            id: notification.id,
+                            type: notification.type,
+                            message: notification.message,
+                            isRead: notification.isRead,
+                            createdAt: notification.createdAt
+                        }
+                    });
+                }
             }
         }
 
@@ -251,12 +272,25 @@ exports.reviewReport = async (req, res) => {
 
             // Notify post owner (userID must be username, not user ID)
             if (report.post.user?.username) {
-                await prisma.notification.create({
+                const notification = await prisma.notification.create({
                     data: {
                         userID: report.post.user.username,
                         message: 'Your post has been reviewed and unfrozen',
                         type: 'post_unfrozen',
                         isRead: false
+                    }
+                });
+                
+                // Emit real-time notification event
+                emitEvent('notification:created', {
+                    userId: report.post.user.id,
+                    userID: report.post.user.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt
                     }
                 });
             }
@@ -428,14 +462,34 @@ exports.appealPost = async (req, res) => {
         });
 
         for (const admin of admins) {
-            await prisma.notification.create({
-                data: {
-                    userID: admin.username,
-                    message: `New appeal submitted for flagged post: ${post.title}`,
-                    type: 'post_appeal',
-                    isRead: false
-                }
+            const adminUser = await prisma.user.findUnique({
+                where: { username: admin.username },
+                select: { id: true }
             });
+            
+            if (adminUser) {
+                const notification = await prisma.notification.create({
+                    data: {
+                        userID: admin.username,
+                        message: `New appeal submitted for flagged post: ${post.title}`,
+                        type: 'post_appeal',
+                        isRead: false
+                    }
+                });
+                
+                // Emit real-time notification event
+                emitEvent('notification:created', {
+                    userId: adminUser.id,
+                    userID: admin.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt
+                    }
+                });
+            }
         }
 
         res.status(201).json({
@@ -578,7 +632,12 @@ exports.reviewAppeal = async (req, res) => {
             });
             
             if (postOwner) {
-                await prisma.notification.create({
+                const postOwnerUser = await prisma.user.findUnique({
+                    where: { username: postOwner.username },
+                    select: { id: true }
+                });
+                
+                const notification = await prisma.notification.create({
                     data: {
                         userID: postOwner.username,
                         message: 'Your appeal has been approved and your post has been restored',
@@ -586,6 +645,21 @@ exports.reviewAppeal = async (req, res) => {
                         isRead: false
                     }
                 });
+                
+                // Emit real-time notification event
+                if (postOwnerUser) {
+                    emitEvent('notification:created', {
+                        userId: postOwnerUser.id,
+                        userID: postOwner.username,
+                        notification: {
+                            id: notification.id,
+                            type: notification.type,
+                            message: notification.message,
+                            isRead: notification.isRead,
+                            createdAt: notification.createdAt
+                        }
+                    });
+                }
             }
         } else {
             // Notify post owner that appeal was rejected
@@ -595,7 +669,12 @@ exports.reviewAppeal = async (req, res) => {
             });
             
             if (postOwner) {
-                await prisma.notification.create({
+                const postOwnerUser = await prisma.user.findUnique({
+                    where: { username: postOwner.username },
+                    select: { id: true }
+                });
+                
+                const notification = await prisma.notification.create({
                     data: {
                         userID: postOwner.username,
                         message: 'Your appeal has been rejected. The post remains flagged.',
@@ -603,6 +682,21 @@ exports.reviewAppeal = async (req, res) => {
                         isRead: false
                     }
                 });
+                
+                // Emit real-time notification event
+                if (postOwnerUser) {
+                    emitEvent('notification:created', {
+                        userId: postOwnerUser.id,
+                        userID: postOwner.username,
+                        notification: {
+                            id: notification.id,
+                            type: notification.type,
+                            message: notification.message,
+                            isRead: notification.isRead,
+                            createdAt: notification.createdAt
+                        }
+                    });
+                }
             }
         }
 

@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
+const { emitEvent } = require('../lib/realtime');
 
 // Register a new admin
 exports.registerAdmin = async (req, res) => {
@@ -5258,10 +5259,10 @@ exports.sendBroadcastNotification = async (req, res) => {
             });
         }
 
-        // Get all active users
+        // Get all active users with their IDs
         const users = await prisma.user.findMany({
             where: { status: 'active' },
-            select: { username: true }
+            select: { id: true, username: true }
         });
 
         // Create notifications for all users
@@ -5274,9 +5275,39 @@ exports.sendBroadcastNotification = async (req, res) => {
             updatedAt: new Date()
         }));
 
-        await prisma.notification.createMany({
+        const createdNotifications = await prisma.notification.createMany({
             data: notifications
         });
+
+        // Emit real-time notification events for all users
+        // Note: createMany doesn't return the created records, so we'll fetch them
+        const notificationRecords = await prisma.notification.findMany({
+            where: {
+                userID: { in: users.map(u => u.username) },
+                type: type,
+                message: `${title}: ${message}`
+            },
+            orderBy: { createdAt: 'desc' },
+            take: users.length
+        });
+
+        // Emit events for each user
+        for (let i = 0; i < users.length && i < notificationRecords.length; i++) {
+            const user = users[i];
+            const notification = notificationRecords[i];
+            
+            emitEvent('notification:created', {
+                userId: user.id,
+                userID: user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt
+                }
+            });
+        }
 
         // Log admin action
         loggers.audit('broadcast_notification', {
