@@ -52,6 +52,9 @@ services:
       SUPABASE_KEY: ${SUPABASE_KEY:-anon_key}
       SUPABASE_BUCKET_NAME: ${SUPABASE_BUCKET_NAME:-posts}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-support@ihirwe.art}
+      APP_NAME: ${APP_NAME:-Talynk}
     ports:
       - "3000:3000"
     depends_on:
