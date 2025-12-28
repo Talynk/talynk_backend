@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   db:
     image: postgres:16-alpine
@@ -39,12 +37,12 @@ services:
     #   context: .
     #   dockerfile: Dockerfile
     container_name: talynk-api
-    env_file:
-      - .env
+    # env_file:
+    #   - .env
     environment:
       # Force container DB in compose regardless of host env
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public
-      DATABASE_LOCAL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      DATABASE_LOCAL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
       # Fallbacks for others if .env not present
       PORT: ${PORT:-3000}
       NODE_ENV: ${NODE_ENV:-production}
@@ -54,6 +52,9 @@ services:
       SUPABASE_KEY: ${SUPABASE_KEY:-anon_key}
       SUPABASE_BUCKET_NAME: ${SUPABASE_BUCKET_NAME:-posts}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      RESEND_API_KEY: re_arcTye3F_JK7QVBpDpzDRm5PQf2QVGqof
+      RESEND_FROM_EMAIL: noreply@support.ihirwe.art
+      APP_NAME: Talentix
     ports:
       - "3000:3000"
     depends_on:

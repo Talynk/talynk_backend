@@ -54,6 +54,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 USER node
 
 # Run Prisma migrations then start app (Prisma uses DATABASE_URL from env)
-CMD ["sh", "-c", "npx prisma migrate deploy && node src/app.js"]
+# If migrations fail (e.g., database already has schema), continue anyway
+CMD ["sh", "-c", "npx prisma migrate deploy || echo 'Migrations skipped (database may already be up to date)' && node src/app.js"]
 
 

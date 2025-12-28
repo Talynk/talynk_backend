@@ -1,7 +1,18 @@
 const { Resend } = require('resend');
 
-// Initialize Resend client
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Initialize Resend client lazily (only when needed)
+let resend = null;
+
+const getResendClient = () => {
+    if (!resend) {
+        const apiKey = process.env.RESEND_API_KEY;
+        if (!apiKey) {
+            throw new Error('RESEND_API_KEY is not configured. Email functionality will not work.');
+        }
+        resend = new Resend(apiKey);
+    }
+    return resend;
+};
 
 /**
  * Send OTP email for email verification
@@ -29,7 +40,8 @@ This code will expire in 10 minutes. If you didn't request this code, please ign
 This is an automated email. Please do not reply to this message.
         `.trim();
         
-        const { data, error } = await resend.emails.send({
+        const resendClient = getResendClient();
+        const { data, error } = await resendClient.emails.send({
             from: fromEmail,
             to: [email],
             replyTo: fromEmail, // Proper reply-to header
@@ -109,7 +121,8 @@ This code will expire in 10 minutes. If you didn't request this, please ignore t
 This is an automated email. Please do not reply to this message.
         `.trim();
         
-        const { data, error } = await resend.emails.send({
+        const resendClient = getResendClient();
+        const { data, error } = await resendClient.emails.send({
             from: fromEmail,
             to: [email],
             replyTo: fromEmail, // Proper reply-to header
