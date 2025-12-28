@@ -143,11 +143,14 @@ exports.seedCountries = async (req, res) => {
         await prisma.country.createMany({
             data: countries.map(c => ({
                 // Let DB autoincrement IDs if not provided
-                name: c.name,
-                // Store ISO alpha-2 codes in uppercase for consistency
-                code: (c.code || '').toUpperCase(),
-                // Store calling code (keep the + prefix if present)
-                phone_code: c.callingCode || c.phone_code || null,
+                // Truncate name to 100 chars (schema limit)
+                name: (c.name || '').substring(0, 100),
+                // Store ISO alpha-2 codes in uppercase, truncate to 3 chars (schema limit)
+                code: ((c.code || '').toUpperCase()).substring(0, 3),
+                // Store calling code (keep the + prefix if present), truncate to 20 chars (schema limit)
+                phone_code: c.callingCode || c.phone_code ? String(c.callingCode || c.phone_code).substring(0, 20) : null,
+                // Truncate flag_emoji to 10 chars (schema limit)
+                flag_emoji: c.flag_emoji ? String(c.flag_emoji).substring(0, 10) : null,
                 // Default to active
                 is_active: typeof c.is_active === 'boolean' ? c.is_active : true
             })),
