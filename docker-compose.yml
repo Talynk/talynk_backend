@@ -37,8 +37,8 @@ services:
     #   context: .
     #   dockerfile: Dockerfile
     container_name: talynk-api
-    # env_file:
-    #   - .env
+    env_file:
+      - .env
     environment:
       # Force container DB in compose regardless of host env
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20

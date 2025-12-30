@@ -12,7 +12,7 @@ uploads/
 /src/generated/prisma
 *.md
 
-
+*.sh
 
 
 
