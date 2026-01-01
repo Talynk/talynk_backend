@@ -37,12 +37,13 @@ services:
     #   context: .
     #   dockerfile: Dockerfile
     container_name: talynk-api
-    # env_file:
-    #   - .env
+    env_file:
+      - .env
     environment:
       # Force container DB in compose regardless of host env
-      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
-      DATABASE_LOCAL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      # Hardcoded password 123 to match actual database password
+      DATABASE_URL: postgresql://postgres:123@db:5432/talynk?schema=public&connection_limit=10&pool_timeout=20
+      DATABASE_LOCAL: postgresql://postgres:123@db:5432/talynk?schema=public&connection_limit=10&pool_timeout=20
       # Fallbacks for others if .env not present
       PORT: ${PORT:-3000}
       NODE_ENV: ${NODE_ENV:-production}

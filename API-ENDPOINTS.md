@@ -731,8 +731,10 @@ Content-Type: application/json
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| POST | `/` | Create new post | ✅ |
-| GET | `/user` | Get current user's posts | ✅ |
+| POST | `/` | Create new post (defaults to draft) | ✅ |
+| GET | `/user` | Get current user's posts (all statuses) | ✅ |
+| GET | `/drafts` | Get current user's draft posts | ✅ |
+| PUT | `/:postId/publish` | Publish a draft post (changes to pending) | ✅ |
 | DELETE | `/:postId` | Delete post | ✅ |
 | GET | `/all` | Get all approved posts | ❌ |
 | GET | `/search` | Search posts | ❌ |
@@ -760,8 +762,15 @@ post_category: Music
 subcategory: Afrobeats
 type: video
 content: Original music content
+status: draft (optional - defaults to 'draft', use 'pending' for immediate submission)
 file: [song.mp4]
 ```
+
+**Notes:**
+- `status` parameter is optional. If not provided, defaults to `'draft'`
+- Use `status: 'draft'` to save as draft (not submitted for approval)
+- Use `status: 'pending'` to submit immediately for approval
+- Draft posts are only visible to the post owner
 
 **Response (201):**
 ```json
@@ -775,7 +784,7 @@ file: [song.mp4]
       "caption": "Check out my latest track! #music #original",
       "file_url": "https://supabase.co/storage/v1/object/public/posts/song.mp4",
       "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/thumb.jpg",
-      "status": "pending",
+      "status": "draft",
       "type": "video",
       "content": "Original music content",
       "category": {
@@ -796,11 +805,15 @@ file: [song.mp4]
 }
 ```
 
-#### GET `
-`
+#### GET `/api/posts/user`
 **Headers:**
 ```
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Query Parameters:**
+```
+?page=1&limit=20
 ```
 
 **Response (200):**
@@ -833,7 +846,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
         "caption": "My latest artwork",
         "file_url": "https://supabase.co/storage/v1/object/public/posts/art.jpg",
         "thumbnail_url": "https://supabase.co/storage/v1/object/public/posts/art_thumb.jpg",
-        "status": "pending",
+        "status": "draft",
         "type": "image",
         "likes": 0,
         "views": 0,
@@ -853,6 +866,89 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
       "totalPages": 2
     }
   }
+}
+```
+
+**Note**: This endpoint returns all posts for the user including drafts, pending, approved, and rejected posts. Use `/api/posts/drafts` to get only draft posts.
+
+#### GET `/api/posts/drafts`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Query Parameters:**
+```
+?page=1&limit=20
+```
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "data": {
+    "posts": [
+      {
+        "id": "post-uuid-1",
+        "title": "My Draft Post",
+        "caption": "This is a draft that I'm working on",
+        "file_url": "https://supabase.co/storage/v1/object/public/posts/draft.mp4",
+        "status": "draft",
+        "type": "video",
+        "category": {
+          "id": 1,
+          "name": "Music"
+        },
+        "createdAt": "2025-01-07T10:00:00.000Z",
+        "updatedAt": "2025-01-07T10:30:00.000Z"
+      }
+    ],
+    "pagination": {
+      "currentPage": 1,
+      "totalPages": 1,
+      "totalCount": 1,
+      "hasNext": false,
+      "hasPrev": false,
+      "limit": 20
+    }
+  }
+}
+```
+
+#### PUT `/api/posts/:postId/publish`
+**Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Description**: Publishes a draft post by changing its status from `draft` to `pending` (submitted for approval).
+
+**Response (200):**
+```json
+{
+  "status": "success",
+  "message": "Draft post published successfully and submitted for approval",
+  "data": {
+    "post": {
+      "id": "post-uuid-1",
+      "title": "My Draft Post",
+      "caption": "This is a draft that I'm working on",
+      "status": "pending",
+      "category": {
+        "id": 1,
+        "name": "Music"
+      },
+      "updatedAt": "2025-01-07T10:35:00.000Z"
+    }
+  }
+}
+```
+
+**Error Response (404):**
+```json
+{
+  "status": "error",
+  "message": "Draft post not found or you do not have permission to publish it"
 }
 ```
 
@@ -964,6 +1060,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 #### GET `/api/posts/:postId`
+**Description**: Get a post by ID. Draft posts are only visible to their owners.
+
 **Response (200):**
 ```json
 {

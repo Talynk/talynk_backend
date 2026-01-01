@@ -14,11 +14,13 @@ router.post('/', authenticate, ...upload.single('file'), postController.createPo
 
 // SPECIFIC ROUTES FIRST - before parameterized routes
 router.get('/user', authenticate, postController.getUserPosts);
+router.get('/drafts', authenticate, postController.getUserDraftPosts);
 router.get('/feed', authenticate, postController.getOptimizedFeed);
 router.get('/all', postController.getAllPosts); // only approved
 router.get('/search', postController.searchPosts);
 
 // PARAMETERIZED ROUTES LAST - to avoid conflicts
+router.put('/:postId/publish', authenticate, postController.publishDraftPost);
 router.get('/:postId', postController.getPostById);
 router.post('/:postId/like', authenticate, likeController.toggleLike);
 router.delete('/:postId', authenticate, postController.deletePost);
