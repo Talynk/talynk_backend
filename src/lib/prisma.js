@@ -6,6 +6,15 @@ const prisma = new PrismaClient({
   errorFormat: 'pretty',
 });
 
+// Test connection on startup
+prisma.$connect()
+  .then(() => {
+    console.log('✅ Prisma connected to database');
+  })
+  .catch((err) => {
+    console.error('❌ Prisma connection error:', err.message);
+  });
+
 // Handle graceful shutdown
 process.on('beforeExit', async () => {
   await prisma.$disconnect();

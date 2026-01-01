@@ -84,6 +84,29 @@ exports.createPost = async (req, res) => {
 
         console.log("Category found:", category.name, "(ID:", category.id + ")");
 
+        // Determine post status: draft if status is provided as 'draft', otherwise 'pending' for approval
+        const postStatus = req.body.status === 'draft' ? 'draft' : 'pending';
+
+        // Check draft limit: users can only have a maximum of 3 draft posts
+        if (postStatus === 'draft') {
+            const draftCount = await prisma.post.count({
+                where: {
+                    user_id: userId,
+                    status: 'draft'
+                }
+            });
+
+            if (draftCount >= 3) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Maximum draft limit reached',
+                    details: 'You can only have a maximum of 3 draft posts. Please publish or delete existing drafts before creating a new one.',
+                    currentDraftCount: draftCount,
+                    maxDrafts: 3
+                });
+            }
+        }
+
         // Handle file upload
         let video_url = '';
         let fileType = 'text';
@@ -109,7 +132,7 @@ exports.createPost = async (req, res) => {
         const post = await prisma.post.create({
             data: {
             user_id: userId,
-            status: 'approved', // Posts are now active by default
+            status: postStatus, // Default to draft, can be set to pending for immediate submission
             category_id: category.id,  // Use the category ID instead of name
             title,
             description: caption,
@@ -387,6 +410,20 @@ exports.getPostById = async (req, res) => {
             });
         }
 
+        // Check if post is draft - only owner can view draft posts
+        if (post.status === 'draft') {
+            // If user is authenticated and is the owner, allow access
+            if (req.user && req.user.id === post.user_id) {
+                // Owner can view their own draft
+            } else {
+                // Non-owners cannot view draft posts
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Post not found'
+                });
+            }
+        }
+
         // Add full URL for media
         const postWithUrl = {
             ...post,
@@ -652,7 +689,7 @@ exports.updatePostStatus = async (req, res) => {
         const { id } = req.params;
         const { status, rejectionReason } = req.body;
 
-        if (!['pending', 'approved', 'rejected'].includes(status)) {
+        if (!['draft', 'pending', 'approved', 'rejected'].includes(status)) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid status value'
@@ -769,9 +806,11 @@ exports.getUserPosts = async (req, res) => {
         console.log("user id ----->", req.user.id);
         console.log("user id type ----->", typeof req.user.id);
         
+        // Get all posts including drafts for the user
         const posts = await prisma.post.findMany({
             where: { 
                 user_id: req.user.id
+                // Include all statuses (draft, pending, approved, rejected)
             },
             include: {
                 user: {
@@ -1754,6 +1793,150 @@ exports.getOptimizedFeed = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching optimized feed',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get user's draft posts
+exports.getUserDraftPosts = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { page = 1, limit = 20 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [draftPosts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: {
+                    user_id: userId,
+                    status: 'draft'
+                },
+                include: {
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            postLikes: true,
+                            comments: true,
+                            postViews: true
+                        }
+                    }
+                },
+                orderBy: {
+                    updatedAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: {
+                    user_id: userId,
+                    status: 'draft'
+                }
+            })
+        ]);
+
+        // Add full URLs for files
+        const postsWithUrls = draftPosts.map(post => ({
+            ...post,
+            fullUrl: post.video_url
+        }));
+
+        res.json({
+            status: 'success',
+            data: {
+                posts: postsWithUrls,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / limit),
+                    totalCount: total,
+                    hasNext: page * limit < total,
+                    hasPrev: page > 1,
+                    limit: parseInt(limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching draft posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching draft posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Publish a draft post (change status from draft to pending for approval)
+exports.publishDraftPost = async (req, res) => {
+    try {
+        const postId = req.params.postId;
+        const userId = req.user.id;
+
+        // Check if post exists, belongs to user, and is in draft status
+        const existingPost = await prisma.post.findFirst({
+            where: {
+                id: postId,
+                user_id: userId,
+                status: 'draft'
+            }
+        });
+
+        if (!existingPost) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Draft post not found or you do not have permission to publish it'
+            });
+        }
+
+        // Update post status to pending for approval
+        const updatedPost = await prisma.post.update({
+            where: { id: postId },
+            data: {
+                status: 'pending',
+                updatedAt: new Date()
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                },
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true
+                    }
+                }
+            }
+        });
+
+        // Clear relevant caches
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:published', { postId, userId });
+
+        res.json({
+            status: 'success',
+            message: 'Draft post published successfully and submitted for approval',
+            data: { post: updatedPost }
+        });
+    } catch (error) {
+        console.error('Error publishing draft post:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error publishing draft post',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
