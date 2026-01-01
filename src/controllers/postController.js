@@ -113,13 +113,13 @@ exports.createPost = async (req, res) => {
         let filePath = '';
         let mimetype = '';
         if (req.file) {
-            // File was uploaded to Supabase
-            video_url = req.file.supabaseUrl || '';
+            // File was uploaded to local storage
+            video_url = req.file.localUrl || req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
             filePath = req.file.path;
             mimetype = req.file.mimetype;
-            console.log("File uploaded successfully to Supabase:", {
-                url: req.file.supabaseUrl,
+            console.log("File uploaded successfully to local storage:", {
+                url: video_url,
                 filename: req.file.filename,
                 path: req.file.path,
                 mimetype: req.file.mimetype,

@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const path = require('path');
+const fs = require('fs').promises;
 const { createClient } = require('@supabase/supabase-js');
 const http = require('http');
 const { initRealtime } = require('./lib/realtime');
@@ -25,8 +26,28 @@ const app = express();
 // This ensures Express correctly handles X-Forwarded-* headers
 app.set('trust proxy', true);
 
-// Initialize Supabase bucket check
+// Ensure uploads directory exists on startup
+async function ensureUploadsDirectory() {
+  try {
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    await fs.mkdir(uploadsDir, { recursive: true });
+    console.log(`✅ Uploads directory ready: ${uploadsDir}`);
+  } catch (error) {
+    console.error('Error creating uploads directory:', error.message);
+  }
+}
+
+// Initialize uploads directory on startup
+ensureUploadsDirectory();
+
+// Initialize Supabase bucket check (optional - kept for backward compatibility)
 async function checkSupabaseBucket() {
+  // Skip Supabase check if using local storage
+  if (process.env.USE_LOCAL_STORAGE === 'true') {
+    console.log('Using local file storage, skipping Supabase check');
+    return;
+  }
+  
   try {
     const bucketName = process.env.SUPABASE_BUCKET_NAME || 'posts';
     console.log(`Checking Supabase bucket: '${bucketName}'`);
@@ -51,7 +72,7 @@ async function checkSupabaseBucket() {
   }
 }
 
-// Check Supabase bucket on startup
+// Check Supabase bucket on startup (optional)
 checkSupabaseBucket();
 
 // CORS configuration - must be before other middleware
