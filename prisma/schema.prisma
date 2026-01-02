@@ -82,7 +82,7 @@ model Post {
   title                 String   @db.VarChar(255)
   description           String?  @db.Text
   video_url             String?  @db.VarChar(255)
-  status                PostStatus @default(draft)
+  status                PostStatus @default(active)
   user_id               String?  @db.Uuid
   approver_id           String?  @db.Uuid
   admin_id              String?  @db.Uuid
@@ -386,10 +386,8 @@ model FeaturedPost {
 
 enum PostStatus {
   draft
-  pending
-  approved
-  rejected
-  frozen
+  active
+  suspended
 }
 
 enum CategoryStatus {
