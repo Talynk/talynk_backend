@@ -1,7 +1,7 @@
 const { v4: uuidv4, validate: isUuid } = require('uuid');
 const path = require('path');
 const prisma = require('../lib/prisma');
-const { addWatermarkToVideo } = require('../utils/videoProcessor');
+const { processWatermarkAsync } = require('../utils/videoProcessor');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
 const fs = require('fs').promises;
@@ -163,12 +163,50 @@ exports.createPost = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
+        // Process video watermarking asynchronously (non-blocking)
+        // This happens in the background and updates the post when complete
+        if (req.file && fileType === 'video' && filePath) {
+            // Resolve full path to uploaded video file
+            // filePath is either relative (uploads/filename) or absolute
+            const fullInputPath = path.isAbsolute(filePath) 
+                ? filePath 
+                : path.join(process.cwd(), filePath);
+            
+            // Verify file exists before processing
+            fs.access(fullInputPath)
+                .then(() => {
+                    // Process watermarking in background (don't await - non-blocking)
+                    processWatermarkAsync(
+                        fullInputPath,
+                        post.id,
+                        async (watermarkedUrl) => {
+                            // Update post with watermarked video URL
+                            try {
+                                await prisma.post.update({
+                                    where: { id: post.id },
+                                    data: { video_url: watermarkedUrl }
+                                });
+                                console.log(`[WATERMARK] ✅ Updated post ${post.id} with watermarked video: ${watermarkedUrl}`);
+                            } catch (error) {
+                                console.error(`[WATERMARK] ❌ Failed to update post ${post.id} with watermarked URL:`, error);
+                            }
+                        }
+                    ).catch(error => {
+                        console.error(`[WATERMARK] Background watermarking failed for post ${post.id}:`, error);
+                        // Post remains with original video - not a critical failure
+                    });
+                })
+                .catch(error => {
+                    console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
+                });
+        }
+
         res.status(201).json({
             status: 'success',
             data: { 
                 post: {
                     ...post,
-                    video_url: video_url // Already the full Supabase URL
+                    video_url: video_url // Original video URL (will be updated when watermarking completes)
                 }
             }
         });
