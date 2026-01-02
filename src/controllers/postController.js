@@ -1,7 +1,7 @@
 const { v4: uuidv4, validate: isUuid } = require('uuid');
 const path = require('path');
 const prisma = require('../lib/prisma');
-const { addWatermarkToVideo } = require('../utils/videoProcessor');
+const { processWatermarkAsync } = require('../utils/videoProcessor');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
 const fs = require('fs').promises;
@@ -84,8 +84,8 @@ exports.createPost = async (req, res) => {
 
         console.log("Category found:", category.name, "(ID:", category.id + ")");
 
-        // Determine post status: draft if status is provided as 'draft', otherwise 'pending' for approval
-        const postStatus = req.body.status === 'draft' ? 'draft' : 'pending';
+        // Determine post status: draft if status is provided as 'draft', otherwise 'active' (published immediately)
+        const postStatus = req.body.status === 'draft' ? 'draft' : 'active';
 
         // Check draft limit: users can only have a maximum of 3 draft posts
         if (postStatus === 'draft') {
@@ -132,7 +132,7 @@ exports.createPost = async (req, res) => {
         const post = await prisma.post.create({
             data: {
             user_id: userId,
-            status: postStatus, // Default to draft, can be set to pending for immediate submission
+            status: postStatus, // Default to active (published immediately), can be set to draft
             category_id: category.id,  // Use the category ID instead of name
             title,
             description: caption,
@@ -163,12 +163,50 @@ exports.createPost = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
+        // Process video watermarking asynchronously (non-blocking)
+        // This happens in the background and updates the post when complete
+        if (req.file && fileType === 'video' && filePath) {
+            // Resolve full path to uploaded video file
+            // filePath is either relative (uploads/filename) or absolute
+            const fullInputPath = path.isAbsolute(filePath) 
+                ? filePath 
+                : path.join(process.cwd(), filePath);
+            
+            // Verify file exists before processing
+            fs.access(fullInputPath)
+                .then(() => {
+                    // Process watermarking in background (don't await - non-blocking)
+                    processWatermarkAsync(
+                        fullInputPath,
+                        post.id,
+                        async (watermarkedUrl) => {
+                            // Update post with watermarked video URL
+                            try {
+                                await prisma.post.update({
+                                    where: { id: post.id },
+                                    data: { video_url: watermarkedUrl }
+                                });
+                                console.log(`[WATERMARK] ✅ Updated post ${post.id} with watermarked video: ${watermarkedUrl}`);
+                            } catch (error) {
+                                console.error(`[WATERMARK] ❌ Failed to update post ${post.id} with watermarked URL:`, error);
+                            }
+                        }
+                    ).catch(error => {
+                        console.error(`[WATERMARK] Background watermarking failed for post ${post.id}:`, error);
+                        // Post remains with original video - not a critical failure
+                    });
+                })
+                .catch(error => {
+                    console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
+                });
+        }
+
         res.status(201).json({
             status: 'success',
             data: { 
                 post: {
                     ...post,
-                    video_url: video_url // Already the full Supabase URL
+                    video_url: video_url // Original video URL (will be updated when watermarking completes)
                 }
             }
         });
@@ -221,7 +259,7 @@ exports.getAllPosts = async (req, res) => {
 
         // Build where clause - simplified to avoid country filter issues
         const whereClause = {
-            status: 'approved',
+            status: 'active',
             is_frozen: false
         };
 
@@ -628,10 +666,11 @@ exports.getPostsByUser = async (req, res) => {
     }
 };
 
+// Deprecated: Use getUserDraftPosts instead
 exports.getPendingPosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
-            where: { status: 'pending' },
+            where: { status: 'draft' },
             include: {
                 user: {
                     select: {
@@ -689,10 +728,10 @@ exports.updatePostStatus = async (req, res) => {
         const { id } = req.params;
         const { status, rejectionReason } = req.body;
 
-        if (!['draft', 'pending', 'approved', 'rejected'].includes(status)) {
+        if (!['draft', 'active', 'suspended'].includes(status)) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Invalid status value'
+                message: 'Invalid status value. Must be one of: draft, active, suspended'
             });
         }
 
@@ -708,8 +747,7 @@ exports.updatePostStatus = async (req, res) => {
         }
 
         const updateData = { 
-            status: status,
-            approved_at: status === 'approved' ? new Date() : null
+            status: status
         };
 
         const updatedPost = await prisma.post.update({
@@ -751,12 +789,13 @@ exports.updatePostStatus = async (req, res) => {
     }
 };
 
+// Deprecated: Use getUserDraftPosts instead
 exports.getUserPendingPosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
             where: {
                 user_id: req.user.id,
-                status: 'pending'
+                status: 'draft'
             },
             include: {
                 user: {
@@ -785,7 +824,7 @@ exports.getUserPendingPosts = async (req, res) => {
             }
         });
 
-        console.log(`Found ${posts.length} pending posts for user ${req.user.id}`);
+        console.log(`Found ${posts.length} draft posts for user ${req.user.id}`);
 
         res.json({
             status: 'success',
@@ -796,7 +835,7 @@ exports.getUserPendingPosts = async (req, res) => {
         console.error('Error fetching user pending posts:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error fetching pending posts'
+            message: 'Error fetching draft posts'
         });
     }
 };
@@ -806,11 +845,13 @@ exports.getUserPosts = async (req, res) => {
         console.log("user id ----->", req.user.id);
         console.log("user id type ----->", typeof req.user.id);
         
-        // Get all posts including drafts for the user
+        // Get active posts and drafts for the user (drafts only visible to owner)
         const posts = await prisma.post.findMany({
             where: { 
-                user_id: req.user.id
-                // Include all statuses (draft, pending, approved, rejected)
+                user_id: req.user.id,
+                status: {
+                    in: ['active', 'draft'] // Show active posts and drafts (owner can see their drafts)
+                }
             },
             include: {
                 user: {
@@ -867,10 +908,11 @@ exports.getUserPosts = async (req, res) => {
     }
 };
 
-exports.getApprovedPosts = async (req, res) => {
+// Get all active posts (replaces getApprovedPosts)
+exports.getActivePosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
-            where: { status: 'approved' },
+            where: { status: 'active' },
             include: {
                 user: {
                     select: {
@@ -920,165 +962,12 @@ exports.getApprovedPosts = async (req, res) => {
     }
 };
 
-exports.getUserApprovedPosts = async (req, res) => {
-    try {
-        const posts = await Post.findAll({
-            where: {
-                userId: req.user.id,
-                status: 'approved'
-            },
-            include: [
-                {
-                    model: Category,
-                    as: 'category'
-                }
-            ],
-            order: [['createdAt', 'DESC']]
-        });
+// Removed: getUserApprovedPosts, getUserRejectedPosts, getRejectedPosts
+// These used Sequelize models which are not available in this Prisma-based codebase
+// Use getUserPosts to get active and draft posts, or admin endpoints for suspended posts
 
-        res.json({
-            status: 'success',
-            data: posts
-        });
-    } catch (error) {
-        console.error('Error fetching approved posts:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching posts'
-        });
-    }
-};
-
-exports.getUserRejectedPosts = async (req, res) => {
-    try {
-        const posts = await Post.findAll({
-            where: {
-                userId: req.user.id,
-                status: 'rejected'
-            },
-            include: [
-                {
-                    model: Category,
-                    as: 'category'
-                }
-            ],
-            order: [['createdAt', 'DESC']]
-        });
-
-        res.json({
-            status: 'success',
-            data: posts
-        });
-    } catch (error) {
-        console.error('Error fetching rejected posts:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching posts'
-        });
-    }
-};
-
-exports.getRejectedPosts = async (req, res) => {
-    try {
-        const posts = await Post.findAll({
-            where: { status: 'rejected' },
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
-                },
-                {
-                    model: Category,
-                    as: 'category'
-                }
-            ],
-            order: [['createdAt', 'DESC']]
-        });
-
-        const processedPosts = posts.map(post => {
-            const postObj = post.toJSON();
-            if (postObj.mediaUrl && !postObj.mediaUrl.startsWith('http')) {
-                postObj.mediaUrl = `/uploads/${postObj.mediaUrl.replace(/^uploads\//, '')}`;
-            }
-            return postObj;
-        });
-
-        res.json({
-            status: 'success',
-            data: processedPosts
-        });
-
-    } catch (error) {
-        console.error('Error fetching rejected posts:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching posts'
-        });
-    }
-};
-
-exports.approvePost = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        const post = await Post.findByPk(postId);
-        if (!post) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Post not found'
-            });
-        }
-
-        await post.update({ status: 'approved' });
-
-        res.json({
-            status: 'success',
-            message: 'Post approved successfully',
-            data: post
-        });
-
-    } catch (error) {
-        console.error('Error approving post:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error approving post'
-        });
-    }
-};
-
-exports.rejectPost = async (req, res) => {
-    try {
-        const postId = req.params.id;
-        const { reason } = req.body;
-
-        const post = await Post.findByPk(postId);
-
-        if (!post) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Post not found'
-            });
-        }
-
-        await post.update({ 
-            status: 'rejected',
-            rejectionReason: reason
-        });
-
-        res.json({
-            status: 'success',
-            message: 'Post rejected successfully',
-            data: post
-        });
-
-    } catch (error) {
-        console.error('Error rejecting post:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error rejecting post'
-        });
-    }
-};
+// Removed: approvePost and rejectPost - posts are now published directly as 'active'
+// Use updatePostStatus endpoint to change post status to 'active' or 'suspended'
 
 exports.getPosts = async (req, res) => {
     try {
@@ -1089,7 +978,7 @@ exports.getPosts = async (req, res) => {
         const sort = req.query.sort || 'latest';
 
         let whereClause = {
-            status: 'approved'
+            status: 'active'
         };
 
         if (categoryId) {
@@ -1308,11 +1197,11 @@ exports.searchPosts = async (req, res) => {
             });
         }
 
-        // Search posts by title or description, only return approved posts
+        // Search posts by title or description, only return active posts
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     OR: [
                         {
@@ -1375,7 +1264,7 @@ exports.searchPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     OR: [
                         {
@@ -1516,7 +1405,7 @@ exports.getFollowingPosts = async (req, res) => {
         const [followingPosts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     user: {
                         followers: {
@@ -1563,7 +1452,7 @@ exports.getFollowingPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     user: {
                         followers: {
@@ -1709,7 +1598,7 @@ exports.getOptimizedFeed = async (req, res) => {
         if (includeFollowing === 'true') {
             const followingPosts = await prisma.post.findMany({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     user: {
                         followers: {
@@ -1871,7 +1760,7 @@ exports.getUserDraftPosts = async (req, res) => {
     }
 };
 
-// Publish a draft post (change status from draft to pending for approval)
+// Publish a draft post (change status from draft to active - published immediately)
 exports.publishDraftPost = async (req, res) => {
     try {
         const postId = req.params.postId;
@@ -1893,11 +1782,11 @@ exports.publishDraftPost = async (req, res) => {
             });
         }
 
-        // Update post status to pending for approval
+        // Update post status to active (published immediately)
         const updatedPost = await prisma.post.update({
             where: { id: postId },
             data: {
-                status: 'pending',
+                status: 'active',
                 updatedAt: new Date()
             },
             include: {
@@ -1929,7 +1818,7 @@ exports.publishDraftPost = async (req, res) => {
 
         res.json({
             status: 'success',
-            message: 'Draft post published successfully and submitted for approval',
+            message: 'Draft post published successfully and is now active',
             data: { post: updatedPost }
         });
     } catch (error) {
