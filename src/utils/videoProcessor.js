@@ -47,22 +47,29 @@ async function addWatermarkToVideo(inputPath, outputPath, postId) {
     // Calculate position (mid-right with padding)
     const paddingX = Math.max(20, Math.floor(videoWidth * 0.02));
     
-    // Calculate vertical spacing (5px gap between lines)
-    const lineSpacing = 5;
-    // Estimate text height (approximate: font size * 1.2 for line height)
-    const estimatedTextHeight1 = Math.floor(baseFontSize * 1.2);
-    const estimatedTextHeight2 = Math.floor(idFontSize * 1.2);
-    
-    // Position: mid-right (vertically centered)
-    // First line (Talentix): above center
-    const y1 = Math.floor((videoHeight / 2) - (estimatedTextHeight1 / 2) - lineSpacing);
-    // Second line (ID): below center
-    const y2 = Math.floor((videoHeight / 2) + (estimatedTextHeight2 / 2) + lineSpacing);
-    
     // Watermark text: "Talentix" on first line, "ID: <post_id>" on second line
     // Using two separate drawtext filters for multi-line text
-    const textFilter1 = `drawtext=text='${APP_NAME}':fontcolor=white@0.4:fontsize=${baseFontSize}:x=w-tw-${paddingX}:y=${y1}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
-    const textFilter2 = `drawtext=text='ID: ${postId}':fontcolor=white@0.4:fontsize=${idFontSize}:x=w-tw-${paddingX}:y=${y2}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
+    // Position: mid-right (vertically centered)
+    const lineSpacing = 8; // Gap between lines in pixels
+    
+    // Calculate approximate text heights for positioning
+    // Text height ≈ font size * 1.2 (line height multiplier)
+    const textHeight1 = Math.floor(baseFontSize * 1.2);
+    const textHeight2 = Math.floor(idFontSize * 1.2);
+    
+    // Center both lines vertically around the middle of the video
+    // First line (Talentix): above center
+    const y1 = Math.floor((videoHeight / 2) - (textHeight1 / 2) - (lineSpacing / 2));
+    // Second line (ID): below center  
+    const y2 = Math.floor((videoHeight / 2) + (textHeight2 / 2) + (lineSpacing / 2));
+    
+    // Escape single quotes in text for FFmpeg
+    const appNameEscaped = APP_NAME.replace(/'/g, "\\'");
+    const postIdEscaped = postId.replace(/'/g, "\\'");
+    
+    // Create drawtext filters with proper positioning
+    const textFilter1 = `drawtext=text='${appNameEscaped}':fontcolor=white@0.4:fontsize=${baseFontSize}:x=w-tw-${paddingX}:y=${y1}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
+    const textFilter2 = `drawtext=text='ID: ${postIdEscaped}':fontcolor=white@0.4:fontsize=${idFontSize}:x=w-tw-${paddingX}:y=${y2}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
     
     // Combine both text filters (array for fluent-ffmpeg)
     const textFilter = [textFilter1, textFilter2];

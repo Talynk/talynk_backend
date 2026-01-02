@@ -1,17 +1,22 @@
 const prisma = require('../lib/prisma');
-const { ValidationError } = require('@prisma/client');
 
 exports.errorHandler = (err, req, res, next) => {
     console.error('Error:', err);
 
-    if (err instanceof ValidationError) {
+    // Handle Prisma validation errors
+    if (err && err.name === 'PrismaClientValidationError') {
         return res.status(400).json({
             status: 'error',
             message: 'Validation error',
-            errors: err.errors.map(e => ({
-                field: e.path,
-                message: e.message
-            }))
+            error: err.message
+        });
+    }
+    
+    // Handle RangeNotSatisfiableError (HTTP 416)
+    if (err && (err.name === 'RangeNotSatisfiableError' || err.status === 416)) {
+        return res.status(416).json({
+            status: 'error',
+            message: 'Range not satisfiable'
         });
     }
 
