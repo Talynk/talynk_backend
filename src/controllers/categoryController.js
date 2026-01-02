@@ -40,7 +40,7 @@ exports.getAllCategories = async (req, res) => {
                             select: {
                                 posts: {
                                     where: {
-                                        status: 'approved',
+                                        status: 'active',
                                         is_frozen: false
                                     }
                                 }
@@ -96,7 +96,7 @@ exports.getSubcategories = async (req, res) => {
                     select: {
                         posts: {
                             where: {
-                                status: 'approved',
+                                status: 'active',
                                 is_frozen: false
                             }
                         }
@@ -154,7 +154,7 @@ exports.getCategoryById = async (req, res) => {
                     select: {
                         posts: {
                             where: {
-                                status: 'approved',
+                                status: 'active',
                                 is_frozen: false
                             }
                         }
