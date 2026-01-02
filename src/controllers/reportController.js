@@ -66,13 +66,13 @@ exports.reportPost = async (req, res) => {
         });
 
         // Check if post should be flagged (5+ reports)
-        if (updatedPost.report_count >= 5 && updatedPost.status !== 'frozen') {
+        if (updatedPost.report_count >= 5 && updatedPost.status !== 'suspended') {
             await prisma.post.update({
                 where: { id: postId },
                 data: {
                     is_frozen: true,
                     frozen_at: new Date(),
-                    status: 'frozen'
+                    status: 'suspended'
                 }
             });
 
@@ -266,7 +266,7 @@ exports.reviewReport = async (req, res) => {
                 data: {
                     is_frozen: false,
                     frozen_at: null,
-                    status: 'approved'
+                    status: 'active'
                 }
             });
 
@@ -419,7 +419,7 @@ exports.appealPost = async (req, res) => {
             where: { 
                 id: postId,
                 user_id: userId,
-                status: 'frozen'
+                status: 'suspended'
             }
         });
 
@@ -620,7 +620,7 @@ exports.reviewAppeal = async (req, res) => {
                 data: {
                     is_frozen: false,
                     frozen_at: null,
-                    status: 'approved',
+                    status: 'active',
                     report_count: 0 // Reset report count
                 }
             });

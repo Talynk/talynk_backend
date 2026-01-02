@@ -250,7 +250,7 @@ class WebSocketServer {
   async broadcastLikeUpdate(postId, userId, isLiked) {
     try {
       // Get current like count
-      const likeCount = await prisma.like.count({
+      const likeCount = await prisma.postLike.count({
         where: { post_id: postId }
       });
 

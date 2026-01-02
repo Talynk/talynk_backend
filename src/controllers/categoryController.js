@@ -22,7 +22,7 @@ exports.getAllCategories = async (req, res) => {
                     select: {
                         posts: {
                             where: {
-                                status: 'approved',
+                                status: 'active',
                                 is_frozen: false
                             }
                         }
@@ -133,7 +133,7 @@ exports.getCategoryById = async (req, res) => {
             include: {
                 posts: {
                     where: {
-                        status: 'approved',
+                        status: 'active',
                         is_frozen: false
                     },
                     include: {
@@ -365,7 +365,7 @@ exports.getPopularCategories = async (req, res) => {
                     select: {
                         posts: {
                             where: {
-                                status: 'approved',
+                                status: 'active',
                                 is_frozen: false,
                                 createdAt: {
                                     gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
