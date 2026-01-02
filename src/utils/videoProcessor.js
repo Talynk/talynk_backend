@@ -42,21 +42,34 @@ async function addWatermarkToVideo(inputPath, outputPath, postId) {
 
     // Calculate responsive font size (20-28px based on video height)
     const baseFontSize = Math.max(20, Math.min(28, Math.floor(videoHeight * 0.025)));
+    const idFontSize = Math.floor(baseFontSize * 0.75); // Smaller font for ID
     
-    // Calculate position (bottom-right with padding)
+    // Calculate position (mid-right with padding)
     const paddingX = Math.max(20, Math.floor(videoWidth * 0.02));
-    const paddingY = Math.max(20, Math.floor(videoHeight * 0.02));
     
-    // Watermark text: "Talynk • Post ID: <post_id>"
-    const watermarkText = `${APP_NAME} • Post ID: ${postId}`;
+    // Calculate vertical spacing (5px gap between lines)
+    const lineSpacing = 5;
+    // Estimate text height (approximate: font size * 1.2 for line height)
+    const estimatedTextHeight1 = Math.floor(baseFontSize * 1.2);
+    const estimatedTextHeight2 = Math.floor(idFontSize * 1.2);
     
-    // FFmpeg filter for text overlay with shadow for visibility
-    // Using drawtext filter which is faster than image overlay
-    const textFilter = `drawtext=text='${watermarkText}':fontcolor=white@0.4:fontsize=${baseFontSize}:x=w-tw-${paddingX}:y=h-th-${paddingY}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
+    // Position: mid-right (vertically centered)
+    // First line (Talentix): above center
+    const y1 = Math.floor((videoHeight / 2) - (estimatedTextHeight1 / 2) - lineSpacing);
+    // Second line (ID): below center
+    const y2 = Math.floor((videoHeight / 2) + (estimatedTextHeight2 / 2) + lineSpacing);
+    
+    // Watermark text: "Talentix" on first line, "ID: <post_id>" on second line
+    // Using two separate drawtext filters for multi-line text
+    const textFilter1 = `drawtext=text='${APP_NAME}':fontcolor=white@0.4:fontsize=${baseFontSize}:x=w-tw-${paddingX}:y=${y1}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
+    const textFilter2 = `drawtext=text='ID: ${postId}':fontcolor=white@0.4:fontsize=${idFontSize}:x=w-tw-${paddingX}:y=${y2}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
+    
+    // Combine both text filters (array for fluent-ffmpeg)
+    const textFilter = [textFilter1, textFilter2];
 
     return new Promise((resolve, reject) => {
         const ffmpegCommand = ffmpeg(inputPath)
-            .videoFilters(textFilter)
+            .videoFilters(textFilter) // Pass array of filters
             // Ultra-fast encoding settings for speed
             .videoCodec('libx264')
             .outputOptions([
