@@ -588,7 +588,21 @@ exports.deletePost = async (req, res) => {
             });
         }
 
-        // Delete the post (this will cascade delete related records)
+        // Delete related records first (comments don't have cascade delete)
+        // Delete comments
+        await prisma.comment.deleteMany({
+            where: { post_id: postId }
+        });
+
+        // Delete featured post associations
+        await prisma.featuredPost.deleteMany({
+            where: { post_id: postId }
+        });
+
+        // Note: PostLike, Share, View have cascade delete, so they'll be deleted automatically
+        // Note: PostReport and PostAppeal are kept for admin review (not deleted)
+
+        // Delete the post
         await prisma.post.delete({
             where: { id: postId }
         });

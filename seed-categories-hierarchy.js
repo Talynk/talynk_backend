@@ -70,6 +70,35 @@ const hierarchy = [
       'Women Beauty',
       'Men'
     ]
+  },
+  {
+    name: 'Sport',
+    description: 'Sport-related content',
+    sort_order: 5,
+    children: [
+      'Football',
+      'Volleyball',
+      'Basketball',
+      'Handball',
+      'Tennis',
+      'Table tennis',
+      'Golf',
+      'Cricket',
+      'Rugby',
+      'Acrobatics',
+      'Other'
+    ]
+  },
+  {
+    name: 'Performance',
+    description: 'Performance-related content',
+    sort_order: 6,
+    children: [
+      'Drama/Theatre',
+      'Dance',
+      'Comedy',
+      'Other'
+    ]
   }
 ];
 
