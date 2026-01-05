@@ -4561,8 +4561,13 @@ exports.getDashboardStats = async (req, res) => {
         ]);
 
         // Calculate engagement rate
+        // Convert BigInt to Number for calculations
+        const totalEngagementsCount = totalEngagements[0]?.total_engagements 
+            ? Number(totalEngagements[0].total_engagements) 
+            : 0;
+        
         const engagementRate = totalPosts > 0 ? 
-            (totalEngagements[0]?.total_engagements || 0) / totalPosts * 100 : 0;
+            (totalEngagementsCount / totalPosts) * 100 : 0;
 
         res.json({
             status: 'success',
@@ -4575,7 +4580,7 @@ exports.getDashboardStats = async (req, res) => {
                     flaggedContents,
                     totalViews,
                     totalPosts,
-                    totalEngagements: totalEngagements[0]?.total_engagements || 0,
+                    totalEngagements: totalEngagementsCount,
                     engagementRate: Math.round(engagementRate * 100) / 100
                 },
                 recentContent
@@ -4767,7 +4772,9 @@ exports.getAnalytics = async (req, res) => {
                     totalUsers,
                     totalViews,
                     totalPosts,
-                    totalEngagements: totalEngagements[0]?.total_engagements || 0,
+                    totalEngagements: totalEngagements[0]?.total_engagements 
+                        ? Number(totalEngagements[0].total_engagements) 
+                        : 0,
                     userDemographics,
                     deviceUsage,
                     topCountries,
@@ -4803,7 +4810,7 @@ exports.getContentManagementStats = async (req, res) => {
             prisma.post.count(),
             prisma.post.count({ where: { video_url: { not: null }, type: 'video' } }),
             prisma.post.count({ where: { video_url: { not: null }, type: 'image' } }),
-            prisma.post.count({ where: { status: 'pending' } }),
+            prisma.post.count({ where: { status: 'draft' } }),
             prisma.post.count({ where: { is_frozen: true } }),
             prisma.post.count({ where: { is_featured: true } })
         ]);
