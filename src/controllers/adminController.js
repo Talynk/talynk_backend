@@ -256,7 +256,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -303,7 +302,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -337,9 +335,9 @@ exports.getDashboardData = async (req, res) => {
     try {
         // Get counts for different post statuses
         const totalPosts = await prisma.post.count();
-        const pendingPosts = await prisma.post.count({ where: { status: 'pending' } });
-        const approvedPosts = await prisma.post.count({ where: { status: 'approved' } });
-        const rejectedPosts = await prisma.post.count({ where: { status: 'rejected' } });
+        const pendingPosts = await prisma.post.count({ where: { status: 'draft' } });
+        const approvedPosts = await prisma.post.count({ where: { status: 'active' } });
+        const rejectedPosts = await prisma.post.count({ where: { status: 'suspended' } });
 
         // Get recent posts with their authors and categories
         const recentPosts = await prisma.post.findMany({
@@ -397,7 +395,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -444,7 +441,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -568,7 +564,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -615,7 +610,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -649,7 +643,7 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.getPendingPosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
-            where: { status: 'pending' },
+            where: { status: 'draft' },
             include: {
                 user: {
                     select: {
@@ -691,7 +685,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -738,7 +731,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -795,7 +787,25 @@ exports.updatePostStatus = async (req, res) => {
             });
         }
 
-        if (status === 'rejected' && !rejectionReason) {
+        // Map status values to enum
+        let mappedStatus;
+        if (status === 'approved' || status === 'active') {
+            mappedStatus = 'active';
+        } else if (status === 'rejected' || status === 'suspended') {
+            mappedStatus = 'suspended';
+            if (!rejectionReason) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Rejection reason is required'
+                });
+            }
+        } else if (status === 'pending' || status === 'draft') {
+            mappedStatus = 'draft';
+        } else {
+            mappedStatus = status; // Use as-is if already valid enum value
+        }
+
+        if (mappedStatus === 'suspended' && !rejectionReason) {
             return res.status(400).json({
                 status: 'error',
                 message: 'Rejection reason is required'
@@ -805,10 +815,10 @@ exports.updatePostStatus = async (req, res) => {
         await prisma.post.update({
             where: { id: req.body.id },
             data: {
-                status,
-                rejectionReason: status === 'rejected' ? rejectionReason : null,
+                status: mappedStatus,
+                rejectionReason: mappedStatus === 'suspended' ? rejectionReason : null,
                 approver_id: req.user.id,
-                approved_at: status === 'approved' ? new Date() : null
+                approved_at: mappedStatus === 'active' ? new Date() : null
             }
         });
 
@@ -816,9 +826,9 @@ exports.updatePostStatus = async (req, res) => {
         if (post.user && post.user.id) {
             // Create notification message based on status
             let notificationText = '';
-            if (status === 'approved') {
+            if (mappedStatus === 'active') {
                 notificationText = `Your post "${post.title}" has been approved.`;
-            } else if (status === 'rejected') {
+            } else if (mappedStatus === 'suspended') {
                 notificationText = `Your post "${post.title}" has been rejected. Reason: ${rejectionReason}`;
             }
 
@@ -859,7 +869,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -906,7 +915,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -950,7 +958,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -997,7 +1004,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1105,7 +1111,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1152,7 +1157,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1187,7 +1191,7 @@ exports.getApprovedPosts = async (req, res) => {
         const { date, search, page = 1, limit = 10 } = req.query;
         const approverUsername = req.user.id;
         const whereClause = {
-            status: 'approved',
+            status: 'active',
             // approver_id: approverUsername
         };
 
@@ -1255,7 +1259,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1302,7 +1305,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1365,7 +1367,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1412,7 +1413,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1539,7 +1539,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1586,7 +1585,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1812,7 +1810,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1859,7 +1856,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -1928,7 +1924,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -1975,7 +1970,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2043,7 +2037,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2090,7 +2083,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2133,8 +2125,8 @@ exports.getAdminDashboardStats = async (req, res) => {
             User.count(),
             Approver.count(),
             Post.count(),
-            Post.count({ where: { status: 'pending' } }),
-            Post.count({ where: { status: 'approved' } })
+            Post.count({ where: { status: 'draft' } }),
+            Post.count({ where: { status: 'active' } })
         ]);
 
         res.json({
@@ -2165,7 +2157,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2212,7 +2203,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2282,7 +2272,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2329,7 +2318,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2386,7 +2374,7 @@ exports.getAllUsers = async (req, res) => {
         // Get approved and pending post counts for all users
         const approvedCounts = await prisma.post.groupBy({
             by: ['user_id'],
-            where: { status: 'approved' },
+            where: { status: 'active' },
             _count: {
                 id: true
             }
@@ -2394,7 +2382,7 @@ exports.getAllUsers = async (req, res) => {
 
         const pendingCounts = await prisma.post.groupBy({
             by: ['user_id'],
-            where: { status: 'pending' },
+            where: { status: 'draft' },
             _count: {
                 id: true
             }
@@ -2444,7 +2432,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2491,7 +2478,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2539,8 +2525,8 @@ exports.getRecentActivity = async (req, res) => {
         });
 
         const activity = recentPosts.map(post => ({
-            action: post.status === 'approved' ? 'Video Approved' : 
-                    post.status === 'rejected' ? 'Video Rejected' : 
+            action: post.status === 'active' ? 'Video Approved' : 
+                    post.status === 'suspended' ? 'Video Rejected' : 
                     'Video Submitted',
             user: post.User?.username || 'Unknown User',
             approver: post.Approver?.username,
@@ -2570,7 +2556,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2617,7 +2602,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2675,7 +2659,7 @@ exports.getApprovers = async (req, res) => {
                 prisma.post.count({
                     where: {
                         approver_id: approverId,
-                        status: 'approved'
+                        status: 'active'
                     }
                 })
             )
@@ -2726,7 +2710,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2773,7 +2756,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -2916,7 +2898,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -2963,7 +2944,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3037,7 +3017,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3084,7 +3063,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3158,7 +3136,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3205,7 +3182,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3300,7 +3276,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3347,7 +3322,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3428,7 +3402,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3475,7 +3448,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3541,7 +3513,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3588,7 +3559,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3653,7 +3623,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3700,7 +3669,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3799,7 +3767,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3846,7 +3813,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -3933,7 +3899,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -3980,7 +3945,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -4135,7 +4099,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -4182,7 +4145,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -4281,7 +4243,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -4328,7 +4289,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -4417,7 +4377,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -4464,7 +4423,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -4550,16 +4508,15 @@ exports.getDashboardStats = async (req, res) => {
                 }
             }),
             
-            // Pending Reviews
+            // Pending Reviews (draft posts awaiting approval)
             prisma.post.count({
-                where: { status: 'pending' }
+                where: { status: 'draft' }
             }),
             
-            // Flagged Contents
+            // Flagged Contents (frozen posts)
             prisma.post.count({
                 where: { 
-                    is_frozen: true,
-                    status: 'frozen'
+                    is_frozen: true
                 }
             }),
             
@@ -4925,7 +4882,7 @@ exports.freezePost = async (req, res) => {
             where: { id: postId },
             data: {
                 is_frozen: true,
-                status: 'frozen',
+                status: 'suspended', // Use suspended status when freezing
                 frozen_at: new Date(),
                 frozen_reason: reason
             },
@@ -4982,7 +4939,7 @@ exports.unfreezePost = async (req, res) => {
             where: { id: postId },
             data: {
                 is_frozen: false,
-                status: 'approved',
+                status: 'active',
                 frozen_at: null,
                 frozen_reason: null,
                 report_count: 0 // Reset report count
