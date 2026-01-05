@@ -88,91 +88,8 @@ exports.registerAdmin = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
-exports.getFlaggedPosts = async (req, res) => {
-    try {
-        const { page = 1, limit = 10 } = req.query;
-        const offset = (page - 1) * limit;
-
-        const [posts, totalCount] = await Promise.all([
-            prisma.post.findMany({
-                where: { 
-                    status: 'frozen',
-                    is_frozen: true
-                },
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            username: true,
-                            email: true
-                        }
-                    },
-                    category: true,
-                    reports: {
-                        include: {
-                            user: {
-                                select: {
-                                    id: true,
-                                    username: true
-                                }
-                            }
-                        },
-                        orderBy: {
-                            createdAt: 'desc'
-                        }
-                    },
-                    appeals: {
-                        include: {
-                            user: {
-                                select: {
-                                    id: true,
-                                    username: true
-                                }
-                            }
-                        },
-                        orderBy: {
-                            createdAt: 'desc'
-                        }
-                    }
-                },
-                orderBy: {
-                    frozen_at: 'desc'
-                },
-                take: parseInt(limit),
-                skip: parseInt(offset)
-            }),
-            prisma.post.count({
-                where: { 
-                    status: 'frozen',
-                    is_frozen: true
-                }
-            })
-        ]);
-
-        res.json({
-            status: 'success',
-            data: {
-                posts,
-                pagination: {
-                    currentPage: parseInt(page),
-                    totalPages: Math.ceil(totalCount / limit),
-                    totalCount,
-                    hasNext: page * limit < totalCount,
-                    hasPrev: page > 1
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Get flagged posts error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching flagged posts',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
+// NOTE: getFlaggedPosts is defined later in this file (line ~4528)
+// This duplicate has been removed to avoid confusion
 
 exports.searchPosts = async (req, res) => {
     try {
@@ -1020,44 +937,9 @@ exports.getFlaggedPosts = async (req, res) => {
 };
 
 // Get admin dashboard stats
-exports.getDashboardStats = async (req, res) => {
-    try {
-        // Get counts using Prisma
-        const stats = await Promise.all([
-            prisma.user.count(),
-            prisma.approver.count(),
-            prisma.post.count({ where: { status: 'pending' } }),
-            prisma.post.count({ where: { status: 'approved' } }),
-            prisma.post.count({ where: { status: 'rejected' } }),
-            prisma.post.count({ where: { status: 'frozen' } }),
-            prisma.user.count({ where: { status: 'active' } }),
-            prisma.user.count({ where: { status: 'frozen' } })
-        ]);
-
-        const [totalUsers, totalApprovers, pendingVideos, approvedVideos, rejectedVideos, flaggedVideos, activeUsers, frozenUsers] = stats;
-
-        res.json({
-            status: 'success',
-            data: {
-                totalUsers,
-                totalApprovers,
-                pendingVideos,
-                approvedVideos,
-                rejectedVideos,
-                flaggedVideos,
-                activeUsers,
-                frozenUsers
-            }
-        });
-    } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to fetch dashboard statistics',
-            details: error.message
-        });
-    }
-};
+// DEPRECATED: This function has been replaced by the more comprehensive version at line 4616
+// Keeping for backward compatibility but should be removed in future versions
+// Use the version with date filtering instead
 
 // Get flagged posts (posts with 5+ reports)
 exports.getFlaggedPosts = async (req, res) => {
@@ -4478,15 +4360,15 @@ exports.getFlaggedPosts = async (req, res) => {
 
 exports.getUserStats = async (req, res) => {
     try {
-        // Get user statistics
-        const totalUsers = await User.count();
-        const activeUsers = await User.count({ where: { status: 'active' } });
-        const frozenUsers = await User.count({ where: { status: 'frozen' } });
+        // Get user statistics using Prisma
+        const totalUsers = await prisma.user.count();
+        const activeUsers = await prisma.user.count({ where: { status: 'active' } });
+        const frozenUsers = await prisma.user.count({ where: { status: 'frozen' } });
 
-        // Get post statistics
-        const totalPosts = await Post.count();
-        const approvedPosts = await Post.count({ where: { status: 'approved' } });
-        const pendingPosts = await Post.count({ where: { status: 'pending' } });
+        // Get post statistics using Prisma
+        const totalPosts = await prisma.post.count();
+        const approvedPosts = await prisma.post.count({ where: { status: 'approved' } });
+        const pendingPosts = await prisma.post.count({ where: { status: 'pending' } });
 
         res.json({
             status: 'success',
@@ -4508,6 +4390,7 @@ exports.getUserStats = async (req, res) => {
         // Return default values in case of error
         res.status(500).json({
             status: 'error',
+            message: 'Error fetching user statistics',
             data: {
                 users: {
                     total: 0,
@@ -4519,7 +4402,8 @@ exports.getUserStats = async (req, res) => {
                     approved: 0,
                     pending: 0
                 }
-            }
+            },
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -4657,10 +4541,11 @@ exports.getDashboardStats = async (req, res) => {
             // Total Users
             prisma.user.count(),
             
-            // Total Videos (posts with video_url)
+            // Total Videos (posts with video_url and type='video')
             prisma.post.count({
                 where: {
                     video_url: { not: null },
+                    type: 'video',
                     createdAt: { gte: startDate }
                 }
             }),
@@ -4959,8 +4844,8 @@ exports.getContentManagementStats = async (req, res) => {
             featuredContents
         ] = await Promise.all([
             prisma.post.count(),
-            prisma.post.count({ where: { video_url: { not: null } } }),
-            prisma.post.count({ where: { image_url: { not: null } } }),
+            prisma.post.count({ where: { video_url: { not: null }, type: 'video' } }),
+            prisma.post.count({ where: { video_url: { not: null }, type: 'image' } }),
             prisma.post.count({ where: { status: 'pending' } }),
             prisma.post.count({ where: { is_frozen: true } }),
             prisma.post.count({ where: { is_featured: true } })
