@@ -4377,11 +4377,10 @@ exports.getUserStats = async (req, res) => {
             // Registration Rate (users per day in period)
             prisma.$queryRaw`
                 SELECT 
-                    COUNT(*) as total_registrations,
-                    COUNT(*)::float / NULLIF(EXTRACT(EPOCH FROM (NOW() - ${startDate})) / 86400, 0) as registrations_per_day,
-                    COUNT(*) FILTER (WHERE "createdAt" >= ${startDate} AND "createdAt" < ${startDate} + INTERVAL '1 day') as today_registrations
+                    COUNT(*) FILTER (WHERE "createdAt" >= ${startDate}) as total_registrations,
+                    COUNT(*) FILTER (WHERE "createdAt" >= ${startDate})::float / NULLIF(EXTRACT(EPOCH FROM (NOW() - ${startDate})) / 86400, 0) as registrations_per_day,
+                    (SELECT COUNT(*) FROM "users" WHERE DATE("createdAt") = CURRENT_DATE) as today_registrations
                 FROM "users"
-                WHERE "createdAt" >= ${startDate}
             `,
             
             // Age Distribution
