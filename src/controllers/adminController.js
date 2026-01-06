@@ -4320,49 +4320,191 @@ exports.getFlaggedPosts = async (req, res) => {
 
 exports.getUserStats = async (req, res) => {
     try {
-        // Get user statistics using Prisma
-        const totalUsers = await prisma.user.count();
-        const activeUsers = await prisma.user.count({ where: { status: 'active' } });
-        const frozenUsers = await prisma.user.count({ where: { status: 'frozen' } });
+        const { period = '30d' } = req.query;
+        
+        // Calculate date range based on period
+        const now = new Date();
+        let startDate;
+        
+        switch (period) {
+            case '1d':
+                startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                break;
+            case '7d':
+                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                break;
+            case '30d':
+                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                break;
+            case '90d':
+                startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+                break;
+            case '1y':
+                startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+                break;
+            default:
+                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        }
 
-        // Get post statistics using Prisma
-        const totalPosts = await prisma.post.count();
-        const approvedPosts = await prisma.post.count({ where: { status: 'approved' } });
-        const pendingPosts = await prisma.post.count({ where: { status: 'pending' } });
+        // Get user statistics using Prisma
+        const [
+            totalUsers,
+            activeUsers,
+            suspendedUsers,
+            newUsersInPeriod,
+            registrationRate,
+            ageDistribution,
+            topCountries,
+            usersWithPosts,
+            usersWithVerifiedEmail
+        ] = await Promise.all([
+            // Total Users
+            prisma.user.count(),
+            
+            // Active Users
+            prisma.user.count({ where: { status: 'active' } }),
+            
+            // Suspended Users
+            prisma.user.count({ where: { status: 'suspended' } }),
+            
+            // New Users in Period
+            prisma.user.count({
+                where: { 
+                    createdAt: { gte: startDate }
+                }
+            }),
+            
+            // Registration Rate (users per day in period)
+            prisma.$queryRaw`
+                SELECT 
+                    COUNT(*) as total_registrations,
+                    COUNT(*)::float / NULLIF(EXTRACT(EPOCH FROM (NOW() - ${startDate})) / 86400, 0) as registrations_per_day,
+                    COUNT(*) FILTER (WHERE "createdAt" >= ${startDate} AND "createdAt" < ${startDate} + INTERVAL '1 day') as today_registrations
+                FROM "users"
+                WHERE "createdAt" >= ${startDate}
+            `,
+            
+            // Age Distribution
+            prisma.$queryRaw`
+                SELECT 
+                    CASE 
+                        WHEN "date_of_birth" IS NULL THEN 'Unknown'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) < 18 THEN 'Under 18'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 18 AND 24 THEN '18-24'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 25 AND 34 THEN '25-34'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 35 AND 44 THEN '35-44'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 45 AND 54 THEN '45-54'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 55 AND 64 THEN '55-64'
+                        ELSE '65+'
+                    END as age_group,
+                    COUNT(*) as count,
+                    ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM "users"), 0), 2) as percentage
+                FROM "users"
+                GROUP BY age_group
+                ORDER BY 
+                    CASE age_group
+                        WHEN 'Under 18' THEN 1
+                        WHEN '18-24' THEN 2
+                        WHEN '25-34' THEN 3
+                        WHEN '35-34' THEN 4
+                        WHEN '35-44' THEN 5
+                        WHEN '45-54' THEN 6
+                        WHEN '55-64' THEN 7
+                        WHEN '65+' THEN 8
+                        ELSE 9
+                    END
+            `,
+            
+            // Top 3 Countries with Most Users
+            prisma.$queryRaw`
+                SELECT 
+                    c.id,
+                    c.name as country,
+                    c.flag_emoji,
+                    COUNT(u.id) as user_count,
+                    ROUND(COUNT(u.id) * 100.0 / NULLIF((SELECT COUNT(*) FROM "users"), 0), 2) as percentage
+                FROM "users" u
+                JOIN "countries" c ON u.country_id = c.id
+                GROUP BY c.id, c.name, c.flag_emoji
+                ORDER BY user_count DESC
+                LIMIT 3
+            `,
+            
+            // Users with Posts
+            prisma.user.count({
+                where: {
+                    posts_count: { gt: 0 }
+                }
+            }),
+            
+            // Users with Verified Email
+            prisma.user.count({
+                where: {
+                    email_verified: true
+                }
+            })
+        ]);
+
+        // Calculate registration growth rate
+        const daysInPeriod = Math.ceil((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        const regRate = registrationRate[0];
+        const avgRegistrationsPerDay = regRate?.registrations_per_day || 0;
 
         res.json({
             status: 'success',
             data: {
+                period,
                 users: {
                     total: totalUsers,
                     active: activeUsers,
-                    frozen: frozenUsers
+                    suspended: suspendedUsers,
+                    newInPeriod: newUsersInPeriod,
+                    withPosts: usersWithPosts,
+                    withVerifiedEmail: usersWithVerifiedEmail,
+                    withoutPosts: totalUsers - usersWithPosts
                 },
-                posts: {
-                    total: totalPosts,
-                    approved: approvedPosts,
-                    pending: pendingPosts
+                registration: {
+                    newUsers: newUsersInPeriod,
+                    periodDays: daysInPeriod,
+                    averagePerDay: Math.round(avgRegistrationsPerDay * 100) / 100,
+                    todayRegistrations: Number(regRate?.today_registrations || 0),
+                    growthRate: totalUsers > 0 
+                        ? Math.round((newUsersInPeriod / totalUsers) * 10000) / 100 
+                        : 0
+                },
+                ageDistribution: ageDistribution.map(item => ({
+                    ageGroup: item.age_group,
+                    count: Number(item.count),
+                    percentage: Number(item.percentage)
+                })),
+                topCountries: topCountries.map(item => ({
+                    id: Number(item.id),
+                    country: item.country,
+                    flagEmoji: item.flag_emoji,
+                    userCount: Number(item.user_count),
+                    percentage: Number(item.percentage)
+                })),
+                engagement: {
+                    usersWithPosts: usersWithPosts,
+                    usersWithoutPosts: totalUsers - usersWithPosts,
+                    postCreationRate: totalUsers > 0 
+                        ? Math.round((usersWithPosts / totalUsers) * 10000) / 100 
+                        : 0
+                },
+                verification: {
+                    verified: usersWithVerifiedEmail,
+                    unverified: totalUsers - usersWithVerifiedEmail,
+                    verificationRate: totalUsers > 0 
+                        ? Math.round((usersWithVerifiedEmail / totalUsers) * 10000) / 100 
+                        : 0
                 }
             }
         });
     } catch (error) {
         console.error('Error getting user stats:', error);
-        // Return default values in case of error
         res.status(500).json({
             status: 'error',
             message: 'Error fetching user statistics',
-            data: {
-                users: {
-                    total: 0,
-                    active: 0,
-                    frozen: 0
-                },
-                posts: {
-                    total: 0,
-                    approved: 0,
-                    pending: 0
-                }
-            },
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -4679,7 +4821,7 @@ exports.getAnalytics = async (req, res) => {
                         ELSE '65+'
                     END as age_group,
                     COUNT(*) as count
-                FROM "User" 
+                FROM "users" 
                 WHERE "createdAt" >= ${startDate}
                 GROUP BY age_group
                 ORDER BY count DESC
@@ -4694,7 +4836,7 @@ exports.getAnalytics = async (req, res) => {
                         ELSE 'Desktop'
                     END as device_type,
                     COUNT(*) as count
-                FROM "View" 
+                FROM "views" 
                 WHERE "createdAt" >= ${startDate}
                 GROUP BY device_type
                 ORDER BY count DESC
@@ -4706,9 +4848,9 @@ exports.getAnalytics = async (req, res) => {
                     c.name as country,
                     c.flag_emoji,
                     COUNT(u.id) as user_count,
-                    ROUND(COUNT(u.id) * 100.0 / (SELECT COUNT(*) FROM "User" WHERE "createdAt" >= ${startDate}), 2) as percentage
-                FROM "User" u
-                JOIN "Country" c ON u.country_id = c.id
+                    ROUND(COUNT(u.id) * 100.0 / (SELECT COUNT(*) FROM "users" WHERE "createdAt" >= ${startDate}), 2) as percentage
+                FROM "users" u
+                JOIN "countries" c ON u.country_id = c.id
                 WHERE u."createdAt" >= ${startDate}
                 GROUP BY c.id, c.name, c.flag_emoji
                 ORDER BY user_count DESC
@@ -4720,9 +4862,9 @@ exports.getAnalytics = async (req, res) => {
                 SELECT 
                     cat.name as category,
                     COUNT(p.id) as post_count,
-                    ROUND(COUNT(p.id) * 100.0 / (SELECT COUNT(*) FROM "Post" WHERE "createdAt" >= ${startDate}), 2) as percentage
-                FROM "Post" p
-                JOIN "Category" cat ON p.category_id = cat.id
+                    ROUND(COUNT(p.id) * 100.0 / (SELECT COUNT(*) FROM "posts" WHERE "createdAt" >= ${startDate}), 2) as percentage
+                FROM "posts" p
+                JOIN "categories" cat ON p.category_id = cat.id
                 WHERE p."createdAt" >= ${startDate}
                 GROUP BY cat.id, cat.name
                 ORDER BY post_count DESC
@@ -4733,7 +4875,7 @@ exports.getAnalytics = async (req, res) => {
             prisma.$queryRaw`
                 SELECT 
                     AVG(EXTRACT(EPOCH FROM ("updatedAt" - "createdAt"))) as avg_session_seconds
-                FROM "View" 
+                FROM "views" 
                 WHERE "createdAt" >= ${startDate}
             `,
             
@@ -4741,11 +4883,11 @@ exports.getAnalytics = async (req, res) => {
             prisma.$queryRaw`
                 SELECT 
                     COUNT(*) as single_view_users,
-                    (SELECT COUNT(DISTINCT "user_id") FROM "View" WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL) as total_users,
-                    ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(DISTINCT "user_id") FROM "View" WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL), 0), 2) as bounce_rate
+                    (SELECT COUNT(DISTINCT "user_id") FROM "views" WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL) as total_users,
+                    ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(DISTINCT "user_id") FROM "views" WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL), 0), 2) as bounce_rate
                 FROM (
                     SELECT "user_id", COUNT(*) as view_count
-                    FROM "View" 
+                    FROM "views" 
                     WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL
                     GROUP BY "user_id"
                     HAVING COUNT(*) = 1
@@ -4756,9 +4898,9 @@ exports.getAnalytics = async (req, res) => {
             prisma.$queryRaw`
                 SELECT 
                     COUNT(*) as high_engagement_posts,
-                    (SELECT COUNT(*) FROM "Post" WHERE "createdAt" >= ${startDate}) as total_posts,
-                    ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM "Post" WHERE "createdAt" >= ${startDate}), 0), 2) as completion_rate
-                FROM "Post" p
+                    (SELECT COUNT(*) FROM "posts" WHERE "createdAt" >= ${startDate}) as total_posts,
+                    ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM "posts" WHERE "createdAt" >= ${startDate}), 0), 2) as completion_rate
+                FROM "posts" p
                 WHERE p."createdAt" >= ${startDate}
                 AND (p.likes + p.comment_count + p.shares) >= 10
             `
