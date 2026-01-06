@@ -4400,18 +4400,27 @@ exports.getUserStats = async (req, res) => {
                     COUNT(*) as count,
                     ROUND(COUNT(*) * 100.0 / NULLIF((SELECT COUNT(*) FROM "users"), 0), 2) as percentage
                 FROM "users"
-                GROUP BY age_group
+                GROUP BY 
+                    CASE 
+                        WHEN "date_of_birth" IS NULL THEN 'Unknown'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) < 18 THEN 'Under 18'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 18 AND 24 THEN '18-24'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 25 AND 34 THEN '25-34'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 35 AND 44 THEN '35-44'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 45 AND 54 THEN '45-54'
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 55 AND 64 THEN '55-64'
+                        ELSE '65+'
+                    END
                 ORDER BY 
-                    CASE age_group
-                        WHEN 'Under 18' THEN 1
-                        WHEN '18-24' THEN 2
-                        WHEN '25-34' THEN 3
-                        WHEN '35-34' THEN 4
-                        WHEN '35-44' THEN 5
-                        WHEN '45-54' THEN 6
-                        WHEN '55-64' THEN 7
-                        WHEN '65+' THEN 8
-                        ELSE 9
+                    CASE 
+                        WHEN "date_of_birth" IS NULL THEN 9
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) < 18 THEN 1
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 18 AND 24 THEN 2
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 25 AND 34 THEN 3
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 35 AND 44 THEN 5
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 45 AND 54 THEN 6
+                        WHEN EXTRACT(YEAR FROM AGE("date_of_birth")) BETWEEN 55 AND 64 THEN 7
+                        ELSE 8
                     END
             `,
             
