@@ -19,6 +19,7 @@ const recommendationRoutes = require('./recommendation.routes');
 const likeRoutes = require('./like.routes');
 const viewRoutes = require('./view.routes');
 const countryRoutes = require('./country.routes');
+const challengeRoutes = require('./challenge.routes');
 
 // Test route
 router.get('/test', (req, res) => {
@@ -44,5 +45,6 @@ router.use('/recommendations', recommendationRoutes);
 router.use('/likes', likeRoutes);
 router.use('/views', viewRoutes);
 router.use('/countries', countryRoutes);
+router.use('/challenges', challengeRoutes);
 
 module.exports = router; 

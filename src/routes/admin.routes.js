@@ -48,6 +48,14 @@ router.get('/appeals', authenticate, isAdmin, adminController.getAllAppeals);
 // Broadcast Notifications
 router.post('/notifications/broadcast', authenticate, isAdmin, adminController.sendBroadcastNotification);
 
+// Challenge Management
+router.get('/challenges', authenticate, isAdmin, adminController.getAllChallenges);
+router.get('/challenges/pending', authenticate, isAdmin, adminController.getPendingChallenges);
+router.get('/challenges/:challengeId', authenticate, isAdmin, adminController.getChallengeById);
+router.put('/challenges/:challengeId/approve', authenticate, isAdmin, adminController.approveChallenge);
+router.put('/challenges/:challengeId/reject', authenticate, isAdmin, adminController.rejectChallenge);
+router.put('/challenges/:challengeId/stop', authenticate, isAdmin, adminController.stopChallenge);
+
 
 
 
