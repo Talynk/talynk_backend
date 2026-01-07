@@ -145,6 +145,61 @@ exports.createPost = async (req, res) => {
 
         console.log("Post created successfully:", post.id);
 
+        // Optionally link post to challenge if challenge_id is provided
+        let challengePost = null;
+        if (req.body.challenge_id) {
+            try {
+                const challengeId = req.body.challenge_id;
+                
+                // Check if challenge exists and is active
+                const challenge = await prisma.challenge.findUnique({
+                    where: { id: challengeId }
+                });
+
+                if (challenge && (challenge.status === 'active' || challenge.status === 'approved')) {
+                    // Check if user is a participant
+                    const participant = await prisma.challengeParticipant.findUnique({
+                        where: {
+                            unique_challenge_participant: {
+                                challenge_id: challengeId,
+                                user_id: userId
+                            }
+                        }
+                    });
+
+                    if (participant) {
+                        // Check if post is already linked
+                        const existingLink = await prisma.challengePost.findUnique({
+                            where: {
+                                unique_challenge_post: {
+                                    challenge_id: challengeId,
+                                    post_id: post.id
+                                }
+                            }
+                        });
+
+                        if (!existingLink) {
+                            challengePost = await prisma.challengePost.create({
+                                data: {
+                                    challenge_id: challengeId,
+                                    post_id: post.id,
+                                    user_id: userId
+                                }
+                            });
+                            console.log("Post linked to challenge:", challengeId);
+                        }
+                    } else {
+                        console.log("User is not a participant in the challenge, skipping link");
+                    }
+                } else {
+                    console.log("Challenge not found or not active, skipping link");
+                }
+            } catch (error) {
+                console.error("Error linking post to challenge:", error);
+                // Don't fail post creation if challenge linking fails
+            }
+        }
+
         // Update user's post count
         await prisma.user.update({
             where: { id: userId },
@@ -206,7 +261,9 @@ exports.createPost = async (req, res) => {
             data: { 
                 post: {
                     ...post,
-                    video_url: video_url // Original video URL (will be updated when watermarking completes)
+                    video_url: video_url, // Original video URL (will be updated when watermarking completes)
+                    challenge_linked: challengePost ? true : false,
+                    challenge_id: challengePost ? challengePost.challenge_id : null
                 }
             }
         });

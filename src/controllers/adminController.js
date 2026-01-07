@@ -5473,3 +5473,506 @@ exports.getAdminPosts = async (req, res) => {
         });
     }
 };
+
+// ===== CHALLENGE MANAGEMENT =====
+
+// Get all challenge requests (pending, approved, rejected, active, ended)
+exports.getAllChallenges = async (req, res) => {
+    try {
+        const { status, page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const where = status ? { status } : {};
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where,
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    approver: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({ where })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: challenges,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get pending challenge requests
+exports.getPendingChallenges = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where: { status: 'pending' },
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({ where: { status: 'pending' } })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: challenges,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching pending challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch pending challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get a single challenge by ID
+exports.getChallengeById = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        email: true,
+                        profile_picture: true
+                    }
+                },
+                approver: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                },
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                profile_picture: true,
+                                posts_count: true,
+                                follower_count: true
+                            }
+                        }
+                    },
+                    orderBy: {
+                        joined_at: 'desc'
+                    }
+                },
+                posts: {
+                    include: {
+                        post: {
+                            include: {
+                                user: {
+                                    select: {
+                                        id: true,
+                                        username: true,
+                                        display_name: true,
+                                        profile_picture: true
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    orderBy: {
+                        submitted_at: 'desc'
+                    }
+                },
+                _count: {
+                    select: {
+                        participants: true,
+                        posts: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        // Get post counts for each participant
+        const participantsWithPostCounts = await Promise.all(
+            challenge.participants.map(async (participant) => {
+                const postCount = await prisma.challengePost.count({
+                    where: {
+                        challenge_id: challengeId,
+                        user_id: participant.user_id
+                    }
+                });
+
+                return {
+                    ...participant,
+                    post_count: postCount
+                };
+            })
+        );
+
+        res.json({
+            status: 'success',
+            data: {
+                ...challenge,
+                participants: participantsWithPostCounts
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenge:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Approve a challenge
+exports.approveChallenge = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const adminId = req.user.id;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status !== 'pending') {
+            return res.status(400).json({
+                status: 'error',
+                message: `Challenge is already ${challenge.status}`
+            });
+        }
+
+        // Update challenge status to approved and set it to active
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+        
+        // Determine if challenge should be active (if start date has passed)
+        const shouldBeActive = now >= startDate && now <= endDate;
+
+        const updatedChallenge = await prisma.challenge.update({
+            where: { id: challengeId },
+            data: {
+                status: shouldBeActive ? 'active' : 'approved',
+                approved_by: adminId,
+                approved_at: now
+            },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                },
+                approver: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        // Notify organizer
+        await prisma.notification.create({
+            data: {
+                userID: challenge.organizer.username,
+                message: `Your challenge "${challenge.name}" has been approved and is now ${shouldBeActive ? 'active' : 'approved'}.`,
+                type: 'challenge_approved',
+                isRead: false
+            }
+        });
+
+        // Log admin action
+        loggers.audit('approve_challenge', {
+            adminId: adminId,
+            challengeId: challengeId,
+            challengeName: challenge.name
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Challenge approved successfully',
+            data: updatedChallenge
+        });
+    } catch (error) {
+        console.error('Error approving challenge:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to approve challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Reject a challenge
+exports.rejectChallenge = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { reason } = req.body;
+        const adminId = req.user.id;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status !== 'pending') {
+            return res.status(400).json({
+                status: 'error',
+                message: `Challenge is already ${challenge.status}`
+            });
+        }
+
+        const updatedChallenge = await prisma.challenge.update({
+            where: { id: challengeId },
+            data: {
+                status: 'rejected',
+                rejection_reason: reason || null
+            }
+        });
+
+        // Notify organizer
+        await prisma.notification.create({
+            data: {
+                userID: challenge.organizer.username,
+                message: `Your challenge "${challenge.name}" has been rejected.${reason ? ' Reason: ' + reason : ''}`,
+                type: 'challenge_rejected',
+                isRead: false
+            }
+        });
+
+        // Log admin action
+        loggers.audit('reject_challenge', {
+            adminId: adminId,
+            challengeId: challengeId,
+            challengeName: challenge.name,
+            reason: reason
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Challenge rejected successfully',
+            data: updatedChallenge
+        });
+    } catch (error) {
+        console.error('Error rejecting challenge:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to reject challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Stop/End a challenge (admin only)
+exports.stopChallenge = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const adminId = req.user.id;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'ended') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Challenge is already ended'
+            });
+        }
+
+        if (challenge.status !== 'active' && challenge.status !== 'approved') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only active or approved challenges can be stopped'
+            });
+        }
+
+        const updatedChallenge = await prisma.challenge.update({
+            where: { id: challengeId },
+            data: {
+                status: 'ended'
+            }
+        });
+
+        // Notify organizer
+        await prisma.notification.create({
+            data: {
+                userID: challenge.organizer.username,
+                message: `Your challenge "${challenge.name}" has been ended by an administrator.`,
+                type: 'challenge_ended',
+                isRead: false
+            }
+        });
+
+        // Notify all participants
+        const participants = await prisma.challengeParticipant.findMany({
+            where: { challenge_id: challengeId },
+            include: {
+                user: {
+                    select: {
+                        username: true
+                    }
+                }
+            }
+        });
+
+        for (const participant of participants) {
+            await prisma.notification.create({
+                data: {
+                    userID: participant.user.username,
+                    message: `The challenge "${challenge.name}" has been ended.`,
+                    type: 'challenge_ended',
+                    isRead: false
+                }
+            });
+        }
+
+        // Log admin action
+        loggers.audit('stop_challenge', {
+            adminId: adminId,
+            challengeId: challengeId,
+            challengeName: challenge.name
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Challenge stopped successfully',
+            data: updatedChallenge
+        });
+    } catch (error) {
+        console.error('Error stopping challenge:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to stop challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};

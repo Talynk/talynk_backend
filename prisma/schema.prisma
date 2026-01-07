@@ -56,6 +56,9 @@ model User {
   preferences           UserPreference[]
   country               Country? @relation(fields: [country_id], references: [id])
   otps                   Otp[]
+  organizedChallenges   Challenge[] @relation("ChallengeOrganizer")
+  challengeParticipants ChallengeParticipant[]
+  challengePosts        ChallengePost[]
 
   @@map("users")
 }
@@ -115,6 +118,7 @@ model Post {
   reports               PostReport[]
   appeals               PostAppeal[]
   featuredPosts         FeaturedPost[]
+  challengePosts        ChallengePost[]
 
   @@map("posts")
 }
@@ -267,6 +271,7 @@ model Admin {
   reports   PostReport[]
   appeals   PostAppeal[]
   featuredPosts FeaturedPost[]
+  approvedChallenges    Challenge[] @relation("ChallengeApprover")
 
   @@map("admins")
 }
@@ -442,4 +447,71 @@ enum OtpType {
   EMAIL_VERIFICATION
   PASSWORD_RESET
   LOGIN
+}
+
+enum ChallengeStatus {
+  pending
+  approved
+  rejected
+  active
+  ended
+}
+
+model Challenge {
+  id                    String   @id @default(uuid()) @db.Uuid
+  name                  String   @db.VarChar(255)
+  description           String?  @db.Text
+  has_rewards           Boolean  @default(false)
+  rewards               String?  @db.Text
+  organizer_id          String   @db.Uuid
+  organizer_name        String   @db.VarChar(255)
+  organizer_contact     String   @db.VarChar(255)
+  start_date            DateTime
+  end_date              DateTime
+  min_content_per_account Int    @default(1)
+  scoring_criteria      String?  @db.Text
+  status                ChallengeStatus @default(pending)
+  approved_by           String?  @db.Uuid
+  approved_at           DateTime?
+  rejection_reason      String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  organizer             User     @relation("ChallengeOrganizer", fields: [organizer_id], references: [id])
+  approver              Admin?   @relation("ChallengeApprover", fields: [approved_by], references: [id])
+  participants          ChallengeParticipant[]
+  posts                 ChallengePost[]
+
+  @@map("challenges")
+}
+
+model ChallengeParticipant {
+  id          String   @id @default(uuid()) @db.Uuid
+  challenge_id String  @db.Uuid
+  user_id     String   @db.Uuid
+  joined_at   DateTime @default(now())
+
+  // Relations
+  challenge   Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([challenge_id, user_id], name: "unique_challenge_participant")
+  @@map("challenge_participants")
+}
+
+model ChallengePost {
+  id          String   @id @default(uuid()) @db.Uuid
+  challenge_id String  @db.Uuid
+  post_id     String   @db.Uuid
+  user_id     String   @db.Uuid
+  submitted_at DateTime @default(now())
+
+  // Relations
+  challenge   Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  post        Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([challenge_id, post_id], name: "unique_challenge_post")
+  @@map("challenge_posts")
 }
