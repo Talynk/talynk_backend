@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const challengeController = require('../controllers/challengeController');
 const { authenticate } = require('../middleware/auth');
+const upload = require('../middleware/fileUpload');
 
 // All challenge routes require authentication
 router.use(authenticate);
@@ -30,7 +31,10 @@ router.get('/:challengeId/participants', challengeController.getChallengePartici
 // Get posts for a challenge
 router.get('/:challengeId/posts', challengeController.getChallengePosts);
 
-// Link a post to a challenge
+// Create a post directly in a challenge (with file upload)
+router.post('/:challengeId/posts', ...upload.single('file'), challengeController.createPostInChallenge);
+
+// Link an existing post to a challenge
 router.post('/:challengeId/posts/:postId', challengeController.linkPostToChallenge);
 
 module.exports = router;

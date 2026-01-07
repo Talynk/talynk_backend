@@ -1,4 +1,9 @@
 const prisma = require('../lib/prisma');
+const path = require('path');
+const fs = require('fs').promises;
+const { processWatermarkAsync } = require('../utils/videoProcessor');
+const { clearCacheByPattern } = require('../utils/cache');
+const { emitEvent } = require('../lib/realtime');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -805,6 +810,231 @@ exports.linkPostToChallenge = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to link post to challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Create a post directly in a challenge
+exports.createPostInChallenge = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { title, caption, post_category } = req.body;
+        const userId = req.user.id;
+
+        // Validate required fields
+        if (!title || !post_category) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Missing required fields: title, post_category'
+            });
+        }
+
+        // Check if challenge exists
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        // Check if challenge is active
+        if (challenge.status !== 'active' && challenge.status !== 'approved') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Challenge is not active'
+            });
+        }
+
+        // Check if challenge is within date range
+        const now = new Date();
+        const startDate = new Date(challenge.start_date);
+        const endDate = new Date(challenge.end_date);
+
+        if (now < startDate) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Challenge has not started yet'
+            });
+        }
+
+        if (now > endDate) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Challenge has ended'
+            });
+        }
+
+        // Check if user is a participant
+        const participant = await prisma.challengeParticipant.findUnique({
+            where: {
+                unique_challenge_participant: {
+                    challenge_id: challengeId,
+                    user_id: userId
+                }
+            }
+        });
+
+        if (!participant) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'You must join the challenge before submitting posts'
+            });
+        }
+
+        // Verify that the user exists
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Get the category ID from the category name
+        const category = await prisma.category.findFirst({
+            where: {
+                name: {
+                    mode: 'insensitive',
+                    equals: post_category.trim()
+                },
+                status: 'active'
+            }
+        });
+
+        if (!category) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid category'
+            });
+        }
+
+        // Handle file upload
+        let video_url = '';
+        let fileType = 'text';
+        let filePath = '';
+        let mimetype = '';
+        if (req.file) {
+            video_url = req.file.localUrl || req.file.supabaseUrl || '';
+            fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
+            filePath = req.file.path;
+            mimetype = req.file.mimetype;
+        }
+
+        // Create the post (always active when posting to challenge)
+        const post = await prisma.post.create({
+            data: {
+                user_id: userId,
+                status: 'active',
+                category_id: category.id,
+                title,
+                description: caption,
+                uploadDate: new Date(),
+                type: fileType,
+                video_url,
+                content: caption
+            }
+        });
+
+        // Update user's post count
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                posts_count: {
+                    increment: 1
+                }
+            }
+        });
+
+        // Automatically link post to challenge
+        const challengePost = await prisma.challengePost.create({
+            data: {
+                challenge_id: challengeId,
+                post_id: post.id,
+                user_id: userId
+            },
+            include: {
+                challenge: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
+                }
+            }
+        });
+
+        // Clear relevant caches
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('search_posts');
+
+        emitEvent('post:created', { postId: post.id, userId: userId });
+
+        // Process video watermarking asynchronously (non-blocking)
+        if (req.file && fileType === 'video' && filePath) {
+            const fullInputPath = path.isAbsolute(filePath) 
+                ? filePath 
+                : path.join(process.cwd(), filePath);
+            
+            fs.access(fullInputPath)
+                .then(() => {
+                    processWatermarkAsync(
+                        fullInputPath,
+                        post.id,
+                        async (watermarkedUrl) => {
+                            try {
+                                await prisma.post.update({
+                                    where: { id: post.id },
+                                    data: { video_url: watermarkedUrl }
+                                });
+                                console.log(`[WATERMARK] ✅ Updated post ${post.id} with watermarked video: ${watermarkedUrl}`);
+                            } catch (error) {
+                                console.error(`[WATERMARK] ❌ Failed to update post ${post.id} with watermarked URL:`, error);
+                            }
+                        }
+                    ).catch(error => {
+                        console.error(`[WATERMARK] Background watermarking failed for post ${post.id}:`, error);
+                    });
+                })
+                .catch(error => {
+                    console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
+                });
+        }
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Post created and submitted to challenge successfully',
+            data: {
+                post: {
+                    ...post,
+                    video_url: video_url
+                },
+                challenge_post: challengePost
+            }
+        });
+    } catch (error) {
+        console.error('Error creating post in challenge:', error);
+        
+        // Handle specific Prisma errors
+        if (error.code === 'P2003') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Foreign key constraint violation. User or category not found.',
+                details: error.meta
+            });
+        }
+
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create post in challenge',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
