@@ -17,6 +17,27 @@ exports.createChallenge = async (req, res) => {
         } = req.body;
 
         const userId = req.user.id;
+        const userRole = req.user.role;
+
+        // Only regular users can create challenges, not admins or approvers
+        if (userRole === 'admin' || userRole === 'approver') {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admins and approvers cannot create challenges. Only regular users can organize challenges.'
+            });
+        }
+
+        // Verify that the user exists in the users table
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
 
         // Validate required fields
         if (!name || !organizer_name || !organizer_contact || !start_date || !end_date) {
