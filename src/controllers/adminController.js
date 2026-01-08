@@ -4875,12 +4875,19 @@ exports.getAnalytics = async (req, res) => {
                 LIMIT 10
             `,
             
-            // Average Session Times (simplified - using view timestamps)
+            // Average Session Times (calculated as time between first and last view per user)
             prisma.$queryRaw`
                 SELECT 
-                    AVG(EXTRACT(EPOCH FROM ("updatedAt" - "createdAt"))) as avg_session_seconds
-                FROM "views" 
-                WHERE "createdAt" >= ${startDate}
+                    AVG(session_duration) as avg_session_seconds
+                FROM (
+                    SELECT 
+                        "user_id",
+                        EXTRACT(EPOCH FROM (MAX("createdAt") - MIN("createdAt"))) as session_duration
+                    FROM "views" 
+                    WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL
+                    GROUP BY "user_id"
+                    HAVING COUNT(*) > 1
+                ) user_sessions
             `,
             
             // Bounce Rate (users with only 1 view)
