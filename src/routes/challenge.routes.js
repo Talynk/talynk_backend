@@ -19,6 +19,13 @@ router.get('/my-challenges', challengeController.getMyChallenges);
 // Get challenges the user has joined
 router.get('/joined', challengeController.getJoinedChallenges);
 
+// Challenge Statistics Endpoints (must be before parameterized routes)
+router.get('/stats/overview', challengeController.getChallengeStatistics);
+router.get('/stats/most-participants', challengeController.getChallengesWithMostParticipants);
+router.get('/stats/most-posts', challengeController.getChallengesWithMostPosts);
+router.get('/stats/most-rewarding', challengeController.getMostRewardingChallenges);
+router.get('/stats/top-organizers', challengeController.getUsersWithMostChallenges);
+
 // Get a single challenge by ID
 router.get('/:challengeId', challengeController.getChallengeById);
 

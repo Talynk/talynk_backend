@@ -1040,3 +1040,364 @@ exports.createPostInChallenge = async (req, res) => {
     }
 };
 
+// ===== CHALLENGE STATISTICS ENDPOINTS =====
+
+// Get challenges with most participants
+exports.getChallengesWithMostParticipants = async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        const challenges = await prisma.challenge.findMany({
+            where: {
+                status: {
+                    in: ['approved', 'active']
+                }
+            },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                _count: {
+                    select: {
+                        participants: true,
+                        posts: true
+                    }
+                }
+            },
+            orderBy: {
+                participants: {
+                    _count: 'desc'
+                }
+            },
+            take: parseInt(limit)
+        });
+
+        const challengesWithStats = challenges.map(challenge => ({
+            ...challenge,
+            participant_count: challenge._count.participants,
+            post_count: challenge._count.posts
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStats
+        });
+    } catch (error) {
+        console.error('Error fetching challenges with most participants:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get users with most challenges organized
+exports.getUsersWithMostChallenges = async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        const users = await prisma.user.findMany({
+            include: {
+                _count: {
+                    select: {
+                        organizedChallenges: true
+                    }
+                },
+                organizedChallenges: {
+                    where: {
+                        status: {
+                            in: ['approved', 'active', 'ended']
+                        }
+                    },
+                    select: {
+                        id: true,
+                        name: true,
+                        status: true,
+                        _count: {
+                            select: {
+                                participants: true,
+                                posts: true
+                            }
+                        }
+                    }
+                }
+            },
+            orderBy: {
+                organizedChallenges: {
+                    _count: 'desc'
+                }
+            },
+            take: parseInt(limit)
+        });
+
+        const usersWithStats = users
+            .filter(user => user._count.organizedChallenges > 0)
+            .map(user => ({
+                id: user.id,
+                username: user.username,
+                display_name: user.display_name,
+                profile_picture: user.profile_picture,
+                total_challenges: user._count.organizedChallenges,
+                challenges: user.organizedChallenges.map(challenge => ({
+                    id: challenge.id,
+                    name: challenge.name,
+                    status: challenge.status,
+                    participant_count: challenge._count.participants,
+                    post_count: challenge._count.posts
+                }))
+            }));
+
+        res.json({
+            status: 'success',
+            data: usersWithStats
+        });
+    } catch (error) {
+        console.error('Error fetching users with most challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch users',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get most rewarding challenges
+exports.getMostRewardingChallenges = async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        const challenges = await prisma.challenge.findMany({
+            where: {
+                has_rewards: true,
+                status: {
+                    in: ['approved', 'active', 'ended']
+                }
+            },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                _count: {
+                    select: {
+                        participants: true,
+                        posts: true
+                    }
+                }
+            },
+            orderBy: {
+                participants: {
+                    _count: 'desc'
+                }
+            },
+            take: parseInt(limit)
+        });
+
+        const challengesWithStats = challenges.map(challenge => ({
+            id: challenge.id,
+            name: challenge.name,
+            description: challenge.description,
+            rewards: challenge.rewards,
+            has_rewards: challenge.has_rewards,
+            organizer: challenge.organizer,
+            start_date: challenge.start_date,
+            end_date: challenge.end_date,
+            status: challenge.status,
+            participant_count: challenge._count.participants,
+            post_count: challenge._count.posts
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStats
+        });
+    } catch (error) {
+        console.error('Error fetching most rewarding challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get challenges with most posts
+exports.getChallengesWithMostPosts = async (req, res) => {
+    try {
+        const { limit = 10 } = req.query;
+
+        const challenges = await prisma.challenge.findMany({
+            where: {
+                status: {
+                    in: ['approved', 'active', 'ended']
+                }
+            },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                _count: {
+                    select: {
+                        participants: true,
+                        posts: true
+                    }
+                }
+            },
+            orderBy: {
+                posts: {
+                    _count: 'desc'
+                }
+            },
+            take: parseInt(limit)
+        });
+
+        const challengesWithStats = challenges.map(challenge => ({
+            ...challenge,
+            participant_count: challenge._count.participants,
+            post_count: challenge._count.posts
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStats
+        });
+    } catch (error) {
+        console.error('Error fetching challenges with most posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get overall challenge statistics
+exports.getChallengeStatistics = async (req, res) => {
+    try {
+        const [
+            totalChallenges,
+            activeChallenges,
+            endedChallenges,
+            totalParticipants,
+            totalPosts,
+            challengesWithRewards,
+            topChallengesByParticipants,
+            topChallengesByPosts
+        ] = await Promise.all([
+            prisma.challenge.count({
+                where: {
+                    status: {
+                        in: ['approved', 'active', 'ended']
+                    }
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    status: 'active'
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    status: 'ended'
+                }
+            }),
+            prisma.challengeParticipant.count(),
+            prisma.challengePost.count(),
+            prisma.challenge.count({
+                where: {
+                    has_rewards: true,
+                    status: {
+                        in: ['approved', 'active', 'ended']
+                    }
+                }
+            }),
+            prisma.challenge.findMany({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    }
+                },
+                include: {
+                    _count: {
+                        select: {
+                            participants: true
+                        }
+                    }
+                },
+                orderBy: {
+                    participants: {
+                        _count: 'desc'
+                    }
+                },
+                take: 5
+            }),
+            prisma.challenge.findMany({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    }
+                },
+                include: {
+                    _count: {
+                        select: {
+                            posts: true
+                        }
+                    }
+                },
+                orderBy: {
+                    posts: {
+                        _count: 'desc'
+                    }
+                },
+                take: 5
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                overview: {
+                    total_challenges: totalChallenges,
+                    active_challenges: activeChallenges,
+                    ended_challenges: endedChallenges,
+                    total_participants: totalParticipants,
+                    total_posts: totalPosts,
+                    challenges_with_rewards: challengesWithRewards
+                },
+                top_challenges_by_participants: topChallengesByParticipants.map(challenge => ({
+                    id: challenge.id,
+                    name: challenge.name,
+                    participant_count: challenge._count.participants
+                })),
+                top_challenges_by_posts: topChallengesByPosts.map(challenge => ({
+                    id: challenge.id,
+                    name: challenge.name,
+                    post_count: challenge._count.posts
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenge statistics:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch statistics',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+

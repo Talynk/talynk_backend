@@ -5688,11 +5688,56 @@ exports.getChallengeById = async (req, res) => {
             })
         );
 
+        // Get basic statistics
+        const totalParticipants = challenge._count.participants;
+        const totalPosts = challenge._count.posts;
+        const participantsWithPosts = participantsWithPostCounts.filter(p => p.post_count > 0).length;
+        const participantsWithoutPosts = totalParticipants - participantsWithPosts;
+        const averagePostsPerParticipant = totalParticipants > 0 
+            ? Math.round((totalPosts / totalParticipants) * 100) / 100 
+            : 0;
+
+        // Get recent activity (last 7 days)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const [recentParticipants, recentPosts] = await Promise.all([
+            prisma.challengeParticipant.count({
+                where: {
+                    challenge_id: challengeId,
+                    joined_at: {
+                        gte: sevenDaysAgo
+                    }
+                }
+            }),
+            prisma.challengePost.count({
+                where: {
+                    challenge_id: challengeId,
+                    submitted_at: {
+                        gte: sevenDaysAgo
+                    }
+                }
+            })
+        ]);
+
         res.json({
             status: 'success',
             data: {
                 ...challenge,
-                participants: participantsWithPostCounts
+                participants: participantsWithPostCounts,
+                statistics: {
+                    total_participants: totalParticipants,
+                    total_posts: totalPosts,
+                    participants_with_posts: participantsWithPosts,
+                    participants_without_posts: participantsWithoutPosts,
+                    average_posts_per_participant: averagePostsPerParticipant,
+                    recent_activity: {
+                        participants_last_7_days: recentParticipants,
+                        posts_last_7_days: recentPosts
+                    }
+                },
+                // Note: For detailed analytics and growth graphs, use GET /admin/challenges/:challengeId/analytics
+                analytics_endpoint: `/admin/challenges/${challengeId}/analytics`
             }
         });
     } catch (error) {
@@ -5972,6 +6017,431 @@ exports.stopChallenge = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to stop challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get challenge dashboard statistics
+exports.getChallengeDashboardStats = async (req, res) => {
+    try {
+        const [
+            totalChallenges,
+            pendingChallenges,
+            approvedChallenges,
+            activeChallenges,
+            rejectedChallenges,
+            endedChallenges,
+            totalParticipants,
+            totalPosts,
+            challengesWithRewards,
+            recentChallenges
+        ] = await Promise.all([
+            prisma.challenge.count(),
+            prisma.challenge.count({ where: { status: 'pending' } }),
+            prisma.challenge.count({ where: { status: 'approved' } }),
+            prisma.challenge.count({ where: { status: 'active' } }),
+            prisma.challenge.count({ where: { status: 'rejected' } }),
+            prisma.challenge.count({ where: { status: 'ended' } }),
+            prisma.challengeParticipant.count(),
+            prisma.challengePost.count(),
+            prisma.challenge.count({ where: { has_rewards: true } }),
+            prisma.challenge.findMany({
+                take: 10,
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                overview: {
+                    total: totalChallenges,
+                    pending: pendingChallenges,
+                    approved: approvedChallenges,
+                    active: activeChallenges,
+                    rejected: rejectedChallenges,
+                    ended: endedChallenges
+                },
+                engagement: {
+                    total_participants: totalParticipants,
+                    total_posts: totalPosts,
+                    challenges_with_rewards: challengesWithRewards,
+                    average_participants_per_challenge: totalChallenges > 0 ? Math.round(totalParticipants / totalChallenges) : 0,
+                    average_posts_per_challenge: totalChallenges > 0 ? Math.round(totalPosts / totalChallenges) : 0
+                },
+                recent_challenges: recentChallenges.map(challenge => ({
+                    id: challenge.id,
+                    name: challenge.name,
+                    status: challenge.status,
+                    organizer: challenge.organizer,
+                    participant_count: challenge._count.participants,
+                    post_count: challenge._count.posts,
+                    createdAt: challenge.createdAt
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenge dashboard stats:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch dashboard statistics',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get challenge growth analytics (for graphs)
+exports.getChallengeGrowthAnalytics = async (req, res) => {
+    try {
+        const { days = 30 } = req.query;
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - parseInt(days));
+
+        // Get challenges created over time
+        const challengesByDate = await prisma.challenge.groupBy({
+            by: ['createdAt'],
+            where: {
+                createdAt: {
+                    gte: daysAgo
+                }
+            },
+            _count: {
+                id: true
+            },
+            orderBy: {
+                createdAt: 'asc'
+            }
+        });
+
+        // Get participants joined over time
+        const participantsByDate = await prisma.challengeParticipant.groupBy({
+            by: ['joined_at'],
+            where: {
+                joined_at: {
+                    gte: daysAgo
+                }
+            },
+            _count: {
+                id: true
+            },
+            orderBy: {
+                joined_at: 'asc'
+            }
+        });
+
+        // Get posts submitted over time
+        const postsByDate = await prisma.challengePost.groupBy({
+            by: ['submitted_at'],
+            where: {
+                submitted_at: {
+                    gte: daysAgo
+                }
+            },
+            _count: {
+                id: true
+            },
+            orderBy: {
+                submitted_at: 'asc'
+            }
+        });
+
+        // Format data for charts (group by day)
+        const formatDate = (date) => {
+            const d = new Date(date);
+            return d.toISOString().split('T')[0];
+        };
+
+        const challengeGrowth = {};
+        challengesByDate.forEach(item => {
+            const date = formatDate(item.createdAt);
+            challengeGrowth[date] = (challengeGrowth[date] || 0) + item._count.id;
+        });
+
+        const participantGrowth = {};
+        participantsByDate.forEach(item => {
+            const date = formatDate(item.joined_at);
+            participantGrowth[date] = (participantGrowth[date] || 0) + item._count.id;
+        });
+
+        const postGrowth = {};
+        postsByDate.forEach(item => {
+            const date = formatDate(item.submitted_at);
+            postGrowth[date] = (postGrowth[date] || 0) + item._count.id;
+        });
+
+        // Get all unique dates
+        const allDates = new Set([
+            ...Object.keys(challengeGrowth),
+            ...Object.keys(participantGrowth),
+            ...Object.keys(postGrowth)
+        ]);
+
+        // Create cumulative data
+        const cumulativeData = Array.from(allDates).sort().map(date => {
+            const challenges = challengeGrowth[date] || 0;
+            const participants = participantGrowth[date] || 0;
+            const posts = postGrowth[date] || 0;
+
+            return {
+                date,
+                challenges,
+                participants,
+                posts
+            };
+        });
+
+        // Calculate cumulative totals
+        let cumulativeChallenges = 0;
+        let cumulativeParticipants = 0;
+        let cumulativePosts = 0;
+
+        const cumulativeChartData = cumulativeData.map(item => {
+            cumulativeChallenges += item.challenges;
+            cumulativeParticipants += item.participants;
+            cumulativePosts += item.posts;
+
+            return {
+                date: item.date,
+                challenges: cumulativeChallenges,
+                participants: cumulativeParticipants,
+                posts: cumulativePosts
+            };
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                daily_data: cumulativeData,
+                cumulative_data: cumulativeChartData,
+                summary: {
+                    total_challenges: cumulativeChallenges,
+                    total_participants: cumulativeParticipants,
+                    total_posts: cumulativePosts,
+                    period_days: parseInt(days)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenge growth analytics:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch growth analytics',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get challenge analytics by ID (with growth data)
+exports.getChallengeAnalytics = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { days = 30 } = req.query;
+        const daysAgo = new Date();
+        daysAgo.setDate(daysAgo.getDate() - parseInt(days));
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        email: true,
+                        profile_picture: true
+                    }
+                },
+                approver: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                },
+                _count: {
+                    select: {
+                        participants: true,
+                        posts: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        // Get participants joined over time
+        const participantsByDate = await prisma.challengeParticipant.findMany({
+            where: {
+                challenge_id: challengeId,
+                joined_at: {
+                    gte: daysAgo
+                }
+            },
+            select: {
+                joined_at: true
+            },
+            orderBy: {
+                joined_at: 'asc'
+            }
+        });
+
+        // Get posts submitted over time
+        const postsByDate = await prisma.challengePost.findMany({
+            where: {
+                challenge_id: challengeId,
+                submitted_at: {
+                    gte: daysAgo
+                }
+            },
+            select: {
+                submitted_at: true
+            },
+            orderBy: {
+                submitted_at: 'asc'
+            }
+        });
+
+        // Format data for charts
+        const formatDate = (date) => {
+            const d = new Date(date);
+            return d.toISOString().split('T')[0];
+        };
+
+        const participantGrowth = {};
+        participantsByDate.forEach(item => {
+            const date = formatDate(item.joined_at);
+            participantGrowth[date] = (participantGrowth[date] || 0) + 1;
+        });
+
+        const postGrowth = {};
+        postsByDate.forEach(item => {
+            const date = formatDate(item.submitted_at);
+            postGrowth[date] = (postGrowth[date] || 0) + 1;
+        });
+
+        // Get all unique dates
+        const allDates = new Set([
+            ...Object.keys(participantGrowth),
+            ...Object.keys(postGrowth)
+        ]);
+
+        // Create daily data
+        const dailyData = Array.from(allDates).sort().map(date => {
+            const participants = participantGrowth[date] || 0;
+            const posts = postGrowth[date] || 0;
+
+            return {
+                date,
+                participants,
+                posts
+            };
+        });
+
+        // Calculate cumulative totals
+        let cumulativeParticipants = 0;
+        let cumulativePosts = 0;
+
+        const cumulativeData = dailyData.map(item => {
+            cumulativeParticipants += item.participants;
+            cumulativePosts += item.posts;
+
+            return {
+                date: item.date,
+                participants: cumulativeParticipants,
+                posts: cumulativePosts
+            };
+        });
+
+        // Get participant breakdown by post count
+        const participantsWithPostCounts = await prisma.challengeParticipant.findMany({
+            where: {
+                challenge_id: challengeId
+            },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                }
+            }
+        });
+
+        const participantStats = await Promise.all(
+            participantsWithPostCounts.map(async (participant) => {
+                const postCount = await prisma.challengePost.count({
+                    where: {
+                        challenge_id: challengeId,
+                        user_id: participant.user_id
+                    }
+                });
+
+                return {
+                    user_id: participant.user_id,
+                    username: participant.user.username,
+                    display_name: participant.user.display_name,
+                    profile_picture: participant.user.profile_picture,
+                    post_count: postCount,
+                    joined_at: participant.joined_at
+                };
+            })
+        );
+
+        // Sort by post count
+        participantStats.sort((a, b) => b.post_count - a.post_count);
+
+        res.json({
+            status: 'success',
+            data: {
+                challenge: {
+                    ...challenge,
+                    participant_count: challenge._count.participants,
+                    post_count: challenge._count.posts
+                },
+                growth: {
+                    daily_data: dailyData,
+                    cumulative_data: cumulativeData,
+                    period_days: parseInt(days)
+                },
+                participant_stats: {
+                    total: participantStats.length,
+                    top_contributors: participantStats.slice(0, 10),
+                    participants_with_posts: participantStats.filter(p => p.post_count > 0).length,
+                    participants_without_posts: participantStats.filter(p => p.post_count === 0).length,
+                    average_posts_per_participant: participantStats.length > 0
+                        ? Math.round(participantStats.reduce((sum, p) => sum + p.post_count, 0) / participantStats.length)
+                        : 0
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching challenge analytics:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenge analytics',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
