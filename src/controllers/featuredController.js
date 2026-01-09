@@ -2,7 +2,8 @@ const prisma = require('../lib/prisma');
 const { 
     CACHE_KEYS, 
     getFeaturedPostsCache, 
-    setFeaturedPostsCache 
+    setFeaturedPostsCache,
+    clearCacheByPattern 
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 
@@ -153,7 +154,7 @@ exports.featurePost = async (req, res) => {
         const { reason, expiresAt } = req.body;
         const adminId = req.user.id;
 
-        // Check if post exists and is approved
+        // Check if post exists and is active (approved/published)
         const post = await prisma.post.findUnique({
             where: { id: postId }
         });
@@ -165,10 +166,10 @@ exports.featurePost = async (req, res) => {
             });
         }
 
-        if (post.status !== 'approved') {
+        if (post.status !== 'active') {
             return res.status(400).json({
                 status: 'error',
-                message: 'Only approved posts can be featured'
+                message: 'Only active posts can be featured'
             });
         }
 
@@ -238,6 +239,10 @@ exports.featurePost = async (req, res) => {
                 featured_at: new Date()
             }
         });
+
+        // Clear cache for all posts and featured posts
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        await clearCacheByPattern(CACHE_KEYS.FEATURED_POSTS);
 
         // Notify post owner (userID must be username, not user ID)
         if (featuredPost.post.user?.username) {
@@ -326,6 +331,10 @@ exports.unfeaturePost = async (req, res) => {
                 featured_at: null
             }
         });
+
+        // Clear cache for all posts and featured posts
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        await clearCacheByPattern(CACHE_KEYS.FEATURED_POSTS);
 
         res.json({
             status: 'success',

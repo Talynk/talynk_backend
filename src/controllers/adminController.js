@@ -5036,6 +5036,11 @@ exports.setPostFeatured = async (req, res) => {
             }
         });
 
+        // Clear cache for all posts and featured posts
+        const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        await clearCacheByPattern(CACHE_KEYS.FEATURED_POSTS);
+
         // Log admin action
         loggers.audit('set_post_featured', {
             adminId: req.user.id,
