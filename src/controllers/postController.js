@@ -375,7 +375,7 @@ exports.getAllPosts = async (req, res) => {
         let featuredPostIds = [];
         
         if (shouldFeatureFirst) {
-            // Get all active featured posts that haven't expired
+            // Get all active featured posts from FeaturedPost table that haven't expired
             const activeFeaturedPosts = await prisma.featuredPost.findMany({
                 where: {
                     is_active: true,
@@ -440,6 +440,64 @@ exports.getAllPosts = async (req, res) => {
                 featuredReason: fp.reason
             }));
             
+            featuredPostIds = featuredPosts.map(fp => fp.id);
+
+            // Also get posts with is_featured: true that don't have FeaturedPost entries
+            // (posts featured via the alternative route)
+            const postsWithFeaturedFlag = await prisma.post.findMany({
+                where: {
+                    ...baseWhereClause,
+                    is_featured: true,
+                    id: {
+                        notIn: featuredPostIds // Exclude already found featured posts
+                    }
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            comments: true,
+                            postLikes: true,
+                            postViews: true
+                        }
+                    }
+                },
+                orderBy: {
+                    featured_at: 'desc' // Sort by when it was featured
+                }
+            });
+
+            // Add posts with is_featured flag to featured posts list
+            const additionalFeatured = postsWithFeaturedFlag.map(post => ({
+                ...post,
+                isFeatured: true,
+                featuredAt: post.featured_at || post.createdAt,
+                expiresAt: null,
+                featuredBy: null,
+                featuredReason: null
+            }));
+
+            featuredPosts = [...featuredPosts, ...additionalFeatured];
             featuredPostIds = featuredPosts.map(fp => fp.id);
         }
 

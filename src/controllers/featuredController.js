@@ -2,7 +2,8 @@ const prisma = require('../lib/prisma');
 const { 
     CACHE_KEYS, 
     getFeaturedPostsCache, 
-    setFeaturedPostsCache 
+    setFeaturedPostsCache,
+    clearCacheByPattern 
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 
@@ -239,6 +240,10 @@ exports.featurePost = async (req, res) => {
             }
         });
 
+        // Clear cache for all posts and featured posts
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        await clearCacheByPattern(CACHE_KEYS.FEATURED_POSTS);
+
         // Notify post owner (userID must be username, not user ID)
         if (featuredPost.post.user?.username) {
             const notification = await prisma.notification.create({
@@ -326,6 +331,10 @@ exports.unfeaturePost = async (req, res) => {
                 featured_at: null
             }
         });
+
+        // Clear cache for all posts and featured posts
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        await clearCacheByPattern(CACHE_KEYS.FEATURED_POSTS);
 
         res.json({
             status: 'success',
