@@ -4875,12 +4875,19 @@ exports.getAnalytics = async (req, res) => {
                 LIMIT 10
             `,
             
-            // Average Session Times (simplified - using view timestamps)
+            // Average Session Times (calculated as time between first and last view per user)
             prisma.$queryRaw`
                 SELECT 
-                    AVG(EXTRACT(EPOCH FROM ("updatedAt" - "createdAt"))) as avg_session_seconds
-                FROM "views" 
-                WHERE "createdAt" >= ${startDate}
+                    AVG(session_duration) as avg_session_seconds
+                FROM (
+                    SELECT 
+                        "user_id",
+                        EXTRACT(EPOCH FROM (MAX("createdAt") - MIN("createdAt"))) as session_duration
+                    FROM "views" 
+                    WHERE "createdAt" >= ${startDate} AND "user_id" IS NOT NULL
+                    GROUP BY "user_id"
+                    HAVING COUNT(*) > 1
+                ) user_sessions
             `,
             
             // Bounce Rate (users with only 1 view)
@@ -4910,24 +4917,51 @@ exports.getAnalytics = async (req, res) => {
             `
         ]);
 
+        // Convert BigInt values to numbers for JSON serialization
+        const convertBigInt = (value) => {
+            if (typeof value === 'bigint') {
+                return Number(value);
+            }
+            if (value === null || value === undefined) {
+                return value;
+            }
+            if (typeof value === 'object') {
+                if (Array.isArray(value)) {
+                    return value.map(convertBigInt);
+                }
+                const converted = {};
+                for (const key in value) {
+                    converted[key] = convertBigInt(value[key]);
+                }
+                return converted;
+            }
+            return value;
+        };
+
         res.json({
             status: 'success',
             data: {
                 period,
                 analytics: {
-                    totalUsers,
-                    totalViews,
-                    totalPosts,
+                    totalUsers: Number(totalUsers),
+                    totalViews: Number(totalViews),
+                    totalPosts: Number(totalPosts),
                     totalEngagements: totalEngagements[0]?.total_engagements 
                         ? Number(totalEngagements[0].total_engagements) 
                         : 0,
-                    userDemographics,
-                    deviceUsage,
-                    topCountries,
-                    topCategories,
-                    avgSessionTimes: Math.round((avgSessionTimes[0]?.avg_session_seconds || 0) / 60), // Convert to minutes
-                    bounceRate: bounceRate[0]?.bounce_rate || 0,
-                    completionRate: completionRate[0]?.completion_rate || 0
+                    userDemographics: convertBigInt(userDemographics),
+                    deviceUsage: convertBigInt(deviceUsage),
+                    topCountries: convertBigInt(topCountries),
+                    topCategories: convertBigInt(topCategories),
+                    avgSessionTimes: avgSessionTimes[0]?.avg_session_seconds 
+                        ? Math.round(Number(avgSessionTimes[0].avg_session_seconds) / 60)
+                        : 0,
+                    bounceRate: bounceRate[0]?.bounce_rate 
+                        ? Number(bounceRate[0].bounce_rate) 
+                        : 0,
+                    completionRate: completionRate[0]?.completion_rate 
+                        ? Number(completionRate[0].completion_rate) 
+                        : 0
                 }
             }
         });

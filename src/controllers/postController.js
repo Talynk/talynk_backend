@@ -297,11 +297,21 @@ exports.createPost = async (req, res) => {
 
 exports.getAllPosts = async (req, res) => {
     try {
-        const { country_id, page = 1, limit = 20 } = req.query;
+        const { 
+            country_id, 
+            page = 1, 
+            limit = 20, 
+            sort = 'default', // default, newest, oldest, most_liked, most_viewed, most_commented
+            status = 'active', // active, all, pending, suspended
+            category_id,
+            featured_first = 'true' // true by default
+        } = req.query;
+        
         const offset = (page - 1) * limit;
+        const shouldFeatureFirst = featured_first === 'true';
 
-        // Create cache key
-        const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${country_id || 'all'}`;
+        // Create cache key with all parameters
+        const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${sort}_${status}_${category_id || 'all'}_${country_id || 'all'}_${featured_first}`;
         
         // Try to get from cache first
         const cachedData = await getAllPostsCache(cacheKey);
@@ -314,18 +324,168 @@ exports.getAllPosts = async (req, res) => {
             });
         }
 
-        // Build where clause - simplified to avoid country filter issues
-        const whereClause = {
-            status: 'active',
+        // Build base where clause
+        const baseWhereClause = {
             is_frozen: false
         };
 
-        // For now, skip country filtering to avoid UUID issues
-        // TODO: Implement proper country filtering when users have country_id set
+        // Filter by status
+        if (status && status !== 'all') {
+            baseWhereClause.status = status;
+        } else if (status === 'all') {
+            // Include all statuses except frozen
+        } else {
+            baseWhereClause.status = 'active';
+        }
 
-        const [posts, total] = await Promise.all([
-            prisma.post.findMany({
-                where: whereClause,
+        // Filter by category
+        if (category_id) {
+            baseWhereClause.category_id = parseInt(category_id);
+        }
+
+        // Determine sort order for non-featured posts
+        let orderBy = {};
+        switch (sort) {
+            case 'newest':
+                orderBy = { createdAt: 'desc' };
+                break;
+            case 'oldest':
+                orderBy = { createdAt: 'asc' };
+                break;
+            case 'most_liked':
+                orderBy = { likes: 'desc' };
+                break;
+            case 'most_viewed':
+                orderBy = { views: 'desc' };
+                break;
+            case 'most_commented':
+                orderBy = { comment_count: 'desc' };
+                break;
+            case 'default':
+            default:
+                // Default: most liked for non-featured posts
+                orderBy = { likes: 'desc' };
+                break;
+        }
+
+        const currentDate = new Date();
+
+        // Get featured posts first (if featured_first is true)
+        let featuredPosts = [];
+        let featuredPostIds = [];
+        
+        if (shouldFeatureFirst) {
+            // Get all active featured posts that haven't expired
+            const activeFeaturedPosts = await prisma.featuredPost.findMany({
+                where: {
+                    is_active: true,
+                    OR: [
+                        { expires_at: null },
+                        { expires_at: { gt: currentDate } }
+                    ],
+                    post: {
+                        ...baseWhereClause
+                    }
+                },
+                include: {
+                    post: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    profile_picture: true,
+                                    country: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                            code: true,
+                                            flag_emoji: true
+                                        }
+                                    }
+                                }
+                            },
+                            category: {
+                                select: {
+                                    id: true,
+                                    name: true
+                                }
+                            },
+                            _count: {
+                                select: {
+                                    comments: true,
+                                    postLikes: true,
+                                    postViews: true
+                                }
+                            }
+                        }
+                    },
+                    admin: {
+                        select: {
+                            username: true
+                        }
+                    }
+                },
+                orderBy: {
+                    createdAt: 'desc' // Featured posts by newest first
+                }
+            });
+
+            featuredPosts = activeFeaturedPosts.map(fp => ({
+                ...fp.post,
+                isFeatured: true,
+                featuredAt: fp.createdAt,
+                expiresAt: fp.expires_at,
+                featuredBy: fp.admin?.username,
+                featuredReason: fp.reason
+            }));
+            
+            featuredPostIds = featuredPosts.map(fp => fp.id);
+        }
+
+        // Build where clause for regular posts (exclude featured if featured_first is true)
+        const regularWhereClause = {
+            ...baseWhereClause
+        };
+
+        if (shouldFeatureFirst && featuredPostIds.length > 0) {
+            regularWhereClause.id = {
+                notIn: featuredPostIds
+            };
+        }
+
+        // Calculate pagination for combined results
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const featuredCount = featuredPosts.length;
+        
+        // Determine how many featured posts to show on this page
+        let featuredOnPage = [];
+        let regularOffset = offset;
+        let regularLimit = limitNum;
+        
+        if (shouldFeatureFirst && featuredCount > 0) {
+            // Calculate which featured posts belong on this page
+            const featuredStart = Math.max(0, offset);
+            const featuredEnd = Math.min(featuredCount, offset + limitNum);
+            
+            if (featuredStart < featuredCount) {
+                featuredOnPage = featuredPosts.slice(featuredStart, featuredEnd);
+                regularLimit = limitNum - featuredOnPage.length;
+                // If we've shown all featured posts, adjust offset for regular posts
+                if (featuredEnd >= featuredCount) {
+                    regularOffset = Math.max(0, offset - featuredCount);
+                } else {
+                    // Still showing featured posts, so no regular posts needed
+                    regularLimit = 0;
+                }
+            }
+        }
+
+        // Get regular posts
+        const [regularPosts, totalRegular] = await Promise.all([
+            regularLimit > 0 ? prisma.post.findMany({
+                where: regularWhereClause,
                 include: {
                     user: {
                         select: {
@@ -356,19 +516,27 @@ exports.getAllPosts = async (req, res) => {
                         }
                     }
                 },
-                orderBy: {
-                    createdAt: 'desc'
-                },
-                take: parseInt(limit),
-                skip: parseInt(offset)
-            }),
+                orderBy: orderBy,
+                take: regularLimit,
+                skip: regularOffset
+            }) : Promise.resolve([]),
             prisma.post.count({
-                where: whereClause
+                where: regularWhereClause
             })
         ]);
 
+        // Combine featured and regular posts
+        const allPosts = shouldFeatureFirst 
+            ? [...featuredOnPage, ...regularPosts]
+            : regularPosts;
+        
+        // Calculate total count
+        const totalCount = shouldFeatureFirst 
+            ? featuredCount + totalRegular
+            : totalRegular;
+
         // Add full URLs for files (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
+        const postsWithUrls = allPosts.map(post => {
             if (post.video_url) {
                 post.fullUrl = post.video_url; // Supabase URL is already complete
             }
@@ -378,13 +546,18 @@ exports.getAllPosts = async (req, res) => {
         const responseData = {
             posts: postsWithUrls,
             pagination: {
-                total,
-                page: parseInt(page),
-                limit: parseInt(limit),
-                totalPages: Math.ceil(total / limit)
+                total: totalCount,
+                page: pageNum,
+                limit: limitNum,
+                totalPages: Math.ceil(totalCount / limitNum),
+                featuredCount: shouldFeatureFirst ? featuredCount : 0
             },
             filters: {
-                country_id: null // Disabled for now
+                sort,
+                status,
+                category_id: category_id || null,
+                country_id: null, // Disabled for now
+                featured_first: shouldFeatureFirst
             }
         };
 
