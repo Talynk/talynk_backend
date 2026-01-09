@@ -153,7 +153,7 @@ exports.featurePost = async (req, res) => {
         const { reason, expiresAt } = req.body;
         const adminId = req.user.id;
 
-        // Check if post exists and is approved
+        // Check if post exists and is active (approved/published)
         const post = await prisma.post.findUnique({
             where: { id: postId }
         });
@@ -165,10 +165,10 @@ exports.featurePost = async (req, res) => {
             });
         }
 
-        if (post.status !== 'approved') {
+        if (post.status !== 'active') {
             return res.status(400).json({
                 status: 'error',
-                message: 'Only approved posts can be featured'
+                message: 'Only active posts can be featured'
             });
         }
 
