@@ -1004,59 +1004,52 @@ exports.getUsersWithHighSuspendedVideos = async (req, res) => {
             });
         }
 
-        // Get user details with their suspended posts
-        const [users, total] = await Promise.all([
-            prisma.user.findMany({
-                where: {
-                    id: {
-                        in: userIds
-                    }
-                },
-                include: {
-                    posts: {
-                        where: {
-                            status: 'suspended'
+        // Get user details with their suspended posts count
+        const usersWithCounts = await Promise.all(
+            userIds.map(async (userId) => {
+                const user = await prisma.user.findUnique({
+                    where: { id: userId },
+                    include: {
+                        posts: {
+                            where: {
+                                status: 'suspended'
+                            },
+                            select: {
+                                id: true,
+                                title: true,
+                                status: true,
+                                createdAt: true,
+                                updatedAt: true
+                            },
+                            orderBy: {
+                                updatedAt: 'desc'
+                            }
                         },
-                        select: {
-                            id: true,
-                            title: true,
-                            status: true,
-                            createdAt: true,
-                            updatedAt: true
-                        },
-                        orderBy: {
-                            updatedAt: 'desc'
-                        }
-                    },
-                    _count: {
-                        select: {
-                            posts: {
-                                where: {
-                                    status: 'suspended'
+                        _count: {
+                            select: {
+                                posts: {
+                                    where: {
+                                        status: 'suspended'
+                                    }
                                 }
                             }
                         }
                     }
-                },
-                orderBy: {
-                    posts: {
-                        _count: 'desc'
-                    }
-                },
-                take: parseInt(limit),
-                skip: parseInt(offset)
-            }),
-            prisma.user.count({
-                where: {
-                    id: {
-                        in: userIds
-                    }
-                }
+                });
+                return user;
             })
-        ]);
+        );
+
+        // Filter out null users and sort by suspended posts count (descending)
+        const validUsers = usersWithCounts.filter(user => user !== null);
+        const sortedUsers = validUsers.sort((a, b) => b._count.posts - a._count.posts);
+        
+        // Paginate
+        const total = sortedUsers.length;
+        const paginatedUsers = sortedUsers.slice(offset, offset + parseInt(limit));
 
         // Format response with suspended count
-        const formattedUsers = users.map(user => ({
+        const formattedUsers = paginatedUsers.map(user => ({
             id: user.id,
             username: user.username,
             email: user.email,
@@ -1084,6 +1077,95 @@ exports.getUsersWithHighSuspendedVideos = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching users with high suspended videos',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Complete approver onboarding (set password, first name, last name, phone number)
+exports.completeOnboarding = async (req, res) => {
+    try {
+        const { token, password, first_name, last_name, phone_number } = req.body;
+
+        // Validate required fields
+        if (!token || !password || !first_name || !last_name || !phone_number) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Token, password, first_name, last_name, and phone_number are required'
+            });
+        }
+
+        // Validate password strength
+        if (password.length < 6) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Find approver by onboarding token
+        const approver = await prisma.approver.findUnique({
+            where: { onboarding_token: token }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Invalid or expired onboarding token'
+            });
+        }
+
+        // Check if already onboarded
+        if (approver.password_set) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Onboarding already completed'
+            });
+        }
+
+        // Hash password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Generate username from email if not set
+        const username = approver.username || approver.email.split('@')[0];
+
+        // Update approver with all information
+        const updatedApprover = await prisma.approver.update({
+            where: { id: approver.id },
+            data: {
+                password: hashedPassword,
+                first_name,
+                last_name,
+                phone_number,
+                username,
+                password_set: true,
+                status: 'active',
+                onboarding_token: null // Clear token after use
+            },
+            select: {
+                id: true,
+                email: true,
+                username: true,
+                first_name: true,
+                last_name: true,
+                phone_number: true,
+                status: true,
+                createdAt: true
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Onboarding completed successfully',
+            data: {
+                approver: updatedApprover
+            }
+        });
+    } catch (error) {
+        console.error('Complete onboarding error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error completing onboarding',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
