@@ -2297,7 +2297,6 @@ exports.getApproverReviewedPosts = async (req, res) => {
                     post.status === 'suspended' ? 'suspended' : post.status,
             reviewedAt: post.updatedAt,
             approvedAt: post.approved_at,
-            reviewNotes: post.review_notes || null,
             user: post.user,
             category: post.category,
             views: post.views,
