@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const {validate, parse} = require('uuid');
 const { emitEvent } = require('../lib/realtime');
+const bcrypt = require('bcryptjs');
 
 exports.getApproverStats = async (req, res) => {
     try {
@@ -741,6 +742,348 @@ exports.reviewFlaggedPost = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error reviewing flagged post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get suspended posts (for approvers to review)
+exports.getSuspendedPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 10 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'suspended'
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    },
+                    approver: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true
+                        }
+                    }
+                },
+                orderBy: { updatedAt: 'desc' },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { status: 'suspended' }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / limit),
+                    totalCount: total,
+                    hasNext: page * limit < total,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get suspended posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching suspended posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get posts in traffic (active posts with high views)
+exports.getPostsInTraffic = async (req, res) => {
+    try {
+        const { page = 1, limit = 10, minViews = 100 } = req.query;
+        const offset = (page - 1) * limit;
+
+        const [posts, total] = await Promise.all([
+            prisma.post.findMany({
+                where: { 
+                    status: 'active',
+                    views: {
+                        gte: parseInt(minViews)
+                    }
+                },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    }
+                },
+                orderBy: { views: 'desc' },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: { 
+                    status: 'active',
+                    views: {
+                        gte: parseInt(minViews)
+                    }
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / limit),
+                    totalCount: total,
+                    hasNext: page * limit < total,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get posts in traffic error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching posts in traffic',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Suspend a post (approver can suspend posts)
+exports.suspendPost = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { reason } = req.body;
+        const approverId = req.user.id;
+
+        const post = await prisma.post.findFirst({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true
+                    }
+                }
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        // Update post to suspended status
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                status: 'suspended',
+                approver_id: approverId,
+                updatedAt: new Date()
+            }
+        });
+
+        // Create notification for the user
+        if (post.user?.username) {
+            const notification = await prisma.notification.create({
+                data: {
+                    userID: post.user.username,
+                    message: `Your post has been suspended. Reason: ${reason || 'Violation of community guidelines'}`,
+                    type: 'post_suspended',
+                    isRead: false
+                }
+            });
+            
+            // Emit real-time notification event
+            emitEvent('notification:created', {
+                userId: post.user.id,
+                userID: post.user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt
+                }
+            });
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Post suspended successfully',
+            data: {
+                postId,
+                suspendedBy: approverId
+            }
+        });
+    } catch (error) {
+        console.error('Suspend post error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error suspending post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Monitor users with high suspended videos count
+exports.getUsersWithHighSuspendedVideos = async (req, res) => {
+    try {
+        const { page = 1, limit = 10, minSuspendedCount = 3 } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Get users with suspended posts count
+        const usersWithSuspendedCount = await prisma.post.groupBy({
+            by: ['user_id'],
+            where: {
+                status: 'suspended',
+                user_id: {
+                    not: null
+                }
+            },
+            _count: {
+                id: true
+            },
+            having: {
+                id: {
+                    _count: {
+                        gte: parseInt(minSuspendedCount)
+                    }
+                }
+            }
+        });
+
+        const userIds = usersWithSuspendedCount.map(item => item.user_id);
+
+        if (userIds.length === 0) {
+            return res.json({
+                status: 'success',
+                data: {
+                    users: [],
+                    pagination: {
+                        currentPage: parseInt(page),
+                        totalPages: 0,
+                        totalCount: 0,
+                        hasNext: false,
+                        hasPrev: false
+                    }
+                }
+            });
+        }
+
+        // Get user details with their suspended posts
+        const [users, total] = await Promise.all([
+            prisma.user.findMany({
+                where: {
+                    id: {
+                        in: userIds
+                    }
+                },
+                include: {
+                    posts: {
+                        where: {
+                            status: 'suspended'
+                        },
+                        select: {
+                            id: true,
+                            title: true,
+                            status: true,
+                            createdAt: true,
+                            updatedAt: true
+                        },
+                        orderBy: {
+                            updatedAt: 'desc'
+                        }
+                    },
+                    _count: {
+                        select: {
+                            posts: {
+                                where: {
+                                    status: 'suspended'
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy: {
+                    posts: {
+                        _count: 'desc'
+                    }
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.user.count({
+                where: {
+                    id: {
+                        in: userIds
+                    }
+                }
+            })
+        ]);
+
+        // Format response with suspended count
+        const formattedUsers = users.map(user => ({
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            profile_picture: user.profile_picture,
+            suspended_posts_count: user._count.posts,
+            suspended_posts: user.posts,
+            createdAt: user.createdAt
+        }));
+
+        res.json({
+            status: 'success',
+            data: {
+                users: formattedUsers,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(total / limit),
+                    totalCount: total,
+                    hasNext: page * limit < total,
+                    hasPrev: page > 1
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get users with high suspended videos error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching users with high suspended videos',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
