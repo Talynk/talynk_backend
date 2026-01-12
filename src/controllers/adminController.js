@@ -1801,6 +1801,585 @@ exports.activateApprover = async (req, res) => {
     }
 };
 
+// Suspend approver (temporarily disable access)
+exports.suspendApprover = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        if (approver.status === 'suspended') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Approver is already suspended'
+            });
+        }
+
+        // Update approver status to suspended
+        const updatedApprover = await prisma.approver.update({
+            where: { id },
+            data: {
+                status: 'suspended',
+                updatedAt: new Date()
+            },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                createdAt: true,
+                last_login: true
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Approver suspended successfully',
+            data: {
+                approver: updatedApprover,
+                reason: reason || 'Suspended by admin'
+            }
+        });
+    } catch (error) {
+        console.error('Error suspending approver:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error suspending approver',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get approver stats with time range filter
+exports.getApproverStats = async (req, res) => {
+    try {
+        const { approverId } = req.params;
+        const { period = 'days', value = 7 } = req.query; // period: hours, days, weeks, months, annual
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id: approverId },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true,
+                createdAt: true,
+                last_login: true
+            }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Calculate date range based on period
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (period) {
+            case 'hours':
+                startDate = new Date(now.getTime() - parseInt(value) * 60 * 60 * 1000);
+                break;
+            case 'days':
+                startDate = new Date(now.getTime() - parseInt(value) * 24 * 60 * 60 * 1000);
+                break;
+            case 'weeks':
+                startDate = new Date(now.getTime() - parseInt(value) * 7 * 24 * 60 * 60 * 1000);
+                break;
+            case 'months':
+                startDate = new Date(now);
+                startDate.setMonth(startDate.getMonth() - parseInt(value));
+                break;
+            case 'annual':
+                startDate = new Date(now);
+                startDate.setFullYear(startDate.getFullYear() - parseInt(value));
+                break;
+            default:
+                startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // Default: 7 days
+        }
+
+        // Get stats for the time period
+        const [
+            totalReviewed,
+            approvedCount,
+            rejectedCount,
+            suspendedCount,
+            averageResponseTime
+        ] = await Promise.all([
+            // Total reviewed posts
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    updatedAt: {
+                        gte: startDate
+                    }
+                }
+            }),
+            // Approved posts
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'active',
+                    updatedAt: {
+                        gte: startDate
+                    }
+                }
+            }),
+            // Rejected posts
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'rejected',
+                    updatedAt: {
+                        gte: startDate
+                    }
+                }
+            }),
+            // Suspended posts
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'suspended',
+                    updatedAt: {
+                        gte: startDate
+                    }
+                }
+            }),
+            // Calculate average response time (time between post creation and approval/rejection)
+            prisma.post.findMany({
+                where: {
+                    approver_id: approverId,
+                    updatedAt: {
+                        gte: startDate
+                    },
+                    approved_at: {
+                        not: null
+                    }
+                },
+                select: {
+                    createdAt: true,
+                    approved_at: true
+                }
+            })
+        ]);
+
+        // Calculate average response time in hours
+        let avgResponseTime = 0;
+        if (averageResponseTime.length > 0) {
+            const totalResponseTime = averageResponseTime.reduce((sum, post) => {
+                if (post.approved_at) {
+                    const responseTime = post.approved_at.getTime() - post.createdAt.getTime();
+                    return sum + responseTime;
+                }
+                return sum;
+            }, 0);
+            avgResponseTime = (totalResponseTime / averageResponseTime.length) / (1000 * 60 * 60); // Convert to hours
+        }
+
+        // Get recent activity (last 10 actions)
+        const recentActivity = await prisma.post.findMany({
+            where: {
+                approver_id: approverId,
+                updatedAt: {
+                    gte: startDate
+                }
+            },
+            select: {
+                id: true,
+                title: true,
+                status: true,
+                updatedAt: true,
+                user: {
+                    select: {
+                        username: true
+                    }
+                }
+            },
+            orderBy: {
+                updatedAt: 'desc'
+            },
+            take: 10
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                approver: {
+                    id: approver.id,
+                    username: approver.username,
+                    email: approver.email,
+                    status: approver.status,
+                    joinedDate: approver.createdAt,
+                    lastActive: approver.last_login
+                },
+                period: {
+                    type: period,
+                    value: parseInt(value),
+                    startDate,
+                    endDate: now
+                },
+                statistics: {
+                    totalReviewed,
+                    approved: approvedCount,
+                    rejected: rejectedCount,
+                    suspended: suspendedCount,
+                    approvalRate: totalReviewed > 0 ? ((approvedCount / totalReviewed) * 100).toFixed(2) : 0,
+                    rejectionRate: totalReviewed > 0 ? ((rejectedCount / totalReviewed) * 100).toFixed(2) : 0,
+                    averageResponseTimeHours: avgResponseTime.toFixed(2)
+                },
+                recentActivity
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching approver stats:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching approver statistics',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get approver analytics for graphs
+exports.getApproverAnalytics = async (req, res) => {
+    try {
+        const { approverId } = req.params;
+        const { period = 'days', value = 30, groupBy = 'day' } = req.query;
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id: approverId },
+            select: {
+                id: true,
+                username: true,
+                email: true
+            }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Calculate date range
+        const now = new Date();
+        let startDate = new Date();
+
+        switch (period) {
+            case 'hours':
+                startDate = new Date(now.getTime() - parseInt(value) * 60 * 60 * 1000);
+                break;
+            case 'days':
+                startDate = new Date(now.getTime() - parseInt(value) * 24 * 60 * 60 * 1000);
+                break;
+            case 'weeks':
+                startDate = new Date(now.getTime() - parseInt(value) * 7 * 24 * 60 * 60 * 1000);
+                break;
+            case 'months':
+                startDate = new Date(now);
+                startDate.setMonth(startDate.getMonth() - parseInt(value));
+                break;
+            case 'annual':
+                startDate = new Date(now);
+                startDate.setFullYear(startDate.getFullYear() - parseInt(value));
+                break;
+            default:
+                startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        }
+
+        // Get all posts reviewed in the period
+        const posts = await prisma.post.findMany({
+            where: {
+                approver_id: approverId,
+                updatedAt: {
+                    gte: startDate
+                }
+            },
+            select: {
+                id: true,
+                status: true,
+                updatedAt: true,
+                approved_at: true
+            },
+            orderBy: {
+                updatedAt: 'asc'
+            }
+        });
+
+        // Group data by time period
+        const analyticsData = {};
+
+        posts.forEach(post => {
+            const date = new Date(post.updatedAt);
+            let key = '';
+
+            if (groupBy === 'hour') {
+                key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:00`;
+            } else if (groupBy === 'day') {
+                key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            } else if (groupBy === 'week') {
+                const week = Math.ceil(date.getDate() / 7);
+                key = `${date.getFullYear()}-W${String(week).padStart(2, '0')}`;
+            } else if (groupBy === 'month') {
+                key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+            } else {
+                key = `${date.getFullYear()}`;
+            }
+
+            if (!analyticsData[key]) {
+                analyticsData[key] = {
+                    date: key,
+                    approved: 0,
+                    rejected: 0,
+                    suspended: 0,
+                    total: 0
+                };
+            }
+
+            analyticsData[key].total++;
+            if (post.status === 'active') {
+                analyticsData[key].approved++;
+            } else if (post.status === 'rejected') {
+                analyticsData[key].rejected++;
+            } else if (post.status === 'suspended') {
+                analyticsData[key].suspended++;
+            }
+        });
+
+        // Convert to array and sort by date
+        const chartData = Object.values(analyticsData).sort((a, b) => {
+            return new Date(a.date) - new Date(b.date);
+        });
+
+        // Calculate totals
+        const totals = {
+            approved: posts.filter(p => p.status === 'active').length,
+            rejected: posts.filter(p => p.status === 'rejected').length,
+            suspended: posts.filter(p => p.status === 'suspended').length,
+            total: posts.length
+        };
+
+        res.json({
+            status: 'success',
+            data: {
+                approver: {
+                    id: approver.id,
+                    username: approver.username,
+                    email: approver.email
+                },
+                period: {
+                    type: period,
+                    value: parseInt(value),
+                    groupBy,
+                    startDate,
+                    endDate: now
+                },
+                chartData,
+                totals
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching approver analytics:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching approver analytics',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get reviewed posts by approver with decisions
+exports.getApproverReviewedPosts = async (req, res) => {
+    try {
+        const { approverId } = req.params;
+        const { page = 1, limit = 20, status, decision, startDate, endDate } = req.query;
+        const offset = (page - 1) * limit;
+
+        // Check if approver exists
+        const approver = await prisma.approver.findUnique({
+            where: { id: approverId },
+            select: {
+                id: true,
+                username: true,
+                email: true,
+                status: true
+            }
+        });
+
+        if (!approver) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Approver not found'
+            });
+        }
+
+        // Build where clause
+        const whereClause = {
+            approver_id: approverId
+        };
+
+        // Filter by status/decision
+        if (status || decision) {
+            const decisionStatus = status || decision;
+            if (['active', 'approved', 'rejected', 'suspended'].includes(decisionStatus)) {
+                whereClause.status = decisionStatus === 'approved' ? 'active' : decisionStatus;
+            }
+        }
+
+        // Filter by date range
+        if (startDate || endDate) {
+            whereClause.updatedAt = {};
+            if (startDate) {
+                whereClause.updatedAt.gte = new Date(startDate);
+            }
+            if (endDate) {
+                whereClause.updatedAt.lte = new Date(endDate);
+            }
+        }
+
+        // Get posts with decisions
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            email: true,
+                            profile_picture: true
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true
+                        }
+                    }
+                },
+                orderBy: {
+                    updatedAt: 'desc'
+                },
+                take: parseInt(limit),
+                skip: parseInt(offset)
+            }),
+            prisma.post.count({
+                where: whereClause
+            })
+        ]);
+
+        // Format posts with decision information
+        const formattedPosts = posts.map(post => ({
+            id: post.id,
+            title: post.title,
+            description: post.description,
+            video_url: post.video_url,
+            status: post.status,
+            decision: post.status === 'active' ? 'approved' : 
+                    post.status === 'rejected' ? 'rejected' : 
+                    post.status === 'suspended' ? 'suspended' : post.status,
+            reviewedAt: post.updatedAt,
+            approvedAt: post.approved_at,
+            user: post.user,
+            category: post.category,
+            views: post.views,
+            likes: post.likes,
+            shares: post.shares
+        }));
+
+        // Get decision statistics
+        const [approvedCount, rejectedCount, suspendedCount] = await Promise.all([
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'active',
+                    ...(startDate || endDate ? {
+                        updatedAt: {
+                            ...(startDate ? { gte: new Date(startDate) } : {}),
+                            ...(endDate ? { lte: new Date(endDate) } : {})
+                        }
+                    } : {})
+                }
+            }),
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'rejected',
+                    ...(startDate || endDate ? {
+                        updatedAt: {
+                            ...(startDate ? { gte: new Date(startDate) } : {}),
+                            ...(endDate ? { lte: new Date(endDate) } : {})
+                        }
+                    } : {})
+                }
+            }),
+            prisma.post.count({
+                where: {
+                    approver_id: approverId,
+                    status: 'suspended',
+                    ...(startDate || endDate ? {
+                        updatedAt: {
+                            ...(startDate ? { gte: new Date(startDate) } : {}),
+                            ...(endDate ? { lte: new Date(endDate) } : {})
+                        }
+                    } : {})
+                }
+            })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                approver: {
+                    id: approver.id,
+                    username: approver.username,
+                    email: approver.email,
+                    status: approver.status
+                },
+                posts: formattedPosts,
+                pagination: {
+                    currentPage: parseInt(page),
+                    totalPages: Math.ceil(totalCount / limit),
+                    totalCount,
+                    hasNext: page * limit < totalCount,
+                    hasPrev: page > 1
+                },
+                statistics: {
+                    total: totalCount,
+                    approved: approvedCount,
+                    rejected: rejectedCount,
+                    suspended: suspendedCount,
+                    approvalRate: totalCount > 0 ? ((approvedCount / totalCount) * 100).toFixed(2) : 0
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching reviewed posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching reviewed posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Get flagged posts (posts with 5+ reports)
 exports.getFlaggedPosts = async (req, res) => {
     try {
