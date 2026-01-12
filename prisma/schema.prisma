@@ -277,17 +277,22 @@ model Admin {
 }
 
 model Approver {
-  id        String   @id @default(uuid()) @db.Uuid
-  username  String   @unique @db.VarChar(255)
-  email     String   @unique @db.VarChar(255)
-  password  String   @db.VarChar(255)
-  status    String   @default("active") @db.VarChar(255)
-  last_login DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now())
+  id               String   @id @default(uuid()) @db.Uuid
+  username         String?  @unique @db.VarChar(255)
+  email            String   @unique @db.VarChar(255)
+  password         String?  @db.VarChar(255)
+  first_name       String?  @db.VarChar(255)
+  last_name        String?  @db.VarChar(255)
+  phone_number     String?  @db.VarChar(255)
+  onboarding_token String?  @unique @db.VarChar(255)
+  password_set     Boolean  @default(false)
+  status           String   @default("pending") @db.VarChar(255)
+  last_login       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @default(now())
 
   // Relations
-  posts     Post[]
+  posts            Post[]
 
   @@map("approvers")
 }

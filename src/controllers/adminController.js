@@ -1445,13 +1445,13 @@ exports.getFlaggedPosts = async (req, res) => {
 // Approver Management
 exports.registerApprover = async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const { email } = req.body;
 
         // Validate required fields
-        if (!email || !username || !password) {
+        if (!email) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Email, username, and password are required'
+                message: 'Email is required'
             });
         }
 
@@ -1464,60 +1464,60 @@ exports.registerApprover = async (req, res) => {
             });
         }
 
-        // Validate password strength
-        if (password.length < 6) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Password must be at least 6 characters long'
-            });
-        }
-
-        // Check if approver exists with the same email or username
-        const existingApprover = await prisma.approver.findFirst({
-            where: {
-                OR: [
-                    { email: email.toLowerCase() },
-                    { username: username.toLowerCase() }
-                ]
-            }
+        // Check if approver exists with the same email
+        const existingApprover = await prisma.approver.findUnique({
+            where: { email: email.toLowerCase() }
         });
 
         if (existingApprover) {
             return res.status(409).json({
                 status: 'error',
-                message: 'Approver already exists',
+                message: 'Approver with this email already exists',
                 data: {
                     exists: true,
-                    field: existingApprover.email === email.toLowerCase() ? 'email' : 'username'
+                    field: 'email'
                 }
             });
         }
 
-        // Hash password before storing
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Generate onboarding token
+        const crypto = require('crypto');
+        const onboardingToken = crypto.randomBytes(32).toString('hex');
 
-        // Create new approver using Prisma
+        // Create new approver with pending status
         const approver = await prisma.approver.create({
             data: {
-                username: username.toLowerCase(),
                 email: email.toLowerCase(),
-                password: hashedPassword,
-                status: 'active'
+                onboarding_token: onboardingToken,
+                password_set: false,
+                status: 'pending'
             },
             select: {
                 id: true,
-                username: true,
                 email: true,
                 status: true,
                 createdAt: true
             }
         });
 
+        // Send onboarding email with link
+        const { sendApproverOnboardingEmail } = require('../services/emailService');
+        const frontendUrl = process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:3000';
+        const onboardingLink = `${frontendUrl}/approver/onboarding?token=${onboardingToken}`;
+        
+        try {
+            await sendApproverOnboardingEmail(email, onboardingLink);
+        } catch (emailError) {
+            console.error('Error sending onboarding email:', emailError);
+            // Continue even if email fails - admin can resend later
+        }
+
         res.status(201).json({
             status: 'success',
-            message: 'Approver registered successfully',
+            message: 'Approver created successfully. Onboarding link has been sent to their email.',
             data: {
-                approver
+                approver,
+                onboardingLink: process.env.NODE_ENV === 'development' ? onboardingLink : undefined
             }
         });
     } catch (error) {
