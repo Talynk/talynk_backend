@@ -106,24 +106,24 @@ exports.createPost = async (req, res) => {
                 });
             }
         }
-
         // Handle file upload
         let video_url = '';
         let fileType = 'text';
         let filePath = '';
         let mimetype = '';
         if (req.file) {
-            // File was uploaded to local storage
-            video_url = req.file.localUrl || req.file.supabaseUrl || '';
+            // File was uploaded to R2 (or local storage as fallback)
+            video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
             filePath = req.file.path;
             mimetype = req.file.mimetype;
-            console.log("File uploaded successfully to local storage:", {
+            console.log("File uploaded successfully:", {
                 url: video_url,
                 filename: req.file.filename,
                 path: req.file.path,
                 mimetype: req.file.mimetype,
-                size: req.file.size
+                size: req.file.size,
+                storage: req.file.r2Url ? 'R2' : 'local'
             });
         } else {
             console.log("No file was uploaded. Check if the request is using multipart/form-data and the file field is named 'file'");
@@ -220,7 +220,9 @@ exports.createPost = async (req, res) => {
 
         // Process video watermarking asynchronously (non-blocking)
         // This happens in the background and updates the post when complete
-        if (req.file && fileType === 'video' && filePath) {
+        // Note: Watermarking only works for local files, not R2 files
+        if (req.file && fileType === 'video' && filePath && !req.file.r2Url) {
+            // Only process watermarking if file is stored locally (not in R2)
             // Resolve full path to uploaded video file
             // filePath is either relative (uploads/filename) or absolute
             const fullInputPath = path.isAbsolute(filePath) 
@@ -254,6 +256,8 @@ exports.createPost = async (req, res) => {
                 .catch(error => {
                     console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
                 });
+        } else if (req.file && fileType === 'video' && req.file.r2Url) {
+            console.log(`[WATERMARK] Skipping watermarking for R2-stored video (post ${post.id}) - watermarking requires local file access`);
         }
 
         res.status(201).json({
@@ -329,9 +333,14 @@ exports.getAllPosts = async (req, res) => {
             is_frozen: false
         };
 
-        // Filter by status
+        // Filter by status - ensure valid PostStatus enum value
         if (status && status !== 'all') {
-            baseWhereClause.status = status;
+            // Validate status is a valid PostStatus enum value
+            if (['draft', 'active', 'suspended'].includes(status)) {
+                baseWhereClause.status = status;
+            } else {
+                baseWhereClause.status = 'active';
+            }
         } else if (status === 'all') {
             // Include all statuses except frozen
         } else {
@@ -376,6 +385,21 @@ exports.getAllPosts = async (req, res) => {
         
         if (shouldFeatureFirst) {
             // Get all active featured posts from FeaturedPost table that haven't expired
+            // Build post filter explicitly to ensure enum types are correct
+            const postFilter = {
+                is_frozen: false
+            };
+            
+            // Add status filter if present in baseWhereClause
+            if (baseWhereClause.status) {
+                postFilter.status = baseWhereClause.status;
+            }
+            
+            // Add category filter if present
+            if (baseWhereClause.category_id) {
+                postFilter.category_id = baseWhereClause.category_id;
+            }
+            
             const activeFeaturedPosts = await prisma.featuredPost.findMany({
                 where: {
                     is_active: true,
@@ -383,9 +407,7 @@ exports.getAllPosts = async (req, res) => {
                         { expires_at: null },
                         { expires_at: { gt: currentDate } }
                     ],
-                    post: {
-                        ...baseWhereClause
-                    }
+                    post: postFilter
                 },
                 include: {
                     post: {
@@ -1271,110 +1293,20 @@ exports.getActivePosts = async (req, res) => {
 // Removed: approvePost and rejectPost - posts are now published directly as 'active'
 // Use updatePostStatus endpoint to change post status to 'active' or 'suspended'
 
+// Deprecated: Use getAllPosts or getPostById instead
 exports.getPosts = async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 12;
-        const offset = (page - 1) * limit;
-        const categoryId = req.query.category || null;
-        const sort = req.query.sort || 'latest';
-
-        let whereClause = {
-            status: 'active'
-        };
-
-        if (categoryId) {
-            whereClause.categoryId = categoryId;
-        }
-
-        const order = sort === 'oldest' ? [['createdAt', 'ASC']] : [['createdAt', 'DESC']];
-
-        const posts = await Post.findAll({
-            where: whereClause,
-            include: [
-                {
-                    model: User,
-                    as: 'author',
-                    attributes: ['id', 'username']
-                },
-                {
-                    model: Category,
-                    as: 'category'
-                }
-            ],
-            order: order,
-            limit: limit,
-            offset: offset
-        });
-
-        const processedPosts = posts.map(post => {
-            const postObj = post.toJSON();
-            if (postObj.mediaUrl && !postObj.mediaUrl.startsWith('http')) {
-                postObj.mediaUrl = `/uploads/${postObj.mediaUrl.replace(/^uploads\//, '')}`;
-            }
-            return postObj;
-        });
-
-        res.json({
-            status: 'success',
-            data: processedPosts,
-            pagination: {
-                page,
-                limit,
-                hasMore: posts.length === limit
-            }
-        });
-
-    } catch (error) {
-        console.error('Error in getPosts:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching posts'
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/posts/all or /api/posts/:postId instead'
+    });
 };
 
+// Deprecated: Use getPostById instead
 exports.getPost = async (req, res) => {
-    try {
-        const post = await Post.findByPk(req.params.id, {
-            include: [
-                {
-                    model: User,
-                    as: 'uploader',
-                    attributes: ['id', 'username']
-                },
-                {
-                    model: Category,
-                    attributes: ['id', 'name']
-                }
-            ]
-        });
-
-        if (!post) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'Post not found'
-            });
-        }
-
-        // Include the full URL for the file (Supabase URLs are already complete)
-        const postData = post.toJSON();
-        if (postData.url) {
-            postData.fullUrl = postData.url; // Supabase URL is already complete
-        }
-
-        res.json({
-            status: 'success',
-            data: { post: postData }
-        });
-    } catch (error) {
-        console.error('Error getting post:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching post',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/posts/:postId instead'
+    });
 };
 
 // Like functionality moved to likeController.js
@@ -1386,72 +1318,22 @@ exports.likePost = async (req, res) => {
     });
 };
 
+// Deprecated: Comment functionality moved to commentController.js
+// Use /api/comments/posts/:postId endpoint instead
 exports.addComment = async (req, res) => {
-    try {
-        const { postId } = req.params;
-        const { commentText } = req.body;
-        const username = req.user.username;
-
-        const result = await db.query(
-            `INSERT INTO comments (
-                commentor_id, 
-                post_id, 
-                comment_text
-            ) VALUES ($1, $2, $3)
-            RETURNING *`,
-            [username, postId, commentText]
-        );
-
-        // Update post's comment count
-        await db.query(
-            'UPDATE posts SET comment_count = comment_count + 1 WHERE id = $1',
-            [postId]
-        );
-
-        res.status(201).json({
-            status: 'success',
-            data: {
-                comment: result.rows[0]
-            }
-        });
-    } catch (error) {
-        console.error('Error adding comment:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error adding comment'
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/comments/posts/:postId instead'
+    });
 };
 
+// Deprecated: Comment functionality moved to commentController.js
+// Use /api/comments/posts/:postId endpoint instead
 exports.getPostComments = async (req, res) => {
-    try {
-        const { postId } = req.params;
-
-        const comments = await Comment.findAll({
-            where: { post_id: postId },
-            include: [
-                { 
-                    model: User,
-                    attributes: ['id', 'username']
-                }
-            ],
-            order: [['comment_date', 'DESC']]
-        });
-
-        res.json({
-            status: 'success',
-            data: {
-                comments
-            }
-        });
-    } catch (error) {
-        console.error('Error fetching comments:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Error fetching comments',
-            details: error.message
-        });
-    }
+    res.status(410).json({
+        status: 'deprecated',
+        message: 'This endpoint is deprecated. Please use /api/comments/posts/:postId instead'
+    });
 };
 
 // Like status check moved to likeController.js
@@ -1704,17 +1586,50 @@ exports.getFollowingPosts = async (req, res) => {
         // Get posts from users that the current user follows
         console.log('About to query database with userId:', userId);
         
+        // First, get the list of user IDs that the current user follows
+        const followingRelations = await prisma.follow.findMany({
+            where: {
+                followerId: userId
+            },
+            select: {
+                followingId: true
+            }
+        });
+        
+        const followingUserIds = followingRelations.map(rel => rel.followingId);
+        
+        console.log(`User ${userId} follows ${followingUserIds.length} users:`, followingUserIds);
+        
+        // If user follows no one, return empty result
+        if (followingUserIds.length === 0) {
+            return res.json({
+                status: 'success',
+                data: {
+                    posts: [],
+                    pagination: {
+                        currentPage: parseInt(page),
+                        totalPages: 0,
+                        totalCount: 0,
+                        hasNext: false,
+                        hasPrev: false,
+                        limit: parseInt(limit)
+                    },
+                    filters: {
+                        sort,
+                        fromFollowing: true
+                    }
+                },
+                cached: false
+            });
+        }
+        
         const [followingPosts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
                     status: 'active',
                     is_frozen: false,
-                    user: {
-                        followers: {
-                            some: {
-                                followerId: userId
-                            }
-                        }
+                    user_id: {
+                        in: followingUserIds
                     }
                 },
                 include: {
@@ -1756,12 +1671,8 @@ exports.getFollowingPosts = async (req, res) => {
                 where: {
                     status: 'active',
                     is_frozen: false,
-                    user: {
-                        followers: {
-                            some: {
-                                followerId: userId
-                            }
-                        }
+                    user_id: {
+                        in: followingUserIds
                     }
                 }
             })

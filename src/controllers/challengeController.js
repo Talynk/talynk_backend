@@ -922,7 +922,8 @@ exports.createPostInChallenge = async (req, res) => {
         let filePath = '';
         let mimetype = '';
         if (req.file) {
-            video_url = req.file.localUrl || req.file.supabaseUrl || '';
+            // File was uploaded to R2 (or local storage as fallback)
+            video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
             filePath = req.file.path;
             mimetype = req.file.mimetype;
