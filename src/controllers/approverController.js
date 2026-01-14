@@ -10,22 +10,22 @@ exports.getApproverStats = async (req, res) => {
         today.setHours(0, 0, 0, 0);
 
         const [pendingCount, approvedCount, rejectedCount, todayCount] = await Promise.all([
-            prisma.post.count({ where: { status: 'pending' } }),
+            prisma.post.count({ where: { status: 'draft' } }),
             prisma.post.count({ 
                 where: { 
-                    status: 'approved',
+                    status: 'active',
                     approver_id: approverId 
                 } 
             }),
             prisma.post.count({ 
                 where: { 
-                    status: 'rejected',
+                    status: 'suspended',
                     approver_id: approverId 
                 } 
             }),
             prisma.post.count({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     approver_id: approverId,
                     updatedAt: {
                         gte: today
@@ -59,7 +59,7 @@ exports.getPendingPosts = async (req, res) => {
 
         const [posts, total] = await Promise.all([
             prisma.post.findMany({
-                where: { status: 'pending' },
+                where: { status: 'draft' },
                 include: {
                     user: {
                         select: { username: true, email: true }
@@ -70,7 +70,7 @@ exports.getPendingPosts = async (req, res) => {
                 skip: parseInt(offset)
             }),
             prisma.post.count({
-                where: { status: 'pending' }
+                where: { status: 'draft' }
             })
         ]);
 
@@ -97,7 +97,7 @@ exports.getApprovedPosts = async (req, res) => {
         const { date, search, page = 1, limit = 10 } = req.query;
         const approverId = req.user.id;
         const whereClause = {
-            status: 'approved',
+            status: 'active',
             approver_id: approverId
         };
 
@@ -194,7 +194,7 @@ exports.approvePost = async (req, res) => {
         const post = await prisma.post.findFirst({
             where: { 
                 id: postId,
-                status: 'pending'
+                status: 'draft'
             },
             include: {
                 user: {
@@ -213,7 +213,7 @@ exports.approvePost = async (req, res) => {
         await prisma.post.update({
             where: { id: postId },
             data: {
-                status: 'approved',
+                status: 'active',
                 approver_id: approverId,
                 approved_at: new Date(),
                 review_notes: notes
@@ -267,7 +267,7 @@ exports.rejectPost = async (req, res) => {
         const post = await prisma.post.findFirst({
             where: { 
                 id: postId,
-                status: 'pending'
+                status: 'draft'
             },
             include: {
                 user: {
@@ -286,7 +286,7 @@ exports.rejectPost = async (req, res) => {
         await prisma.post.update({
             where: { id: postId },
             data: {
-                status: 'rejected',
+                status: 'suspended',
                 approver_id: approverId,
                 rejected_at: new Date(),
                 review_notes: notes
@@ -415,23 +415,32 @@ exports.searchPosts = async (req, res) => {
                 };
                 break;
             case 'status':
-                const validStatuses = ['pending', 'approved', 'rejected'];
-                if (!validStatuses.includes(query.toLowerCase())) {
+                // Map user-friendly status names to enum values
+                const statusMap = {
+                    'pending': 'draft',
+                    'approved': 'active',
+                    'rejected': 'suspended',
+                    'draft': 'draft',
+                    'active': 'active',
+                    'suspended': 'suspended'
+                };
+                const mappedStatus = statusMap[query.toLowerCase()];
+                if (!mappedStatus) {
                     return res.status(400).json({
                         success: false,
                         error: {
                             code: 'INVALID_STATUS',
-                            message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+                            message: `Invalid status. Must be one of: pending, approved, rejected, draft, active, suspended`
                         }
                     });
                 }
-                whereClause.status = query.toLowerCase();
+                whereClause.status = mappedStatus;
                 break;
         }
         // Only allow approver to see posts they are allowed to see
         whereClause.OR = [
             { approver_id: req.user.id },
-            { status: 'pending' }
+            { status: 'draft' }
         ];
         
         const offset = (page - 1) * limit;
@@ -569,7 +578,6 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 },
                 include: {
@@ -622,7 +630,6 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
-                    status: 'frozen',
                     is_frozen: true
                 }
             })
@@ -666,11 +673,10 @@ exports.reviewFlaggedPost = async (req, res) => {
             });
         }
 
-        // Find the flagged post
+        // Find the flagged post (frozen posts can have any status, check is_frozen flag)
         const post = await prisma.post.findFirst({
             where: { 
                 id: postId,
-                status: 'frozen',
                 is_frozen: true
             },
             include: {
@@ -697,12 +703,12 @@ exports.reviewFlaggedPost = async (req, res) => {
         };
 
         if (action === 'approve') {
-            updateData.status = 'approved';
+            updateData.status = 'active';
             updateData.is_frozen = false;
             updateData.approved_at = new Date();
             updateData.frozen_at = null;
         } else if (action === 'reject') {
-            updateData.status = 'rejected';
+            updateData.status = 'suspended';
             updateData.is_frozen = false;
             updateData.frozen_at = null;
         }
