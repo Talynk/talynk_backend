@@ -218,46 +218,33 @@ exports.createPost = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
-        // Process video watermarking asynchronously (non-blocking)
-        // This happens in the background and updates the post when complete
-        // Note: Watermarking only works for local files, not R2 files
-        if (req.file && fileType === 'video' && filePath && !req.file.r2Url) {
-            // Only process watermarking if file is stored locally (not in R2)
-            // Resolve full path to uploaded video file
-            // filePath is either relative (uploads/filename) or absolute
-            const fullInputPath = path.isAbsolute(filePath) 
-                ? filePath 
-                : path.join(process.cwd(), filePath);
+        // Process video watermarking in background using BullMQ (non-blocking)
+        // Only process videos (images can be handled separately if needed)
+        if (req.file && fileType === 'video') {
+            const { queueWatermarkJob } = require('../queues/videoQueue');
+            const path = require('path');
             
-            // Verify file exists before processing
-            fs.access(fullInputPath)
-                .then(() => {
-                    // Process watermarking in background (don't await - non-blocking)
-                    processWatermarkAsync(
-                        fullInputPath,
+            // Use temp file path if available (more efficient - no R2 download needed)
+            // Otherwise use R2 URL and download will happen in worker
+            const inputPath = req.file.tempPath || req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
+            const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
+            
+            if (inputPath) {
+                try {
+                    const job = await queueWatermarkJob(
                         post.id,
-                        async (watermarkedUrl) => {
-                            // Update post with watermarked video URL
-                            try {
-                                await prisma.post.update({
-                                    where: { id: post.id },
-                                    data: { video_url: watermarkedUrl }
-                                });
-                                console.log(`[WATERMARK] ✅ Updated post ${post.id} with watermarked video: ${watermarkedUrl}`);
-                            } catch (error) {
-                                console.error(`[WATERMARK] ❌ Failed to update post ${post.id} with watermarked URL:`, error);
-                            }
-                        }
-                    ).catch(error => {
-                        console.error(`[WATERMARK] Background watermarking failed for post ${post.id}:`, error);
-                        // Post remains with original video - not a critical failure
-                    });
-                })
-                .catch(error => {
-                    console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
-                });
-        } else if (req.file && fileType === 'video' && req.file.r2Url) {
-            console.log(`[WATERMARK] Skipping watermarking for R2-stored video (post ${post.id}) - watermarking requires local file access`);
+                        inputPath,
+                        mimetype,
+                        logoPath
+                    );
+                    console.log(`[VIDEO_QUEUE] Queued video processing job ${job.id} for Post ID: ${post.id}`);
+                } catch (error) {
+                    console.error(`[VIDEO_QUEUE] Failed to queue job for Post ID: ${post.id}`, error);
+                    // Don't fail post creation if queueing fails
+                }
+            } else {
+                console.warn(`[VIDEO_QUEUE] No input path found for Post ID: ${post.id}, skipping watermarking`);
+            }
         }
 
         res.status(201).json({

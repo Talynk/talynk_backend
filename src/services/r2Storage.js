@@ -137,6 +137,45 @@ async function deleteFromR2(key) {
 }
 
 /**
+ * Download a file from R2 bucket to local path
+ * @param {string} key - File key in R2 bucket
+ * @param {string} localPath - Local file path to save the file
+ * @returns {Promise<void>}
+ */
+async function downloadFromR2(key, localPath) {
+  if (!USE_R2 || !s3Client) {
+    throw new Error('R2 storage is not configured.');
+  }
+
+  try {
+    const command = new GetObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    });
+
+    const response = await s3Client.send(command);
+    
+    // Ensure directory exists
+    const dir = path.dirname(localPath);
+    await fs.mkdir(dir, { recursive: true });
+    
+    // Stream the file to local path
+    const chunks = [];
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    
+    const buffer = Buffer.concat(chunks);
+    await fs.writeFile(localPath, buffer);
+    
+    console.log(`[R2] File downloaded successfully: ${key} -> ${localPath}`);
+  } catch (error) {
+    console.error('[R2] Download error:', error);
+    throw new Error(`Failed to download file from R2: ${error.message}`);
+  }
+}
+
+/**
  * Extract key from R2 URL
  * @param {string} url - R2 public URL
  * @returns {string|null} - File key or null if not a valid R2 URL
@@ -171,6 +210,7 @@ module.exports = {
   uploadToR2,
   uploadFileToR2,
   deleteFromR2,
+  downloadFromR2,
   extractKeyFromUrl,
   isR2Configured,
   R2_PUBLIC_DOMAIN,

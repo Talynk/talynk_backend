@@ -6,6 +6,7 @@ dist/
 logs/
 *.log
 uploads/
+tmp/
 *.sql
 *.sql.gz
 *.dump

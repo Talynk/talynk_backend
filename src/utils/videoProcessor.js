@@ -3,6 +3,7 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const ffprobeInstaller = require('@ffprobe-installer/ffprobe');
 const path = require('path');
 const fs = require('fs').promises;
+const { processAndUploadMedia } = require('../services/mediaProcessor');
 
 // Set ffmpeg and ffprobe paths
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
@@ -11,9 +12,12 @@ ffmpeg.setFfprobePath(ffprobeInstaller.path);
 // App name from environment or default
 const APP_NAME = process.env.APP_NAME || 'Talynk';
 
+// Logo path for watermark
+const LOGO_PATH = path.join(process.cwd(), 'assets', 'logo.png');
+
 /**
- * Ultra-fast video watermarking using FFmpeg text overlay
- * This is faster than image overlay because it doesn't require creating an image file
+ * Add watermark to video using logo and Post ID
+ * Uses logo from assets/logo.png and Post ID text below it
  * 
  * @param {string} inputPath - Path to input video file
  * @param {string} outputPath - Path to save watermarked video
@@ -22,11 +26,18 @@ const APP_NAME = process.env.APP_NAME || 'Talynk';
  */
 async function addWatermarkToVideo(inputPath, outputPath, postId) {
     const startTime = Date.now();
-    console.log(`[WATERMARK] Starting fast watermarking for Post ID: ${postId}`);
+    console.log(`[WATERMARK] Starting watermarking with logo for Post ID: ${postId}`);
     
     // Ensure output directory exists
     const outputDir = path.dirname(outputPath);
     await fs.mkdir(outputDir, { recursive: true });
+    
+    // Verify logo exists
+    try {
+        await fs.access(LOGO_PATH);
+    } catch (error) {
+        throw new Error(`Logo not found at ${LOGO_PATH}. Please ensure assets/logo.png exists.`);
+    }
 
     // Get video dimensions for responsive watermark sizing
     let videoWidth = 1920;
@@ -40,59 +51,52 @@ async function addWatermarkToVideo(inputPath, outputPath, postId) {
         console.warn(`[WATERMARK] Could not get video dimensions, using defaults:`, err.message);
     }
 
-    // Calculate responsive font size (20-28px based on video height)
-    const baseFontSize = Math.max(20, Math.min(28, Math.floor(videoHeight * 0.025)));
-    const idFontSize = Math.floor(baseFontSize * 0.75); // Smaller font for ID
+    // Calculate logo size (responsive, max 10% of video height, min 80px)
+    const logoSize = Math.max(80, Math.min(120, Math.floor(videoHeight * 0.1)));
     
-    // Calculate position (mid-right with padding)
-    const paddingX = Math.max(20, Math.floor(videoWidth * 0.02));
+    // Calculate positions (bottom-right for logo and Post ID)
+    const padding = 24;
+    const logoX = `W-w-${padding}`; // Right edge minus logo width minus padding
+    const logoY = `H-h-${padding}`; // Bottom edge minus logo height minus padding
     
-    // Watermark text: "Talentix" on first line, "ID: <post_id>" on second line
-    // Using two separate drawtext filters for multi-line text
-    // Position: mid-right (vertically centered)
-    const lineSpacing = 8; // Gap between lines in pixels
+    // Post ID text position (below logo, right-aligned with logo)
+    const textSpacing = 8; // Space between logo and text
+    const textY = `H-th-${padding + logoSize + textSpacing}`; // Below logo
+    const textX = `W-tw-${padding}`; // Right-aligned with logo
     
-    // Calculate approximate text heights for positioning
-    // Text height ≈ font size * 1.2 (line height multiplier)
-    const textHeight1 = Math.floor(baseFontSize * 1.2);
-    const textHeight2 = Math.floor(idFontSize * 1.2);
+    // Escape Post ID for FFmpeg
+    const postIdEscaped = postId.replace(/:/g, '\\:').replace(/'/g, "\\'");
     
-    // Center both lines vertically around the middle of the video
-    // First line (Talentix): above center
-    const y1 = Math.floor((videoHeight / 2) - (textHeight1 / 2) - (lineSpacing / 2));
-    // Second line (ID): below center  
-    const y2 = Math.floor((videoHeight / 2) + (textHeight2 / 2) + (lineSpacing / 2));
-    
-    // Escape single quotes in text for FFmpeg
-    const appNameEscaped = APP_NAME.replace(/'/g, "\\'");
-    const postIdEscaped = postId.replace(/'/g, "\\'");
-    
-    // Create drawtext filters with proper positioning
-    const textFilter1 = `drawtext=text='${appNameEscaped}':fontcolor=white@0.4:fontsize=${baseFontSize}:x=w-tw-${paddingX}:y=${y1}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
-    const textFilter2 = `drawtext=text='ID: ${postIdEscaped}':fontcolor=white@0.4:fontsize=${idFontSize}:x=w-tw-${paddingX}:y=${y2}:shadowcolor=black@0.8:shadowx=2:shadowy=2`;
-    
-    // Combine both text filters (array for fluent-ffmpeg)
-    const textFilter = [textFilter1, textFilter2];
+    // Calculate font size based on video height
+    const fontSize = Math.max(22, Math.min(28, Math.floor(videoHeight * 0.015)));
 
     return new Promise((resolve, reject) => {
         const ffmpegCommand = ffmpeg(inputPath)
-            .videoFilters(textFilter) // Pass array of filters
+            .input(LOGO_PATH)
+            .complexFilter([
+                // Scale logo to appropriate size
+                `[1:v]scale=${logoSize}:-1[logo]`,
+                // Overlay logo (bottom-right)
+                `[0:v][logo]overlay=${logoX}:${logoY}[vlogo]`,
+                // Draw Post ID text (bottom-left)
+                `[vlogo]drawtext=text='Post ID\\: ${postIdEscaped}':fontcolor=white:fontsize=${fontSize}:box=1:boxcolor=black@0.45:x=${textX}:y=${textY}`
+            ])
             // Ultra-fast encoding settings for speed
             .videoCodec('libx264')
             .outputOptions([
-                '-preset ultrafast',        // Fastest encoding preset
-                '-tune zerolatency',        // Zero latency tuning
-                '-crf 23',                  // Good quality with fast encoding
-                '-pix_fmt yuv420p',         // Compatible pixel format
-                '-movflags +faststart',     // Web-optimized
-                '-threads 0',               // Use all CPU cores
-                '-vsync 0',                 // Disable frame sync for speed
-                '-async 1'                  // Audio sync
+                '-preset veryfast',        // Fast encoding (as per MEDIA_PIPELINE.md)
+                '-crf 27',                 // Quality vs size balance
+                '-profile:v high',         // H.264 high profile
+                '-level 4.1',              // H.264 level 4.1
+                '-pix_fmt yuv420p',        // Compatible pixel format
+                '-movflags +faststart',    // Web-optimized
+                '-threads 0'               // Use all CPU cores
             ])
-            .audioCodec('copy')             // Copy audio (no re-encoding = faster)
+            .audioCodec('aac')
+            .audioBitrate('128k')
             .output(outputPath)
             .on('start', (commandLine) => {
-                console.log(`[WATERMARK] FFmpeg command: ${commandLine}`);
+                console.log(`[WATERMARK] FFmpeg command started for Post ID: ${postId}`);
             })
             .on('progress', (progress) => {
                 if (progress.percent) {
