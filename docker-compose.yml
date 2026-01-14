@@ -56,6 +56,14 @@ services:
       RESEND_API_KEY: re_arcTye3F_JK7QVBpDpzDRm5PQf2QVGqof
       RESEND_FROM_EMAIL: noreply@support.ihirwe.art
       APP_NAME: Talentix
+      # Cloudflare R2 Storage Configuration
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-talentix}
+      R2_ENDPOINT: ${R2_ENDPOINT:-https://59d4da31782ae0bffa374a8824a15d6e.r2.cloudflarestorage.com}
+      R2_PUBLIC_DOMAIN: ${R2_PUBLIC_DOMAIN:-https://media.talentix.net}
+      USE_R2: ${USE_R2:-true}
     ports:
       - "3000:3000"
     depends_on:

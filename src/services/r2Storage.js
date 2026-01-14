@@ -17,18 +17,40 @@ const USE_R2 = process.env.USE_R2 === 'true' || process.env.USE_R2 === '1';
 let s3Client = null;
 
 if (USE_R2 && R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+  // Debug: Log configuration (masked for security)
+  console.log('[R2] Configuration check:');
+  console.log('[R2]   USE_R2:', USE_R2);
+  console.log('[R2]   R2_ACCOUNT_ID:', R2_ACCOUNT_ID ? `${R2_ACCOUNT_ID.substring(0, 4)}...` : 'NOT SET');
+  console.log('[R2]   R2_ACCESS_KEY_ID:', R2_ACCESS_KEY_ID ? `${R2_ACCESS_KEY_ID.substring(0, 8)}...` : 'NOT SET');
+  console.log('[R2]   R2_SECRET_ACCESS_KEY:', R2_SECRET_ACCESS_KEY ? `${R2_SECRET_ACCESS_KEY.substring(0, 8)}...` : 'NOT SET');
+  console.log('[R2]   R2_BUCKET_NAME:', R2_BUCKET_NAME);
+  console.log('[R2]   R2_ENDPOINT:', R2_ENDPOINT);
+  
+  // Check for whitespace issues
+  const accessKeyTrimmed = R2_ACCESS_KEY_ID.trim();
+  const secretKeyTrimmed = R2_SECRET_ACCESS_KEY.trim();
+  if (accessKeyTrimmed !== R2_ACCESS_KEY_ID || secretKeyTrimmed !== R2_SECRET_ACCESS_KEY) {
+    console.warn('[R2] WARNING: Credentials have leading/trailing whitespace! This will cause signature errors.');
+  }
+  
   s3Client = new S3Client({
     region: 'auto', // R2 uses 'auto' for region
     endpoint: R2_ENDPOINT,
     credentials: {
-      accessKeyId: R2_ACCESS_KEY_ID,
-      secretAccessKey: R2_SECRET_ACCESS_KEY,
+      accessKeyId: accessKeyTrimmed,
+      secretAccessKey: secretKeyTrimmed,
     },
     forcePathStyle: true, // Required for R2
   });
   console.log('[R2] R2 storage client initialized');
 } else {
   console.warn('[R2] R2 storage not configured. Set USE_R2=true and provide R2 credentials.');
+  console.warn('[R2] Missing:', {
+    USE_R2: !USE_R2,
+    R2_ACCOUNT_ID: !R2_ACCOUNT_ID,
+    R2_ACCESS_KEY_ID: !R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: !R2_SECRET_ACCESS_KEY,
+  });
 }
 
 /**
