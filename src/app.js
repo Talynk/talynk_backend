@@ -222,16 +222,7 @@ app.use(errorHandler);
 // Server setup with port handling
 const PORT = process.env.PORT || 3000;
 
-// Initialize BullMQ video worker (only if not in test mode)
-if (process.env.NODE_ENV !== 'test' && !process.env.SKIP_WORKER) {
-  try {
-    require('./workers/videoWorker');
-    console.log('[APP] Video processing worker initialized');
-  } catch (error) {
-    console.warn('[APP] Failed to initialize video worker:', error.message);
-    console.warn('[APP] Video watermarking will not be available');
-  }
-}
+// Video processing/watermarking is handled on the frontend
 
 const startServer = async () => {
     try {

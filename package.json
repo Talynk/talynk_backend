@@ -6,8 +6,6 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
-    "worker": "node src/workers/videoWorker.js",
-    "worker:dev": "nodemon src/workers/videoWorker.js",
     "test": "jest --detectOpenHandles --forceExit",
     "test:watch": "jest --watch",
     "db:generate": "prisma generate",

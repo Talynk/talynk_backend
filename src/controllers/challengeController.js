@@ -1,7 +1,6 @@
 const prisma = require('../lib/prisma');
 const path = require('path');
 const fs = require('fs').promises;
-const { processWatermarkAsync } = require('../utils/videoProcessor');
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 
@@ -979,36 +978,7 @@ exports.createPostInChallenge = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
-        // Process video watermarking asynchronously (non-blocking)
-        if (req.file && fileType === 'video' && filePath) {
-            const fullInputPath = path.isAbsolute(filePath) 
-                ? filePath 
-                : path.join(process.cwd(), filePath);
-            
-            fs.access(fullInputPath)
-                .then(() => {
-                    processWatermarkAsync(
-                        fullInputPath,
-                        post.id,
-                        async (watermarkedUrl) => {
-                            try {
-                                await prisma.post.update({
-                                    where: { id: post.id },
-                                    data: { video_url: watermarkedUrl }
-                                });
-                                console.log(`[WATERMARK] ✅ Updated post ${post.id} with watermarked video: ${watermarkedUrl}`);
-                            } catch (error) {
-                                console.error(`[WATERMARK] ❌ Failed to update post ${post.id} with watermarked URL:`, error);
-                            }
-                        }
-                    ).catch(error => {
-                        console.error(`[WATERMARK] Background watermarking failed for post ${post.id}:`, error);
-                    });
-                })
-                .catch(error => {
-                    console.warn(`[WATERMARK] Video file not found at ${fullInputPath}, skipping watermarking:`, error.message);
-                });
-        }
+        // Video processing/watermarking is handled on the frontend
 
         res.status(201).json({
             status: 'success',

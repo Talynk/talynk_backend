@@ -1,7 +1,6 @@
 const { v4: uuidv4, validate: isUuid } = require('uuid');
 const path = require('path');
 const prisma = require('../lib/prisma');
-const { processWatermarkAsync } = require('../utils/videoProcessor');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
 const fs = require('fs').promises;
@@ -19,7 +18,6 @@ const {
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 
-// Remove the applyWatermarkAsync function and all calls to it
 
 exports.createPost = async (req, res) => {
     try {
@@ -218,41 +216,13 @@ exports.createPost = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
-        // Process video watermarking in background using BullMQ (non-blocking)
-        // Only process videos (images can be handled separately if needed)
-        if (req.file && fileType === 'video') {
-            const { queueWatermarkJob } = require('../queues/videoQueue');
-            const path = require('path');
-            
-            // Use temp file path if available (more efficient - no R2 download needed)
-            // Otherwise use R2 URL and download will happen in worker
-            const inputPath = req.file.tempPath || req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
-            const logoPath = path.join(process.cwd(), 'assets', 'logo.png');
-            
-            if (inputPath) {
-                try {
-                    const job = await queueWatermarkJob(
-                        post.id,
-                        inputPath,
-                        mimetype,
-                        logoPath
-                    );
-                    console.log(`[VIDEO_QUEUE] Queued video processing job ${job.id} for Post ID: ${post.id}`);
-                } catch (error) {
-                    console.error(`[VIDEO_QUEUE] Failed to queue job for Post ID: ${post.id}`, error);
-                    // Don't fail post creation if queueing fails
-                }
-            } else {
-                console.warn(`[VIDEO_QUEUE] No input path found for Post ID: ${post.id}, skipping watermarking`);
-            }
-        }
-
+        // Send response immediately
         res.status(201).json({
             status: 'success',
             data: { 
                 post: {
                     ...post,
-                    video_url: video_url, // Original video URL (will be updated when watermarking completes)
+                    video_url: video_url,
                     challenge_linked: challengePost ? true : false,
                     challenge_id: challengePost ? challengePost.challenge_id : null
                 }
