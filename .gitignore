@@ -17,7 +17,8 @@ tmp/
 .md
 
 *.example
-
+*.env
+export.env
 
 
 
