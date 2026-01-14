@@ -222,6 +222,8 @@ app.use(errorHandler);
 // Server setup with port handling
 const PORT = process.env.PORT || 3000;
 
+// Video processing/watermarking is handled on the frontend
+
 const startServer = async () => {
     try {
         const server = http.createServer(app);

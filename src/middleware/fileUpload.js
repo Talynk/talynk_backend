@@ -95,6 +95,20 @@ const handleFileUpload = async (req, res, next) => {
         // Get file buffer from memory storage
         const fileBuffer = req.file.buffer;
         
+        // Save buffer to temp file for processing (if video/image)
+        // This allows background worker to process without downloading from R2
+        const isMedia = req.file.mimetype.startsWith('video/') || req.file.mimetype.startsWith('image/');
+        let tempFilePath = null;
+        
+        if (isMedia) {
+          const tmpDir = path.join(process.cwd(), 'tmp', 'uploads');
+          await fs.mkdir(tmpDir, { recursive: true });
+          const fileExt = path.extname(req.file.originalname);
+          tempFilePath = path.join(tmpDir, `${Date.now()}-${uuidv4()}${fileExt}`);
+          await fs.writeFile(tempFilePath, fileBuffer);
+          console.log('[UPLOAD] Saved buffer to temp file for processing:', tempFilePath);
+        }
+        
         // Upload to R2
         const result = await uploadFileToR2(
           fileBuffer,
@@ -116,6 +130,7 @@ const handleFileUpload = async (req, res, next) => {
         req.file.localUrl = fileUrl; // For backward compatibility
         req.file.supabaseUrl = fileUrl; // For backward compatibility
         req.file.key = result.key; // R2 key for future deletion if needed
+        req.file.tempPath = tempFilePath; // Temp file path for processing (if media)
       } catch (r2Error) {
         console.error('[UPLOAD] R2 upload failed, falling back to local storage:', r2Error);
         // Fallback to local storage if R2 fails
