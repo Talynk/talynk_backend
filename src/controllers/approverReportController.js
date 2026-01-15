@@ -73,8 +73,12 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
             case 'approvals':
                 data.metrics.approvals = await prisma.post.count({
                     where: {
-                        ...baseFilter,
-                        post_status: 'approved'
+                        approver_id: approver.id,
+                        status: 'active',
+                        updatedAt: {
+                            gte: new Date(dateRange.startDate),
+                            lte: new Date(dateRange.endDate)
+                        }
                     }
                 });
                 break;
@@ -82,8 +86,12 @@ async function gatherReportData(approverUsername, dateRange, metrics) {
             case 'rejections':
                 data.metrics.rejections = await prisma.post.count({
                     where: {
-                        ...baseFilter,
-                        post_status: 'rejected'
+                        approver_id: approver.id,
+                        status: 'suspended',
+                        updatedAt: {
+                            gte: new Date(dateRange.startDate),
+                            lte: new Date(dateRange.endDate)
+                        }
                     }
                 });
                 break;

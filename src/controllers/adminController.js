@@ -247,7 +247,8 @@ exports.searchPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -256,6 +257,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -302,6 +304,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -386,7 +389,8 @@ exports.getDashboardData = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -395,6 +399,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -441,6 +446,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -555,7 +561,8 @@ exports.getPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -564,6 +571,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -610,6 +618,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -676,7 +685,8 @@ exports.getPendingPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -685,6 +695,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -731,6 +742,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -860,7 +872,8 @@ exports.updatePostStatus = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -869,6 +882,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -915,6 +929,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -949,7 +964,8 @@ exports.getFlaggedPosts = async (req, res) => {
 // Keeping for backward compatibility but should be removed in future versions
 // Use the version with date filtering instead
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -958,6 +974,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -1004,6 +1021,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -1102,7 +1120,8 @@ exports.manageUserAccount = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -1111,6 +1130,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -1157,6 +1177,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -1250,7 +1271,8 @@ exports.getApprovedPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -1259,6 +1281,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -1305,6 +1328,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -1358,7 +1382,8 @@ exports.getAllVideos = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -1367,6 +1392,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -1413,6 +1439,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -1530,7 +1557,8 @@ exports.registerApprover = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -1539,6 +1567,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -1585,6 +1614,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -1940,11 +1970,11 @@ exports.getApproverStats = async (req, res) => {
                     }
                 }
             }),
-            // Rejected posts
+            // Rejected posts (suspended status)
             prisma.post.count({
                 where: {
                     approver_id: approverId,
-                    status: 'rejected',
+                    status: 'suspended',
                     updatedAt: {
                         gte: startDate
                     }
@@ -2156,9 +2186,8 @@ exports.getApproverAnalytics = async (req, res) => {
             analyticsData[key].total++;
             if (post.status === 'active') {
                 analyticsData[key].approved++;
-            } else if (post.status === 'rejected') {
-                analyticsData[key].rejected++;
             } else if (post.status === 'suspended') {
+                analyticsData[key].rejected++;
                 analyticsData[key].suspended++;
             }
         });
@@ -2171,7 +2200,7 @@ exports.getApproverAnalytics = async (req, res) => {
         // Calculate totals
         const totals = {
             approved: posts.filter(p => p.status === 'active').length,
-            rejected: posts.filter(p => p.status === 'rejected').length,
+            rejected: posts.filter(p => p.status === 'suspended').length,
             suspended: posts.filter(p => p.status === 'suspended').length,
             total: posts.length
         };
@@ -2239,7 +2268,14 @@ exports.getApproverReviewedPosts = async (req, res) => {
         if (status || decision) {
             const decisionStatus = status || decision;
             if (['active', 'approved', 'rejected', 'suspended'].includes(decisionStatus)) {
-                whereClause.status = decisionStatus === 'approved' ? 'active' : decisionStatus;
+                // Map user-friendly status names to enum values
+                if (decisionStatus === 'approved') {
+                    whereClause.status = 'active';
+                } else if (decisionStatus === 'rejected') {
+                    whereClause.status = 'suspended';
+                } else {
+                    whereClause.status = decisionStatus;
+                }
             }
         }
 
@@ -2293,8 +2329,8 @@ exports.getApproverReviewedPosts = async (req, res) => {
             video_url: post.video_url,
             status: post.status,
             decision: post.status === 'active' ? 'approved' : 
-                    post.status === 'rejected' ? 'rejected' : 
-                    post.status === 'suspended' ? 'suspended' : post.status,
+                    post.status === 'suspended' ? 'rejected' : 
+                    post.status === 'draft' ? 'pending' : post.status,
             reviewedAt: post.updatedAt,
             approvedAt: post.approved_at,
             user: post.user,
@@ -2321,7 +2357,7 @@ exports.getApproverReviewedPosts = async (req, res) => {
             prisma.post.count({
                 where: {
                     approver_id: approverId,
-                    status: 'rejected',
+                    status: 'suspended',
                     ...(startDate || endDate ? {
                         updatedAt: {
                             ...(startDate ? { gte: new Date(startDate) } : {}),
@@ -2380,7 +2416,8 @@ exports.getApproverReviewedPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -2389,6 +2426,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -2435,6 +2473,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -2494,7 +2533,8 @@ exports.sendMessageToAllUsers = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -2503,6 +2543,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -2549,6 +2590,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -2607,7 +2649,8 @@ exports.sendMessageToApprovers = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -2616,6 +2659,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -2662,6 +2706,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -2727,7 +2772,8 @@ exports.getAdminDashboardStats = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -2736,6 +2782,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -2782,6 +2829,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -2842,7 +2890,8 @@ exports.uploadAd = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -2851,6 +2900,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -2897,6 +2947,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3002,7 +3053,8 @@ exports.getAllUsers = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3011,6 +3063,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3057,6 +3110,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3126,7 +3180,8 @@ exports.getRecentActivity = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3135,6 +3190,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3181,6 +3237,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3280,7 +3337,8 @@ exports.getApprovers = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3289,6 +3347,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3335,6 +3394,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3468,7 +3528,8 @@ exports.getApproverDetails = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3477,6 +3538,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3523,6 +3585,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3587,7 +3650,8 @@ exports.updateApproverStatus = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3596,6 +3660,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3642,6 +3707,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3706,7 +3772,8 @@ exports.getProfile = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3715,6 +3782,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3761,6 +3829,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3846,7 +3915,8 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3855,6 +3925,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -3901,6 +3972,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -3972,7 +4044,8 @@ exports.changePassword = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -3981,6 +4054,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4027,6 +4101,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4083,7 +4158,8 @@ exports.getRecentPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4092,6 +4168,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4138,6 +4215,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4193,7 +4271,8 @@ exports.getMostViewedPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4202,6 +4281,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4248,6 +4328,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4337,7 +4418,8 @@ exports.searchByTraceId = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4346,6 +4428,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4392,6 +4475,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4425,7 +4509,7 @@ exports.getRejectedPosts = async (req, res) => {
     try {
         const posts = await prisma.post.findMany({
             where: {
-                status: 'rejected'
+                status: 'suspended'
             },
             include: {
                 user: {
@@ -4469,7 +4553,8 @@ exports.getRejectedPosts = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4478,6 +4563,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4524,6 +4610,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4582,13 +4669,15 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
             approver_id: approverId
         };
 
-        // Filter by status if provided
-        if (status === 'approved' || status === 'rejected') {
-            whereClause.status = status;
+        // Filter by status if provided (map user-friendly names to enum values)
+        if (status === 'approved' || status === 'active') {
+            whereClause.status = 'active';
+        } else if (status === 'rejected' || status === 'suspended') {
+            whereClause.status = 'suspended';
         } else {
-            // Default: get both approved and rejected
+            // Default: get both approved and rejected (active and suspended)
             whereClause.status = {
-                in: ['approved', 'rejected']
+                in: ['active', 'suspended']
             };
         }
 
@@ -4624,13 +4713,13 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
             prisma.post.count({
                 where: {
                     approver_id: approverId,
-                    status: 'approved'
+                    status: 'active'
                 }
             }),
             prisma.post.count({
                 where: {
                     approver_id: approverId,
-                    status: 'rejected'
+                    status: 'suspended'
                 }
             })
         ]);
@@ -4669,7 +4758,8 @@ exports.getAllApprovedPostsByApprover = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4678,6 +4768,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4724,6 +4815,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -4756,36 +4848,36 @@ exports.getFlaggedPosts = async (req, res) => {
 exports.getUsersStats = async (req, res) => {
     try {
         // Get total number of users
-        const totalUsers = await User.count();
+        const totalUsers = await prisma.user.count();
 
         // Get number of active users
-        const activeUsers = await User.count({
+        const activeUsers = await prisma.user.count({
             where: {
                 status: 'active'
             }
         });
 
-        // Get number of frozen users
-        const frozenUsers = await User.count({
+        // Get number of frozen users (user status, not post status)
+        const frozenUsers = await prisma.user.count({
             where: {
                 status: 'frozen'
             }
         });
 
         // Get total number of posts
-        const totalPosts = await Post.count();
+        const totalPosts = await prisma.post.count();
 
-        // Get number of approved posts
-        const approvedPosts = await Post.count({
+        // Get number of approved posts (active status)
+        const approvedPosts = await prisma.post.count({
             where: {
-                status: 'approved'
+                status: 'active'
             }
         });
 
-        // Get number of pending posts
-        const pendingPosts = await Post.count({
+        // Get number of pending posts (draft status)
+        const pendingPosts = await prisma.post.count({
             where: {
-                status: 'pending'
+                status: 'draft'
             }
         });
 
@@ -4813,7 +4905,8 @@ exports.getUsersStats = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -4822,6 +4915,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -4868,6 +4962,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -5093,7 +5188,8 @@ exports.getUserStats = async (req, res) => {
     }
 };
 
-// Get flagged posts (posts with 5+ reports)
+// Get flagged posts (posts with 5+ reports or manually flagged by admin/approver)
+// Flagged posts have status 'suspended' and is_frozen: true
 exports.getFlaggedPosts = async (req, res) => {
     try {
         const { page = 1, limit = 10 } = req.query;
@@ -5102,6 +5198,7 @@ exports.getFlaggedPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 },
                 include: {
@@ -5148,6 +5245,7 @@ exports.getFlaggedPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             })
@@ -5241,6 +5339,7 @@ exports.getDashboardStats = async (req, res) => {
             // Flagged Contents (frozen posts)
             prisma.post.count({
                 where: { 
+                    status: 'suspended',
                     is_frozen: true
                 }
             }),

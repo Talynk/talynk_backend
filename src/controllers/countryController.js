@@ -272,7 +272,7 @@ exports.getCountryStats = async (req, res) => {
                     user: {
                         country_id: parseInt(id)
                     },
-                    status: 'approved'
+                    status: 'active'
                 }
             })
         ]);

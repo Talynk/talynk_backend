@@ -830,18 +830,28 @@ exports.getUserPostsById = async (req, res) => {
         const status = req.query.status || 'approved'; // Default to approved if no status specified
 
         // Validate status parameter
-        const validStatuses = ['approved', 'pending', 'rejected'];
+        const validStatuses = ['approved', 'pending', 'rejected', 'draft', 'active', 'suspended'];
         if (status && !validStatuses.includes(status)) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Invalid status parameter. Must be one of: approved, pending, rejected'
+                message: 'Invalid status parameter. Must be one of: approved, pending, rejected, draft, active, suspended'
             });
         }
+
+        // Map user-friendly status names to enum values
+        const statusMap = {
+            'pending': 'draft',
+            'approved': 'active',
+            'rejected': 'suspended',
+            'draft': 'draft',
+            'active': 'active',
+            'suspended': 'suspended'
+        };
 
         // Build where clause based on status parameter
         const whereClause = { user_id: userId };
         if (status) {
-            whereClause.status = status;
+            whereClause.status = statusMap[status] || status;
         }
 
         // Use Prisma to get posts with count
@@ -955,7 +965,7 @@ exports.getUserApprovedPosts = async (req, res) => {
             prisma.post.findMany({
                 where: {
                     user_id: userId,
-                    status: 'approved'
+                    status: 'active'
                 },
                 include: {
                     category: {
@@ -979,7 +989,7 @@ exports.getUserApprovedPosts = async (req, res) => {
             prisma.post.count({
                 where: {
                     user_id: userId,
-                    status: 'approved'
+                    status: 'active'
                 }
             })
         ]);

@@ -195,7 +195,7 @@ exports.getTrendingPosts = async (req, res) => {
         // Get posts with recent activity
         const trendingPosts = await prisma.post.findMany({
             where: {
-                status: 'approved',
+                status: 'active',
                 is_frozen: false,
                 createdAt: {
                     gte: timeThreshold
