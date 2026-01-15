@@ -75,13 +75,13 @@ const followUser = async (req, res) => {
     }
 
     // Check if the user to follow exists
-    const [userToFollow] = await db.sequelize.query(
-      `SELECT id FROM users WHERE id = $1 AND status = 'active'`,
-      {
-        bind: [followingId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
+    const userToFollow = await prisma.user.findFirst({
+      where: {
+        id: followingId,
+        status: 'active'
+      },
+      select: { id: true }
+    });
 
     if (!userToFollow) {
       return res.status(404).json({
@@ -91,14 +91,12 @@ const followUser = async (req, res) => {
     }
 
     // Check if already following
-    const [existingFollow] = await db.sequelize.query(
-      `SELECT id FROM follows 
-       WHERE "followerId" = $1 AND "followingId" = $2`,
-      {
-        bind: [followerId, followingId],
-        type: db.sequelize.QueryTypes.SELECT
+    const existingFollow = await prisma.follow.findFirst({
+      where: {
+        followerId: followerId,
+        followingId: followingId
       }
-    );
+    });
 
     if (existingFollow) {
       return res.status(400).json({
@@ -107,47 +105,29 @@ const followUser = async (req, res) => {
       });
     }
 
-    // Create new follow relationship
-    await db.sequelize.query(
-      `INSERT INTO follows ("followerId", "followingId", "createdAt", "updatedAt")
-       VALUES ($1, $2, NOW(), NOW())`,
-      {
-        bind: [followerId, followingId],
-        type: db.sequelize.QueryTypes.INSERT
-      }
-    );
+    // Create new follow relationship and update follower count in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Create follow relationship
+      await tx.follow.create({
+        data: {
+          followerId: followerId,
+          followingId: followingId
+        }
+      });
 
-    // Update follower count for the followed user
-    await db.sequelize.query(
-      `UPDATE users 
-       SET follower_count = follower_count + 1
-       WHERE id = $1`,
-      {
-        bind: [followingId],
-        type: db.sequelize.QueryTypes.UPDATE
-      }
-    );
+      // Update follower count for the followed user
+      await tx.user.update({
+        where: { id: followingId },
+        data: {
+          follower_count: {
+            increment: 1
+          }
+        }
+      });
+    });
 
     // Create a notification for the followed user
-    const [follower] = await db.sequelize.query(
-      `SELECT username FROM users WHERE id = $1`,
-      {
-        bind: [followerId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
-
-    await db.sequelize.query(
-      `INSERT INTO notifications (user_id, notification_text, notification_date, is_read)
-       VALUES ($1, $2, NOW(), false)`,
-      {
-        bind: [
-          followingId, 
-          `${follower.username} started following you`, 
-        ],
-        type: db.sequelize.QueryTypes.INSERT
-      }
-    );
+    await createFollowNotification(followerId, followingId);
 
     res.status(200).json({
       status: 'success',
@@ -177,14 +157,12 @@ const unfollowUser = async (req, res) => {
     }
 
     // Check if the follow relationship exists
-    const [follow] = await db.sequelize.query(
-      `SELECT id FROM follows 
-       WHERE "followerId" = $1 AND "followingId" = $2`,
-      {
-        bind: [followerId, followingId],
-        type: db.sequelize.QueryTypes.SELECT
+    const follow = await prisma.follow.findFirst({
+      where: {
+        followerId: followerId,
+        followingId: followingId
       }
-    );
+    });
 
     if (!follow) {
       return res.status(404).json({
@@ -193,26 +171,26 @@ const unfollowUser = async (req, res) => {
       });
     }
 
-    // Delete the follow relationship
-    await db.sequelize.query(
-      `DELETE FROM follows 
-       WHERE "followerId" = $1 AND "followingId" = $2`,
-      {
-        bind: [followerId, followingId],
-        type: db.sequelize.QueryTypes.DELETE
-      }
-    );
+    // Delete the follow relationship and update follower count in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete follow relationship
+      await tx.follow.delete({
+        where: { id: follow.id }
+      });
 
-    // Update follower count for the unfollowed user
-    await db.sequelize.query(
-      `UPDATE users 
-       SET follower_count = GREATEST(follower_count - 1, 0)
-       WHERE id = $1`,
-      {
-        bind: [followingId],
-        type: db.sequelize.QueryTypes.UPDATE
-      }
-    );
+      // Update follower count for the unfollowed user (ensure it doesn't go below 0)
+      const user = await tx.user.findUnique({
+        where: { id: followingId },
+        select: { follower_count: true }
+      });
+
+      await tx.user.update({
+        where: { id: followingId },
+        data: {
+          follower_count: Math.max((user?.follower_count || 0) - 1, 0)
+        }
+      });
+    });
 
     res.status(200).json({
       status: 'success',
@@ -237,13 +215,10 @@ const getFollowers = async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     // Check if user exists
-    const [user] = await db.sequelize.query(
-      `SELECT id FROM users WHERE id = $1`,
-      {
-        bind: [userId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true }
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -253,50 +228,50 @@ const getFollowers = async (req, res) => {
     }
 
     // Get total count
-    const [countResult] = await db.sequelize.query(
-      `SELECT COUNT(*) as count
-       FROM follows
-       WHERE "followingId" = $1`,
-      {
-        bind: [userId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
-    
-    const totalCount = parseInt(countResult.count);
+    const totalCount = await prisma.follow.count({
+      where: { followingId: userId }
+    });
 
     // Find followers with pagination
-    const followers = await db.sequelize.query(
-      `SELECT 
-          u.id, 
-          u.username, 
-          u.profile_picture, 
-          u.bio,
-          CASE 
-              WHEN u.role = 'admin' OR u.role = 'approver' THEN true
-              ELSE false
-          END AS "isVerified",
-          CASE 
-              WHEN EXISTS (
-                  SELECT 1 FROM follows 
-                  WHERE "followerId" = $1 AND "followingId" = u.id
-              ) THEN true
-              ELSE false
-          END AS "isFollowing"
-       FROM users u
-       JOIN follows f ON u.id = f."followerId"
-       WHERE f."followingId" = $2
-       ORDER BY f."createdAt" DESC
-       LIMIT $3 OFFSET $4`,
-      {
-        bind: [
-          currentUserId || '00000000-0000-0000-0000-000000000000', // Use a dummy ID if not logged in
-          userId,
-          limit,
-          offset
-        ],
-        type: db.sequelize.QueryTypes.SELECT
-      }
+    const follows = await prisma.follow.findMany({
+      where: { followingId: userId },
+      include: {
+        follower: {
+          select: {
+            id: true,
+            username: true,
+            profile_picture: true,
+            role: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset
+    });
+
+    // Check if current user is following each follower
+    const followers = await Promise.all(
+      follows.map(async (follow) => {
+        let isFollowing = false;
+        if (currentUserId) {
+          const followCheck = await prisma.follow.findFirst({
+            where: {
+              followerId: currentUserId,
+              followingId: follow.follower.id
+            }
+          });
+          isFollowing = !!followCheck;
+        }
+
+        return {
+          id: follow.follower.id,
+          username: follow.follower.username,
+          profile_picture: follow.follower.profile_picture,
+          isVerified: follow.follower.role === 'admin' || follow.follower.role === 'approver',
+          isFollowing: isFollowing
+        };
+      })
     );
 
     const hasMore = offset + followers.length < totalCount;
@@ -328,13 +303,10 @@ const getFollowing = async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
     // Check if user exists
-    const [user] = await db.sequelize.query(
-      `SELECT id FROM users WHERE id = $1`,
-      {
-        bind: [userId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true }
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -344,50 +316,50 @@ const getFollowing = async (req, res) => {
     }
 
     // Get total count
-    const [countResult] = await db.sequelize.query(
-      `SELECT COUNT(*) as count
-       FROM follows
-       WHERE "followerId" = $1`,
-      {
-        bind: [userId],
-        type: db.sequelize.QueryTypes.SELECT
-      }
-    );
-    
-    const totalCount = parseInt(countResult.count);
+    const totalCount = await prisma.follow.count({
+      where: { followerId: userId }
+    });
 
     // Find following with pagination
-    const following = await db.sequelize.query(
-      `SELECT 
-          u.id, 
-          u.username, 
-          u.profile_picture, 
-          u.bio,
-          CASE 
-              WHEN u.role = 'admin' OR u.role = 'approver' THEN true
-              ELSE false
-          END AS "isVerified",
-          CASE 
-              WHEN EXISTS (
-                  SELECT 1 FROM follows 
-                  WHERE "followerId" = $1 AND "followingId" = u.id
-              ) THEN true
-              ELSE false
-          END AS "isFollowing"
-       FROM users u
-       JOIN follows f ON u.id = f."followingId"
-       WHERE f."followerId" = $2
-       ORDER BY f."createdAt" DESC
-       LIMIT $3 OFFSET $4`,
-      {
-        bind: [
-          currentUserId || '00000000-0000-0000-0000-000000000000', // Use a dummy ID if not logged in
-          userId,
-          limit,
-          offset
-        ],
-        type: db.sequelize.QueryTypes.SELECT
-      }
+    const follows = await prisma.follow.findMany({
+      where: { followerId: userId },
+      include: {
+        following: {
+          select: {
+            id: true,
+            username: true,
+            profile_picture: true,
+            role: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset
+    });
+
+    // Check if current user is following each user in the following list
+    const following = await Promise.all(
+      follows.map(async (follow) => {
+        let isFollowing = false;
+        if (currentUserId) {
+          const followCheck = await prisma.follow.findFirst({
+            where: {
+              followerId: currentUserId,
+              followingId: follow.following.id
+            }
+          });
+          isFollowing = !!followCheck;
+        }
+
+        return {
+          id: follow.following.id,
+          username: follow.following.username,
+          profile_picture: follow.following.profile_picture,
+          isVerified: follow.following.role === 'admin' || follow.following.role === 'approver',
+          isFollowing: isFollowing
+        };
+      })
     );
 
     const hasMore = offset + following.length < totalCount;
@@ -416,21 +388,17 @@ const checkFollowStatus = async (req, res) => {
     const { followingId } = req.params;
 
     // Check follow status
-    const [result] = await db.sequelize.query(
-      `SELECT EXISTS(
-          SELECT 1 FROM follows 
-          WHERE "followerId" = $1 AND "followingId" = $2
-      ) as "isFollowing"`,
-      {
-        bind: [followerId, followingId],
-        type: db.sequelize.QueryTypes.SELECT
+    const follow = await prisma.follow.findFirst({
+      where: {
+        followerId: followerId,
+        followingId: followingId
       }
-    );
+    });
 
     res.status(200).json({
       status: 'success',
       data: { 
-        isFollowing: result.isFollowing
+        isFollowing: !!follow
       }
     });
   } catch (error) {
@@ -448,4 +416,4 @@ module.exports = {
   getFollowers,
   getFollowing,
   checkFollowStatus
-}; 
+};
