@@ -32,7 +32,7 @@ exports.getPersonalizedFeed = async (req, res) => {
 
         // Build recommendation query
         let whereClause = {
-            status: 'approved',
+            status: 'active',
             is_frozen: false
         };
 
@@ -140,7 +140,7 @@ exports.getTrendingPosts = async (req, res) => {
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     createdAt: {
                         gte: daysAgo
@@ -178,7 +178,7 @@ exports.getTrendingPosts = async (req, res) => {
             }),
             prisma.post.count({
                 where: {
-                    status: 'approved',
+                    status: 'active',
                     is_frozen: false,
                     createdAt: {
                         gte: daysAgo
@@ -236,7 +236,7 @@ exports.getRecommendedCategories = async (req, res) => {
                     select: {
                         posts: {
                             where: {
-                                status: 'approved',
+                                status: 'active',
                                 is_frozen: false
                             }
                         }
