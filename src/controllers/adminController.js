@@ -860,6 +860,16 @@ exports.updatePostStatus = async (req, res) => {
             console.log(`Notification sent to user ${post.user.id} for post ${post.id} with status ${status}`);
         }
 
+        // Check and auto-suspend user if they have 3+ suspended posts
+        if (mappedStatus === 'suspended' && post.user_id) {
+            const { checkAndSuspendUser } = require('../utils/userSuspensionService');
+            const suspensionResult = await checkAndSuspendUser(post.user_id, req.body.id);
+            
+            if (suspensionResult.suspended) {
+                console.log(`[Admin] User ${post.user?.username} automatically suspended: ${suspensionResult.message}`);
+            }
+        }
+
         res.json({
             status: 'success',
             message: `Post ${status} successfully`
@@ -3046,13 +3056,30 @@ exports.getAllUsers = async (req, res) => {
             totalViewsMap[view.user_id] = view._sum.views || 0;
         });
 
-        // Enhance user objects with post counts and total views
+        // Get suspended posts count for all users
+        const suspendedCounts = await prisma.post.groupBy({
+            by: ['user_id'],
+            where: { status: 'suspended' },
+            _count: {
+                id: true
+            }
+        });
+
+        const suspendedCountMap = {};
+        suspendedCounts.forEach(count => {
+            suspendedCountMap[count.user_id] = count._count.id;
+        });
+
+        // Enhance user objects with post counts, total views, and suspended posts count
         const enhancedUsers = users.map(user => {
+            const suspendedPostsCount = suspendedCountMap[user.id] || 0;
             return {
                 ...user,
                 postsApproved: approvedCountMap[user.id] || 0,
                 postsPending: pendingCountMap[user.id] || 0,
-                totalPostViews: totalViewsMap[user.id] || 0
+                totalPostViews: totalViewsMap[user.id] || 0,
+                suspendedPostsCount: suspendedPostsCount,
+                isAtSuspensionThreshold: suspendedPostsCount >= 3 && user.status === 'active'
             };
         });
 
