@@ -379,15 +379,27 @@ exports.toggleNotifications = async (req, res) => {
 
 // Get user notifications
 exports.getNotifications = async (req, res) => {
-    console.log("Hiitting User id -------> " + req.user.id);
     try {
+        // Get user's username first
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { username: true }
+        });
+
+        if (!user || !user.username) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
         const notifications = await prisma.notification.findMany({
-            where: { userID: req.user.id },
+            where: { userID: user.username },
             orderBy: {
                 createdAt: 'desc'
             }
         });
-console.log("User id -------> " + req.user.id);
+
         res.json({
             status: 'success',
             data: { notifications }
@@ -655,13 +667,23 @@ exports.deleteUser = async (req, res) => {
 
 exports.markAllNotificationsAsRead = async (req, res) => {
     try {
-        const userId = req.user.id;
-        console.log(`Marking all notifications as read for user ID: ${userId}`);
+        // Get user's username first
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { username: true }
+        });
+
+        if (!user || !user.username) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
         
         // Update all unread notifications for the user
         const result = await prisma.notification.updateMany({
             where: { 
-                userID: userId,
+                userID: user.username,
                 isRead: false
             },
             data: {
@@ -671,13 +693,158 @@ exports.markAllNotificationsAsRead = async (req, res) => {
         
         res.json({
             status: 'success',
-            message: 'All notifications marked as read'
+            message: 'All notifications marked as read',
+            data: { count: result.count }
         });
     } catch (error) {
         console.error('Error marking notifications as read:', error);
         res.status(500).json({
             status: 'error',
             message: 'Error marking notifications as read',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Mark single notification as read
+exports.markNotificationAsRead = async (req, res) => {
+    try {
+        const { notificationId } = req.params;
+        
+        // Get user's username first
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { username: true }
+        });
+
+        if (!user || !user.username) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Check if notification exists and belongs to user
+        const notification = await prisma.notification.findFirst({
+            where: {
+                id: notificationId,
+                userID: user.username
+            }
+        });
+
+        if (!notification) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Notification not found'
+            });
+        }
+
+        // Update notification
+        const updatedNotification = await prisma.notification.update({
+            where: { id: notificationId },
+            data: { isRead: true }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Notification marked as read',
+            data: { notification: updatedNotification }
+        });
+    } catch (error) {
+        console.error('Error marking notification as read:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error marking notification as read',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Delete single notification
+exports.deleteNotification = async (req, res) => {
+    try {
+        const { notificationId } = req.params;
+        
+        // Get user's username first
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { username: true }
+        });
+
+        if (!user || !user.username) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Check if notification exists and belongs to user
+        const notification = await prisma.notification.findFirst({
+            where: {
+                id: notificationId,
+                userID: user.username
+            }
+        });
+
+        if (!notification) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Notification not found'
+            });
+        }
+
+        // Delete notification
+        await prisma.notification.delete({
+            where: { id: notificationId }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Notification deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting notification:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error deleting notification',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Delete all notifications
+exports.deleteAllNotifications = async (req, res) => {
+    try {
+        // Get user's username first
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { username: true }
+        });
+
+        if (!user || !user.username) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        // Delete all notifications for the user
+        const result = await prisma.notification.deleteMany({
+            where: { 
+                userID: user.username
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'All notifications deleted successfully',
+            data: { count: result.count }
+        });
+    } catch (error) {
+        console.error('Error deleting notifications:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error deleting notifications',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

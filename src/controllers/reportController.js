@@ -112,6 +112,16 @@ exports.reportPost = async (req, res) => {
                     });
                 }
             }
+
+            // Check and auto-suspend user if they have 3+ suspended posts
+            if (post.user_id) {
+                const { checkAndSuspendUser } = require('../utils/userSuspensionService');
+                const suspensionResult = await checkAndSuspendUser(post.user_id, postId);
+                
+                if (suspensionResult.suspended) {
+                    console.log(`[Report] User automatically suspended: ${suspensionResult.message}`);
+                }
+            }
         }
 
         res.status(201).json({

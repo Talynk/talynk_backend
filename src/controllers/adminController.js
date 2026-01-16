@@ -1,4 +1,59 @@
 const prisma = require('../lib/prisma');
+
+/**
+ * Get Admin ID from user (handles both Admin records and Users with admin role)
+ * @param {string} userId - User/Admin ID from JWT token
+ * @param {string} userRole - User role from JWT token
+ * @returns {Promise<string|null>} Admin ID or null if not found
+ */
+const getAdminId = async (userId, userRole) => {
+    if (userRole !== 'admin') {
+        return null;
+    }
+
+    // Check if it's an Admin record
+    const admin = await prisma.admin.findUnique({
+        where: { id: userId }
+    });
+    
+    if (admin) {
+        return admin.id;
+    }
+    
+    // User with admin role - find or create Admin record
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, email: true }
+    });
+    
+    if (!user) {
+        return null;
+    }
+    
+    // Try to find Admin by username or email
+    let adminRecord = await prisma.admin.findFirst({
+        where: {
+            OR: [
+                { username: user.username },
+                { email: user.email }
+            ]
+        }
+    });
+    
+    // If no Admin record exists, create one
+    if (!adminRecord) {
+        adminRecord = await prisma.admin.create({
+            data: {
+                username: user.username || `admin_${userId.substring(0, 8)}`,
+                email: user.email || `admin_${userId}@talynk.com`,
+                password: '', // Password not needed for existing user
+                status: 'active'
+            }
+        });
+    }
+    
+    return adminRecord.id;
+};
 const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
@@ -847,7 +902,7 @@ exports.updatePostStatus = async (req, res) => {
 
             // Insert notification (userID must be username, not user ID)
             if (post.user?.username) {
-                await prisma.notification.create({
+                const notification = await prisma.notification.create({
                     data: {
                         userID: post.user.username,
                         message: notificationText,
@@ -855,9 +910,38 @@ exports.updatePostStatus = async (req, res) => {
                         isRead: false
                     }
                 });
+
+                // Emit real-time notification event
+                const { emitEvent } = require('../lib/realtime');
+                emitEvent('notification:created', {
+                    userId: post.user.id,
+                    userID: post.user.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt,
+                        metadata: {
+                            postId: post.id,
+                            postTitle: post.title,
+                            status: mappedStatus
+                        }
+                    }
+                });
             }
             
             console.log(`Notification sent to user ${post.user.id} for post ${post.id} with status ${status}`);
+        }
+
+        // Check and auto-suspend user if they have 3+ suspended posts
+        if (mappedStatus === 'suspended' && post.user_id) {
+            const { checkAndSuspendUser } = require('../utils/userSuspensionService');
+            const suspensionResult = await checkAndSuspendUser(post.user_id, req.body.id);
+            
+            if (suspensionResult.suspended) {
+                console.log(`[Admin] User ${post.user?.username} automatically suspended: ${suspensionResult.message}`);
+            }
         }
 
         res.json({
@@ -3046,13 +3130,30 @@ exports.getAllUsers = async (req, res) => {
             totalViewsMap[view.user_id] = view._sum.views || 0;
         });
 
-        // Enhance user objects with post counts and total views
+        // Get suspended posts count for all users
+        const suspendedCounts = await prisma.post.groupBy({
+            by: ['user_id'],
+            where: { status: 'suspended' },
+            _count: {
+                id: true
+            }
+        });
+
+        const suspendedCountMap = {};
+        suspendedCounts.forEach(count => {
+            suspendedCountMap[count.user_id] = count._count.id;
+        });
+
+        // Enhance user objects with post counts, total views, and suspended posts count
         const enhancedUsers = users.map(user => {
+            const suspendedPostsCount = suspendedCountMap[user.id] || 0;
             return {
                 ...user,
                 postsApproved: approvedCountMap[user.id] || 0,
                 postsPending: pendingCountMap[user.id] || 0,
-                totalPostViews: totalViewsMap[user.id] || 0
+                totalPostViews: totalViewsMap[user.id] || 0,
+                suspendedPostsCount: suspendedPostsCount,
+                isAtSuspensionThreshold: suspendedPostsCount >= 3 && user.status === 'active'
             };
         });
 
@@ -6492,13 +6593,25 @@ exports.getChallengeById = async (req, res) => {
 exports.approveChallenge = async (req, res) => {
     try {
         const { challengeId } = req.params;
-        const adminId = req.user.id;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        // Get Admin ID - handles both Admin records and Users with admin role
+        const adminId = await getAdminId(userId, userRole);
+
+        if (!adminId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admin ID could not be resolved'
+            });
+        }
 
         const challenge = await prisma.challenge.findUnique({
             where: { id: challengeId },
             include: {
                 organizer: {
                     select: {
+                        id: true,
                         username: true,
                         email: true
                     }
@@ -6554,12 +6667,30 @@ exports.approveChallenge = async (req, res) => {
         });
 
         // Notify organizer
-        await prisma.notification.create({
+        const notification = await prisma.notification.create({
             data: {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been approved and is now ${shouldBeActive ? 'active' : 'approved'}.`,
                 type: 'challenge_approved',
                 isRead: false
+            }
+        });
+
+        // Emit real-time notification event
+        const { emitEvent } = require('../lib/realtime');
+        emitEvent('notification:created', {
+            userId: challenge.organizer.id,
+            userID: challenge.organizer.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt,
+                metadata: {
+                    challengeId: challenge.id,
+                    challengeName: challenge.name
+                }
             }
         });
 
@@ -6590,13 +6721,68 @@ exports.rejectChallenge = async (req, res) => {
     try {
         const { challengeId } = req.params;
         const { reason } = req.body;
-        const adminId = req.user.id;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        // Get Admin ID - check if user is Admin or User with admin role
+        let adminId = null;
+        
+        if (userRole === 'admin') {
+            // Check if it's an Admin record
+            const admin = await prisma.admin.findUnique({
+                where: { id: userId }
+            });
+            
+            if (admin) {
+                adminId = admin.id;
+            } else {
+                // User with admin role - find or create Admin record
+                const user = await prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { username: true, email: true }
+                });
+                
+                if (user) {
+                    // Try to find Admin by username or email
+                    let adminRecord = await prisma.admin.findFirst({
+                        where: {
+                            OR: [
+                                { username: user.username },
+                                { email: user.email }
+                            ]
+                        }
+                    });
+                    
+                    // If no Admin record exists, create one
+                    if (!adminRecord) {
+                        adminRecord = await prisma.admin.create({
+                            data: {
+                                username: user.username || `admin_${userId.substring(0, 8)}`,
+                                email: user.email || `admin_${userId}@talynk.com`,
+                                password: '', // Password not needed for existing user
+                                status: 'active'
+                            }
+                        });
+                    }
+                    
+                    adminId = adminRecord.id;
+                }
+            }
+        }
+
+        if (!adminId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admin ID could not be resolved'
+            });
+        }
 
         const challenge = await prisma.challenge.findUnique({
             where: { id: challengeId },
             include: {
                 organizer: {
                     select: {
+                        id: true,
                         username: true,
                         email: true
                     }
@@ -6627,12 +6813,31 @@ exports.rejectChallenge = async (req, res) => {
         });
 
         // Notify organizer
-        await prisma.notification.create({
+        const notification = await prisma.notification.create({
             data: {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been rejected.${reason ? ' Reason: ' + reason : ''}`,
                 type: 'challenge_rejected',
                 isRead: false
+            }
+        });
+
+        // Emit real-time notification event
+        const { emitEvent } = require('../lib/realtime');
+        emitEvent('notification:created', {
+            userId: challenge.organizer.id,
+            userID: challenge.organizer.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt,
+                metadata: {
+                    challengeId: challenge.id,
+                    challengeName: challenge.name,
+                    reason: reason || null
+                }
             }
         });
 

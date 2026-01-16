@@ -79,36 +79,47 @@ exports.addComment = async (req, res) => {
             }
         });
 
-        // Get post owner's username for notification
-        if (existingPost) {
-            // Create notification using Prisma
-            const postOwner = await prisma.user.findUnique({
-                where: { id: existingPost.user_id },
-                select: { id: true, username: true }
-            });
-
-            if (postOwner) {
-                const notification = await prisma.notification.create({
-                    data: {
-                        userID: postOwner.username || '',
-                        message: `${resolvedUser.username || 'Someone'} commented on your post`,
-                        type: 'comment',
-                        isRead: false
-                    }
+        // Create notification for post owner (if not commenting on own post)
+        if (existingPost && existingPost.user_id !== resolvedUser.id) {
+            try {
+                // Get post owner with notification preference
+                const postOwner = await prisma.user.findUnique({
+                    where: { id: existingPost.user_id },
+                    select: { id: true, username: true, notification: true }
                 });
 
-                // Emit notification event
-                emitEvent('notification:created', {
-                    userId: postOwner.id,
-                    userID: postOwner.username,
-                    notification: {
-                        id: notification.id,
-                        type: notification.type,
-                        message: notification.message,
-                        isRead: notification.isRead,
-                        createdAt: notification.createdAt
-                    }
-                });
+                // Only create notification if:
+                // 1. Post owner exists
+                // 2. Post owner has a username
+                // 3. Post owner has notifications enabled
+                if (postOwner && postOwner.username && postOwner.notification) {
+                    const notification = await prisma.notification.create({
+                        data: {
+                            userID: postOwner.username,
+                            message: `${resolvedUser.username || 'Someone'} commented on your post`,
+                            type: 'comment',
+                            isRead: false
+                        }
+                    });
+
+                    // Emit real-time notification event
+                    emitEvent('notification:created', {
+                        userId: postOwner.id,
+                        userID: postOwner.username,
+                        notification: {
+                            id: notification.id,
+                            type: notification.type,
+                            message: notification.message,
+                            isRead: notification.isRead,
+                            createdAt: notification.createdAt
+                        }
+                    });
+
+                    console.log(`Comment notification created: ${resolvedUser.username} commented on post by ${postOwner.username}`);
+                }
+            } catch (notificationError) {
+                console.error('Error creating comment notification:', notificationError);
+                // Don't throw - notification failure shouldn't break the comment action
             }
         }
 

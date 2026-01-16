@@ -37,7 +37,20 @@ const createLikeNotification = async (likerId, postId) => {
             select: { id: true, username: true, notification: true }
         });
 
-        if (!postOwner || !postOwner.notification) return;
+        // Only create notification if:
+        // 1. Post owner exists
+        // 2. Post owner has a username
+        // 3. Post owner has notifications enabled
+        if (!postOwner || !postOwner.username || !postOwner.notification) {
+            if (!postOwner) {
+                console.log(`Like notification skipped: Post owner not found for post ${postId}`);
+            } else if (!postOwner.username) {
+                console.log(`Like notification skipped: Post owner ${postOwner.id} has no username`);
+            } else if (!postOwner.notification) {
+                console.log(`Like notification skipped: Post owner ${postOwner.username} has notifications disabled`);
+            }
+            return;
+        }
 
         // Create notification
         const notification = await prisma.notification.create({
