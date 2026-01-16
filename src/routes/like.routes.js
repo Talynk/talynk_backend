@@ -15,6 +15,8 @@ router.get('/posts/:postId/status', optionalAuthenticate, likeController.checkLi
 router.post('/posts/batch-status', optionalAuthenticate, likeController.batchCheckLikeStatus);
 // Other routes
 router.get('/posts/:postId/stats', likeController.getPostLikeStats);
+// Public endpoint to get users who liked a post (no authentication required)
+router.get('/posts/:postId/users', likeController.getPostLikes);
 router.get('/user/liked', authenticate, likeController.getLikedPosts);
 
 module.exports = router;
