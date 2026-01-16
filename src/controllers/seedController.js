@@ -5,6 +5,7 @@ const prisma = require('../lib/prisma');
 const CATEGORY_STATUS = 'active';
 
 // Category hierarchy definition
+// Order: Music, Sport, Performance, Beauty, Arts, Communication
 const categoryHierarchy = [
     {
         name: 'Music',
@@ -31,9 +32,48 @@ const categoryHierarchy = [
         ]
     },
     {
+        name: 'Sport',
+        description: 'Sport-related content',
+        sort_order: 2,
+        children: [
+            'Football',
+            'Volleyball',
+            'Basketball',
+            'Handball',
+            'Tennis',
+            'Table tennis',
+            'Golf',
+            'Cricket',
+            'Rugby',
+            'Acrobatics',
+            'Other'
+        ]
+    },
+    {
+        name: 'Performance',
+        description: 'Performance-related content',
+        sort_order: 3,
+        children: [
+            'Drama/Theatre',
+            'Dance',
+            'Comedy',
+            'Other'
+        ]
+    },
+    {
+        name: 'Beauty',
+        description: 'Physical appearance related content',
+        sort_order: 4,
+        children: [
+            'Women Beauty',
+            'Men',
+            'Other'
+        ]
+    },
+    {
         name: 'Arts',
         description: 'Arts-related content',
-        sort_order: 2,
+        sort_order: 5,
         children: [
             'Drawing',
             'Painting',
@@ -52,7 +92,7 @@ const categoryHierarchy = [
     {
         name: 'Communication',
         description: 'Communication-related content',
-        sort_order: 3,
+        sort_order: 6,
         children: [
             'Preaching',
             'Public speaking',
@@ -60,44 +100,6 @@ const categoryHierarchy = [
             'Storytelling',
             'Poetry',
             'Teaching & Training',
-            'Other'
-        ]
-    },
-    {
-        name: 'Physical Appearance',
-        description: 'Physical appearance related content',
-        sort_order: 4,
-        children: [
-            'Women Beauty',
-            'Men'
-        ]
-    },
-    {
-        name: 'Sport',
-        description: 'Sport-related content',
-        sort_order: 5,
-        children: [
-            'Football',
-            'Volleyball',
-            'Basketball',
-            'Handball',
-            'Tennis',
-            'Table tennis',
-            'Golf',
-            'Cricket',
-            'Rugby',
-            'Acrobatics',
-            'Other'
-        ]
-    },
-    {
-        name: 'Performance',
-        description: 'Performance-related content',
-        sort_order: 6,
-        children: [
-            'Drama/Theatre',
-            'Dance',
-            'Comedy',
             'Other'
         ]
     }
@@ -114,6 +116,22 @@ async function upsertCategory({ name, description, level, sort_order, parent_id 
 
 exports.seedCategories = async (req, res) => {
     try {
+        // First, update "Physical Appearance" to "Beauty" if it exists
+        const physicalAppearance = await prisma.category.findFirst({
+            where: {
+                name: 'Physical Appearance',
+                level: 1
+            }
+        });
+
+        if (physicalAppearance) {
+            await prisma.category.update({
+                where: { id: physicalAppearance.id },
+                data: { name: 'Beauty' }
+            });
+        }
+
+        // Process each category in the hierarchy
         for (const top of categoryHierarchy) {
             const parent = await upsertCategory({
                 name: top.name,
@@ -123,14 +141,75 @@ exports.seedCategories = async (req, res) => {
                 parent_id: null
             });
 
+            // Get existing subcategories for this parent
+            const existingSubcategories = await prisma.category.findMany({
+                where: {
+                    parent_id: parent.id,
+                    level: 2
+                }
+            });
+
+            // Create a map of existing subcategories by name
+            const existingMap = new Map(
+                existingSubcategories.map(sub => [sub.name.toLowerCase(), sub])
+            );
+
             let childOrder = 1;
             for (const childName of top.children) {
-                await upsertCategory({
-                    name: childName,
-                    description: `${childName} under ${top.name}`,
-                    level: 2,
-                    sort_order: childOrder++,
-                    parent_id: parent.id
+                const childLower = childName.toLowerCase();
+                const existing = existingMap.get(childLower);
+
+                if (existing) {
+                    // Update existing subcategory's sort_order
+                    await prisma.category.update({
+                        where: { id: existing.id },
+                        data: {
+                            sort_order: childOrder++,
+                            description: `${childName} under ${top.name}`
+                        }
+                    });
+                } else {
+                    // Create new subcategory
+                    await upsertCategory({
+                        name: childName,
+                        description: `${childName} under ${top.name}`,
+                        level: 2,
+                        sort_order: childOrder++,
+                        parent_id: parent.id
+                    });
+                }
+            }
+
+            // Ensure "Other" is the last subcategory
+            const otherSubcategory = await prisma.category.findFirst({
+                where: {
+                    parent_id: parent.id,
+                    name: 'Other',
+                    level: 2
+                }
+            });
+
+            if (otherSubcategory) {
+                // Get the highest sort_order among subcategories
+                const maxSortOrder = await prisma.category.findFirst({
+                    where: {
+                        parent_id: parent.id,
+                        level: 2
+                    },
+                    orderBy: {
+                        sort_order: 'desc'
+                    },
+                    select: {
+                        sort_order: true
+                    }
+                });
+
+                // Update "Other" to be last
+                await prisma.category.update({
+                    where: { id: otherSubcategory.id },
+                    data: {
+                        sort_order: (maxSortOrder?.sort_order || 0) + 1
+                    }
                 });
             }
         }
