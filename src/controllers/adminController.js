@@ -902,12 +902,31 @@ exports.updatePostStatus = async (req, res) => {
 
             // Insert notification (userID must be username, not user ID)
             if (post.user?.username) {
-                await prisma.notification.create({
+                const notification = await prisma.notification.create({
                     data: {
                         userID: post.user.username,
                         message: notificationText,
                         type: 'post_status_update',
                         isRead: false
+                    }
+                });
+
+                // Emit real-time notification event
+                const { emitEvent } = require('../lib/realtime');
+                emitEvent('notification:created', {
+                    userId: post.user.id,
+                    userID: post.user.username,
+                    notification: {
+                        id: notification.id,
+                        type: notification.type,
+                        message: notification.message,
+                        isRead: notification.isRead,
+                        createdAt: notification.createdAt,
+                        metadata: {
+                            postId: post.id,
+                            postTitle: post.title,
+                            status: mappedStatus
+                        }
                     }
                 });
             }
@@ -6592,6 +6611,7 @@ exports.approveChallenge = async (req, res) => {
             include: {
                 organizer: {
                     select: {
+                        id: true,
                         username: true,
                         email: true
                     }
@@ -6647,12 +6667,30 @@ exports.approveChallenge = async (req, res) => {
         });
 
         // Notify organizer
-        await prisma.notification.create({
+        const notification = await prisma.notification.create({
             data: {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been approved and is now ${shouldBeActive ? 'active' : 'approved'}.`,
                 type: 'challenge_approved',
                 isRead: false
+            }
+        });
+
+        // Emit real-time notification event
+        const { emitEvent } = require('../lib/realtime');
+        emitEvent('notification:created', {
+            userId: challenge.organizer.id,
+            userID: challenge.organizer.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt,
+                metadata: {
+                    challengeId: challenge.id,
+                    challengeName: challenge.name
+                }
             }
         });
 
@@ -6744,6 +6782,7 @@ exports.rejectChallenge = async (req, res) => {
             include: {
                 organizer: {
                     select: {
+                        id: true,
                         username: true,
                         email: true
                     }
@@ -6774,12 +6813,31 @@ exports.rejectChallenge = async (req, res) => {
         });
 
         // Notify organizer
-        await prisma.notification.create({
+        const notification = await prisma.notification.create({
             data: {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been rejected.${reason ? ' Reason: ' + reason : ''}`,
                 type: 'challenge_rejected',
                 isRead: false
+            }
+        });
+
+        // Emit real-time notification event
+        const { emitEvent } = require('../lib/realtime');
+        emitEvent('notification:created', {
+            userId: challenge.organizer.id,
+            userID: challenge.organizer.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt,
+                metadata: {
+                    challengeId: challenge.id,
+                    challengeName: challenge.name,
+                    reason: reason || null
+                }
             }
         });
 

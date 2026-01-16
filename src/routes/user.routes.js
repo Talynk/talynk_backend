@@ -19,6 +19,9 @@ router.post('/searches', authenticate, userController.addSearchTerm);
 router.put('/notifications', authenticate, userController.toggleNotifications);
 router.get('/notifications', authenticate, userController.getNotifications);
 router.put('/notifications/read-all', authenticate, userController.markAllNotificationsAsRead);
+router.put('/notifications/:notificationId/read', authenticate, userController.markNotificationAsRead);
+router.delete('/notifications/:notificationId', authenticate, userController.deleteNotification);
+router.delete('/notifications', authenticate, userController.deleteAllNotifications);
 
 // Public user profile routes
 router.get('/:id', userController.getUserProfileById);
