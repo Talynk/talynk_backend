@@ -4,6 +4,72 @@ const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 
 /**
+ * Create a notification when a user likes a post
+ */
+const createLikeNotification = async (likerId, postId) => {
+    try {
+        // Get the post and its owner
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: { id: true, username: true }
+                }
+            }
+        });
+
+        if (!post || !post.user) return;
+
+        // Don't notify if user is liking their own post
+        if (post.user_id === likerId) return;
+
+        // Get the liker's username
+        const liker = await prisma.user.findUnique({
+            where: { id: likerId },
+            select: { id: true, username: true }
+        });
+
+        if (!liker || !liker.username) return;
+
+        // Check if user has notifications enabled
+        const postOwner = await prisma.user.findUnique({
+            where: { id: post.user_id },
+            select: { id: true, username: true, notification: true }
+        });
+
+        if (!postOwner || !postOwner.notification) return;
+
+        // Create notification
+        const notification = await prisma.notification.create({
+            data: {
+                userID: postOwner.username,
+                message: `${liker.username} liked your post: ${post.title || 'Untitled'}`,
+                type: 'like',
+                isRead: false
+            }
+        });
+
+        // Emit real-time notification event
+        emitEvent('notification:created', {
+            userId: postOwner.id,
+            userID: postOwner.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt
+            }
+        });
+
+        console.log(`Like notification created: ${liker.username} liked post by ${postOwner.username}`);
+    } catch (error) {
+        console.error('Error creating like notification:', error);
+        // Don't throw - notification failure shouldn't break the like action
+    }
+};
+
+/**
  * Like or unlike a post with atomic operations
  * Uses transactions to ensure data consistency
  */
@@ -71,6 +137,9 @@ exports.toggleLike = async (req, res) => {
                         });
                         newLikeCount = post.likes + 1;
                         isLiked = true;
+                        
+                        // Note: Notification will be created after transaction commits
+                        // to avoid transaction conflicts
                     }
 
                     // Update the post's like count
@@ -182,6 +251,11 @@ exports.toggleLike = async (req, res) => {
         await clearCacheByPattern('search_posts');
 
         emitEvent('post:likeToggled', { postId, userId, isLiked: result.isLiked, likeCount: result.likeCount });
+
+        // Create notification if user liked the post (not if they unliked it)
+        if (result.isLiked) {
+            await createLikeNotification(userId, postId);
+        }
 
         res.json({
             status: 'success',
@@ -477,6 +551,120 @@ exports.getPostLikeStats = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching like statistics'
+        });
+    }
+};
+
+/**
+ * Get all users who liked a post (PUBLIC ENDPOINT - No authentication required)
+ * Supports pagination
+ */
+exports.getPostLikes = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { page = 1, limit = 50 } = req.query;
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+
+        // Check if post exists
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { id: true, likes: true }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found',
+                data: {
+                    users: [],
+                    pagination: {
+                        total: 0,
+                        page: parseInt(page),
+                        limit: parseInt(limit),
+                        totalPages: 0
+                    }
+                }
+            });
+        }
+
+        // Get all users who liked the post
+        const [likes, total] = await Promise.all([
+            prisma.postLike.findMany({
+                where: { post_id: postId },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            profile_picture: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            },
+                            follower_count: true,
+                            posts_count: true
+                        }
+                    }
+                },
+                orderBy: { createdAt: 'desc' },
+                take: parseInt(limit),
+                skip: offset
+            }),
+            prisma.postLike.count({
+                where: { post_id: postId }
+            })
+        ]);
+
+        // Format response
+        const users = likes.map(like => ({
+            id: like.user.id,
+            username: like.user.username,
+            display_name: like.user.display_name,
+            profile_picture: like.user.profile_picture,
+            country: like.user.country,
+            follower_count: like.user.follower_count,
+            posts_count: like.user.posts_count,
+            liked_at: like.createdAt
+        }));
+
+        res.json({
+            status: 'success',
+            data: {
+                users,
+                pagination: {
+                    total,
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    totalPages: Math.ceil(total / parseInt(limit)),
+                    hasNext: offset + parseInt(limit) < total,
+                    hasPrev: parseInt(page) > 1
+                },
+                post: {
+                    id: post.id,
+                    totalLikes: post.likes
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get post likes error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching users who liked the post',
+            data: {
+                users: [],
+                pagination: {
+                    total: 0,
+                    page: parseInt(req.query.page) || 1,
+                    limit: parseInt(req.query.limit) || 50,
+                    totalPages: 0
+                }
+            }
         });
     }
 };

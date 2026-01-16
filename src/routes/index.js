@@ -20,6 +20,7 @@ const likeRoutes = require('./like.routes');
 const viewRoutes = require('./view.routes');
 const countryRoutes = require('./country.routes');
 const challengeRoutes = require('./challenge.routes');
+const searchRoutes = require('./search.routes');
 
 // Test route
 router.get('/test', (req, res) => {
@@ -46,5 +47,6 @@ router.use('/likes', likeRoutes);
 router.use('/views', viewRoutes);
 router.use('/countries', countryRoutes);
 router.use('/challenges', challengeRoutes);
+router.use('/search', searchRoutes);
 
 module.exports = router; 
