@@ -1,4 +1,59 @@
 const prisma = require('../lib/prisma');
+
+/**
+ * Get Admin ID from user (handles both Admin records and Users with admin role)
+ * @param {string} userId - User/Admin ID from JWT token
+ * @param {string} userRole - User role from JWT token
+ * @returns {Promise<string|null>} Admin ID or null if not found
+ */
+const getAdminId = async (userId, userRole) => {
+    if (userRole !== 'admin') {
+        return null;
+    }
+
+    // Check if it's an Admin record
+    const admin = await prisma.admin.findUnique({
+        where: { id: userId }
+    });
+    
+    if (admin) {
+        return admin.id;
+    }
+    
+    // User with admin role - find or create Admin record
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, email: true }
+    });
+    
+    if (!user) {
+        return null;
+    }
+    
+    // Try to find Admin by username or email
+    let adminRecord = await prisma.admin.findFirst({
+        where: {
+            OR: [
+                { username: user.username },
+                { email: user.email }
+            ]
+        }
+    });
+    
+    // If no Admin record exists, create one
+    if (!adminRecord) {
+        adminRecord = await prisma.admin.create({
+            data: {
+                username: user.username || `admin_${userId.substring(0, 8)}`,
+                email: user.email || `admin_${userId}@talynk.com`,
+                password: '', // Password not needed for existing user
+                status: 'active'
+            }
+        });
+    }
+    
+    return adminRecord.id;
+};
 const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
@@ -6519,7 +6574,18 @@ exports.getChallengeById = async (req, res) => {
 exports.approveChallenge = async (req, res) => {
     try {
         const { challengeId } = req.params;
-        const adminId = req.user.id;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        // Get Admin ID - handles both Admin records and Users with admin role
+        const adminId = await getAdminId(userId, userRole);
+
+        if (!adminId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admin ID could not be resolved'
+            });
+        }
 
         const challenge = await prisma.challenge.findUnique({
             where: { id: challengeId },
@@ -6617,7 +6683,61 @@ exports.rejectChallenge = async (req, res) => {
     try {
         const { challengeId } = req.params;
         const { reason } = req.body;
-        const adminId = req.user.id;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        // Get Admin ID - check if user is Admin or User with admin role
+        let adminId = null;
+        
+        if (userRole === 'admin') {
+            // Check if it's an Admin record
+            const admin = await prisma.admin.findUnique({
+                where: { id: userId }
+            });
+            
+            if (admin) {
+                adminId = admin.id;
+            } else {
+                // User with admin role - find or create Admin record
+                const user = await prisma.user.findUnique({
+                    where: { id: userId },
+                    select: { username: true, email: true }
+                });
+                
+                if (user) {
+                    // Try to find Admin by username or email
+                    let adminRecord = await prisma.admin.findFirst({
+                        where: {
+                            OR: [
+                                { username: user.username },
+                                { email: user.email }
+                            ]
+                        }
+                    });
+                    
+                    // If no Admin record exists, create one
+                    if (!adminRecord) {
+                        adminRecord = await prisma.admin.create({
+                            data: {
+                                username: user.username || `admin_${userId.substring(0, 8)}`,
+                                email: user.email || `admin_${userId}@talynk.com`,
+                                password: '', // Password not needed for existing user
+                                status: 'active'
+                            }
+                        });
+                    }
+                    
+                    adminId = adminRecord.id;
+                }
+            }
+        }
+
+        if (!adminId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admin ID could not be resolved'
+            });
+        }
 
         const challenge = await prisma.challenge.findUnique({
             where: { id: challengeId },
