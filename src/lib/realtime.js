@@ -91,6 +91,12 @@ const emitEvent = (event, payload) => {
       }
       break;
 
+    case 'post:viewUpdate':
+      if (payload.postId && payload.views !== undefined) {
+        websocketServer.broadcastPostUpdate(payload.postId, { views: payload.views });
+      }
+      break;
+
     case 'notification:created':
       // payload.userId is the user ID (UUID), payload.userID is username
       if (payload.userId || payload.userID) {
