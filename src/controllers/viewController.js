@@ -1,20 +1,104 @@
 const prisma = require('../lib/prisma');
+const { getClient, redisReady } = require('../lib/redis');
+const { emitEvent } = require('../lib/realtime');
+const crypto = require('crypto');
+const viewMilestoneService = require('../services/viewMilestoneService');
+
+/**
+ * Generate viewer key for deduplication
+ * Authenticated users: userId
+ * Anonymous users: hash(IP + User-Agent)
+ */
+const generateViewerKey = (userId, ipAddress, userAgent) => {
+    if (userId) {
+        return userId;
+    }
+    // Hash IP + User-Agent for anonymous users
+    const combined = `${ipAddress || ''}:${userAgent || ''}`;
+    return crypto.createHash('sha256').update(combined).digest('hex').substring(0, 32);
+};
+
+/**
+ * Check Redis for duplicate view (fast path)
+ */
+const checkRedisDuplicate = async (postId, viewerKey) => {
+    if (!redisReady()) return null;
+    
+    const redis = getClient();
+    const key = `view:${postId}:${viewerKey}`;
+    const exists = await redis.exists(key);
+    
+    if (exists) {
+        return true; // Duplicate found
+    }
+    
+    // Set with 24h TTL to prevent duplicates
+    await redis.setex(key, 86400, '1');
+    return false; // Not a duplicate
+};
+
+/**
+ * Rate limit check per IP
+ */
+const checkRateLimit = async (ipAddress) => {
+    if (!redisReady()) return true; // Allow if Redis not available
+    
+    const redis = getClient();
+    const key = `rate:view:${ipAddress}`;
+    const current = await redis.incr(key);
+    
+    if (current === 1) {
+        // First request, set TTL
+        await redis.expire(key, 60); // 1 minute window
+    }
+    
+    // Allow up to 100 views per minute per IP
+    return current <= 100;
+};
 
 /**
  * Record a view for a post
- * Uses efficient tracking with IP and user-based uniqueness
+ * Refined implementation with Redis caching, rate limiting, and WebSocket broadcasting
+ * 
+ * Request body (optional):
+ * {
+ *   sessionId: string, // Frontend session ID for additional tracking
+ *   watchTime: number, // Watch time in seconds (frontend validated)
+ *   visibilityPercent: number // Visibility percentage (frontend validated)
+ * }
  */
 exports.recordView = async (req, res) => {
     try {
         const { postId } = req.params;
+        const { sessionId, watchTime, visibilityPercent } = req.body || {};
         const userId = req.user?.id; // Optional for anonymous users
-        const ipAddress = req.ip || req.connection.remoteAddress;
-        const userAgent = req.get('User-Agent');
+        const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+        const userAgent = req.get('User-Agent') || 'unknown';
+
+        // Validate qualified view (backend validation)
+        // Frontend should send watchTime >= 3 and visibilityPercent >= 60
+        // Backend enforces minimum thresholds
+        const isQualifiedView = 
+            (watchTime === undefined || watchTime >= 3) &&
+            (visibilityPercent === undefined || visibilityPercent >= 60);
+
+        if (!isQualifiedView) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'View does not meet qualification criteria (min 3s watch time, 60% visibility)'
+            });
+        }
 
         // Check if post exists
         const post = await prisma.post.findUnique({
             where: { id: postId },
-            select: { id: true, views: true }
+            select: { 
+                id: true, 
+                views: true, 
+                user_id: true,
+                status: true,
+                is_frozen: true
+            }
         });
 
         if (!post) {
@@ -24,13 +108,52 @@ exports.recordView = async (req, res) => {
             });
         }
 
+        // Don't count views for inactive or frozen posts
+        if (post.status !== 'active' || post.is_frozen) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Post is not available for viewing'
+            });
+        }
+
+        // Generate viewer key
+        const viewerKey = generateViewerKey(userId, ipAddress, userAgent);
+
+        // Fast path: Check Redis for duplicate
+        const isDuplicate = await checkRedisDuplicate(postId, viewerKey);
+        if (isDuplicate) {
+            // Still return current view count
+            const currentPost = await prisma.post.findUnique({
+                where: { id: postId },
+                select: { views: true }
+            });
+            
+            return res.json({
+                status: 'success',
+                message: 'View already counted',
+                data: {
+                    viewRecorded: false,
+                    viewCount: currentPost?.views || post.views
+                }
+            });
+        }
+
+        // Rate limiting check
+        const rateLimitOk = await checkRateLimit(ipAddress);
+        if (!rateLimitOk) {
+            return res.status(429).json({
+                status: 'error',
+                message: 'Too many view requests. Please try again later.'
+            });
+        }
+
         // Use transaction for atomic view recording
         const result = await prisma.$transaction(async (tx) => {
             let viewRecorded = false;
             let newViewCount = post.views;
 
             if (userId) {
-                // Authenticated user - fast existence query using count()
+                // Authenticated user - check DB for existing view
                 const viewExists = await tx.view.count({
                     where: {
                         user_id: userId,
@@ -50,7 +173,7 @@ exports.recordView = async (req, res) => {
                     viewRecorded = true;
                 }
             } else {
-                // Anonymous user - fast existence query using count()
+                // Anonymous user - check DB for existing view
                 const viewExists = await tx.view.count({
                     where: {
                         ip_address: ipAddress,
@@ -73,15 +196,16 @@ exports.recordView = async (req, res) => {
 
             // Increment view count if new view was recorded
             if (viewRecorded) {
-                await tx.post.update({
+                const updatedPost = await tx.post.update({
                     where: { id: postId },
                     data: {
                         views: {
                             increment: 1
                         }
-                    }
+                    },
+                    select: { views: true }
                 });
-                newViewCount = post.views + 1;
+                newViewCount = updatedPost.views;
             }
 
             return {
@@ -89,6 +213,21 @@ exports.recordView = async (req, res) => {
                 viewCount: newViewCount
             };
         });
+
+        // Broadcast view update via WebSocket (non-blocking)
+        if (result.viewRecorded) {
+            // Emit view update event
+            emitEvent('post:viewUpdate', {
+                postId,
+                views: result.viewCount
+            });
+
+            // Check for view milestones (async, non-blocking)
+            viewMilestoneService.checkAndNotifyMilestone(postId, result.viewCount, post.user_id)
+                .catch(error => {
+                    console.error('[View Milestone] Error checking milestone:', error);
+                });
+        }
 
         res.json({
             status: 'success',
@@ -103,7 +242,8 @@ exports.recordView = async (req, res) => {
         console.error('Record view error:', error);
         res.status(500).json({
             status: 'error',
-            message: 'Error recording view'
+            message: 'Error recording view',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
@@ -274,6 +414,35 @@ exports.getTrendingPosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error fetching trending posts'
+        });
+    }
+};
+
+/**
+ * Get view milestones for a post
+ */
+exports.getPostMilestones = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const milestones = await viewMilestoneService.getPostMilestones(postId);
+
+        if (!milestones) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: milestones
+        });
+
+    } catch (error) {
+        console.error('Get post milestones error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching milestone statistics'
         });
     }
 };
