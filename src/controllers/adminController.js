@@ -121,7 +121,8 @@ exports.searchPosts = async (req, res) => {
                     username: true,
                     email: true,
                     status: true,
-                    profile_picture: true
+                    profile_picture: true,
+                    bio: true
                 }
             },
             category: {
@@ -2992,10 +2993,12 @@ exports.getAllUsers = async (req, res) => {
                 phone2: true,
                 last_active_date: true,
                 profile_picture: true,
+                bio: true,
                 last_login: true,
                 date_of_birth: true,
                 country_id: true,
                 follower_count: true,
+                total_profile_views: true,
                 interests: true,
                 role: true
             }
@@ -3018,9 +3021,18 @@ exports.getAllUsers = async (req, res) => {
             }
         });
 
+        // Get total views for all users' posts
+        const userViews = await prisma.post.groupBy({
+            by: ['user_id'],
+            _sum: {
+                views: true
+            }
+        });
+
         // Create lookup maps for quick access
         const approvedCountMap = {};
         const pendingCountMap = {};
+        const totalViewsMap = {};
             
         approvedCounts.forEach(count => {
             approvedCountMap[count.user_id] = count._count.id;
@@ -3030,12 +3042,17 @@ exports.getAllUsers = async (req, res) => {
             pendingCountMap[count.user_id] = count._count.id;
         });
 
-        // Enhance user objects with post counts
+        userViews.forEach(view => {
+            totalViewsMap[view.user_id] = view._sum.views || 0;
+        });
+
+        // Enhance user objects with post counts and total views
         const enhancedUsers = users.map(user => {
             return {
                 ...user,
                 postsApproved: approvedCountMap[user.id] || 0,
-                postsPending: pendingCountMap[user.id] || 0
+                postsPending: pendingCountMap[user.id] || 0,
+                totalPostViews: totalViewsMap[user.id] || 0
             };
         });
 
@@ -5870,7 +5887,8 @@ exports.getPostReports = async (req, res) => {
                         id: true,
                         username: true,
                         email: true,
-                        profile_picture: true
+                        profile_picture: true,
+                        bio: true
                     }
                 }
             },
@@ -6091,6 +6109,7 @@ exports.getAdminPosts = async (req, res) => {
                             username: true,
                             email: true,
                             profile_picture: true,
+                            bio: true,
                             country: {
                                 select: {
                                     name: true,
@@ -6152,6 +6171,8 @@ exports.getAdminPosts = async (req, res) => {
             
             return {
                 ...post,
+                viewCount: post.views, // Explicit view count
+                viewCountFromTable: post._count.postViews, // View count from views table
                 analytics: {
                     totalEngagements,
                     engagementRate: Math.round(engagementRate * 100) / 100,

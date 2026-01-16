@@ -32,6 +32,7 @@ model User {
   status                String   @default("active") @db.VarChar(255)
   role                  String   @default("user") @db.VarChar(255)
   profile_picture       String?  @db.VarChar(255)
+  bio                   String?  @db.Text // User biography/bio
   last_login            DateTime?
   last_active_date      DateTime @default(now())
   follower_count        Int      @default(0)

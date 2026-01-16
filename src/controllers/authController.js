@@ -777,7 +777,7 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Remove sensitive fields that shouldn't be updated directly
-    const { password, role, country, display_name, ...safeUpdateData } = updateData;
+    const { password, role, country, display_name, bio, ...safeUpdateData } = updateData;
     
     // Handle country update if provided
     let userUpdateData = {
@@ -787,6 +787,10 @@ exports.updateProfile = async (req, res) => {
 
     if (typeof display_name !== 'undefined') {
       userUpdateData.display_name = display_name ? String(display_name).trim() : null;
+    }
+    
+    if (typeof bio !== 'undefined') {
+      userUpdateData.bio = bio ? String(bio).trim() : null;
     }
     
     if (country) {
@@ -818,10 +822,12 @@ exports.updateProfile = async (req, res) => {
       select: {
         id: true,
         username: true,
-            display_name: true,
+        display_name: true,
         email: true,
         phone1: true,
         phone2: true,
+        bio: true,
+        profile_picture: true,
         country_id: true,
         country: {
           select: {
