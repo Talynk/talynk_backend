@@ -46,6 +46,7 @@ model User {
   comments              Comment[]
   postLikes             PostLike[]
   notifications         Notification[]
+  notificationActors    Notification[] @relation("NotificationActor")
   recentSearches        RecentSearch[]
   following             Follow[] @relation("UserFollowing")
   followers             Follow[] @relation("UserFollowers")
@@ -120,6 +121,7 @@ model Post {
   appeals               PostAppeal[]
   featuredPosts         FeaturedPost[]
   challengePosts        ChallengePost[]
+  notifications         Notification[]
 
   @@map("posts")
 }
@@ -211,9 +213,17 @@ model Notification {
   type      String?  @db.VarChar(255)
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
+  
+  // Navigation fields for frontend routing
+  actorId   String?  @db.Uuid  // User who performed the action (liker, commenter, follower, etc.)
+  postId    String?  @db.Uuid  // Post ID (for like, comment, view_milestone notifications)
+  commentId Int?                // Comment ID (for comment notifications)
+  challengeId String? @db.Uuid // Challenge ID (for challenge notifications)
 
   // Relations
   user      User     @relation(fields: [userID], references: [username])
+  actor     User?    @relation("NotificationActor", fields: [actorId], references: [id])
+  post      Post?    @relation(fields: [postId], references: [id])
 
   @@map("notifications")
 }

@@ -98,7 +98,10 @@ exports.addComment = async (req, res) => {
                             userID: postOwner.username,
                             message: `${resolvedUser.username || 'Someone'} commented on your post`,
                             type: 'comment',
-                            isRead: false
+                            isRead: false,
+                            actorId: resolvedUser.id,  // User who commented
+                            postId: postId,            // Post that was commented on
+                            commentId: comment.id      // Comment ID
                         }
                     });
 

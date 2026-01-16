@@ -29,7 +29,8 @@ const createFollowNotification = async (followerId, followingId) => {
         userID: followingUser.username,
         message: `${follower.username} started following you`,
         type: 'follow',
-        isRead: false
+        isRead: false,
+        actorId: follower.id  // User who followed
       }
     });
     
