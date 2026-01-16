@@ -121,7 +121,8 @@ exports.searchPosts = async (req, res) => {
                     username: true,
                     email: true,
                     status: true,
-                    profile_picture: true
+                    profile_picture: true,
+                    bio: true
                 }
             },
             category: {
@@ -5886,7 +5887,8 @@ exports.getPostReports = async (req, res) => {
                         id: true,
                         username: true,
                         email: true,
-                        profile_picture: true
+                        profile_picture: true,
+                        bio: true
                     }
                 }
             },
