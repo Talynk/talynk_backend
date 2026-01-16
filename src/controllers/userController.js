@@ -393,64 +393,83 @@ exports.getNotifications = async (req, res) => {
             });
         }
 
-        const notifications = await prisma.notification.findMany({
-            where: { userID: user.username },
-            orderBy: {
-                createdAt: 'desc'
-            },
-            include: {
-                actor: {
-                    select: {
-                        id: true,
-                        username: true,
-                        profile_picture: true,
-                        display_name: true
-                    }
+        // Try to fetch with navigation fields (if migration has been run)
+        // Otherwise fall back to basic query
+        let notifications;
+        try {
+            notifications = await prisma.notification.findMany({
+                where: { userID: user.username },
+                orderBy: {
+                    createdAt: 'desc'
                 },
-                post: {
-                    select: {
-                        id: true,
-                        title: true,
-                        video_url: true,
-                        thumbnail_url: true
+                include: {
+                    actor: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true,
+                            display_name: true
+                        }
+                    },
+                    post: {
+                        select: {
+                            id: true,
+                            title: true,
+                            video_url: true
+                        }
                     }
                 }
+            });
+
+            // Format notifications with navigation data
+            const formattedNotifications = notifications.map(notif => ({
+                id: notif.id,
+                userID: notif.userID,
+                message: notif.message,
+                type: notif.type,
+                isRead: notif.isRead,
+                createdAt: notif.createdAt,
+                // Navigation data (may be null if migration not run)
+                actorId: notif.actorId || null,
+                postId: notif.postId || null,
+                commentId: notif.commentId || null,
+                challengeId: notif.challengeId || null,
+                // Actor profile for display
+                actor: notif.actor ? {
+                    id: notif.actor.id,
+                    username: notif.actor.username,
+                    displayName: notif.actor.display_name,
+                    profilePicture: notif.actor.profile_picture
+                } : null,
+                // Post preview for display
+                post: notif.post ? {
+                    id: notif.post.id,
+                    title: notif.post.title,
+                    videoUrl: notif.post.video_url
+                } : null
+            }));
+
+            return res.json({
+                status: 'success',
+                data: { notifications: formattedNotifications }
+            });
+        } catch (error) {
+            // Fallback to basic query if navigation fields don't exist yet
+            if (error.code === 'P2022' || error.message?.includes('does not exist')) {
+                notifications = await prisma.notification.findMany({
+                    where: { userID: user.username },
+                    orderBy: {
+                        createdAt: 'desc'
+                    }
+                });
+
+                return res.json({
+                    status: 'success',
+                    data: { notifications }
+                });
             }
-        });
-
-        // Format notifications with navigation data
-        const formattedNotifications = notifications.map(notif => ({
-            id: notif.id,
-            userID: notif.userID,
-            message: notif.message,
-            type: notif.type,
-            isRead: notif.isRead,
-            createdAt: notif.createdAt,
-            // Navigation data
-            actorId: notif.actorId,
-            postId: notif.postId,
-            commentId: notif.commentId,
-            challengeId: notif.challengeId,
-            // Actor profile for display
-            actor: notif.actor ? {
-                id: notif.actor.id,
-                username: notif.actor.username,
-                displayName: notif.actor.display_name,
-                profilePicture: notif.actor.profile_picture
-            } : null,
-            // Post preview for display
-            post: notif.post ? {
-                id: notif.post.id,
-                title: notif.post.title,
-                videoUrl: notif.post.video_url,
-                thumbnailUrl: notif.post.thumbnail_url
-            } : null
-        }));
-
-        res.json({
-            status: 'success',
-            data: { notifications: formattedNotifications }
-        });
+            throw error;
+        }
     } catch (error) {
         console.error('Notifications fetch error:', error);
         res.status(500).json({
