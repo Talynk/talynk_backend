@@ -52,13 +52,15 @@ const createLikeNotification = async (likerId, postId) => {
             return;
         }
 
-        // Create notification
+        // Create notification with navigation data
         const notification = await prisma.notification.create({
             data: {
                 userID: postOwner.username,
                 message: `${liker.username} liked your post: ${post.title || 'Untitled'}`,
                 type: 'like',
-                isRead: false
+                isRead: false,
+                actorId: liker.id,  // User who liked
+                postId: post.id     // Post that was liked
             }
         });
 

@@ -146,7 +146,8 @@ const checkAndNotifyMilestone = async (postId, currentViews, postOwnerId) => {
                 userID: post.user.username,
                 message: notificationMessage,
                 type: 'view_milestone',
-                isRead: false
+                isRead: false,
+                postId: post.id  // Post that reached the milestone
             }
         });
 

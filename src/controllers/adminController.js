@@ -6672,7 +6672,8 @@ exports.approveChallenge = async (req, res) => {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been approved and is now ${shouldBeActive ? 'active' : 'approved'}.`,
                 type: 'challenge_approved',
-                isRead: false
+                isRead: false,
+                challengeId: challenge.id  // Challenge that was approved
             }
         });
 
@@ -6818,7 +6819,8 @@ exports.rejectChallenge = async (req, res) => {
                 userID: challenge.organizer.username,
                 message: `Your challenge "${challenge.name}" has been rejected.${reason ? ' Reason: ' + reason : ''}`,
                 type: 'challenge_rejected',
-                isRead: false
+                isRead: false,
+                challengeId: challenge.id  // Challenge that was rejected
             }
         });
 

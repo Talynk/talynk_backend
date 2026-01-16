@@ -397,12 +397,59 @@ exports.getNotifications = async (req, res) => {
             where: { userID: user.username },
             orderBy: {
                 createdAt: 'desc'
+            },
+            include: {
+                actor: {
+                    select: {
+                        id: true,
+                        username: true,
+                        profile_picture: true,
+                        display_name: true
+                    }
+                },
+                post: {
+                    select: {
+                        id: true,
+                        title: true,
+                        video_url: true,
+                        thumbnail_url: true
+                    }
+                }
             }
         });
 
+        // Format notifications with navigation data
+        const formattedNotifications = notifications.map(notif => ({
+            id: notif.id,
+            userID: notif.userID,
+            message: notif.message,
+            type: notif.type,
+            isRead: notif.isRead,
+            createdAt: notif.createdAt,
+            // Navigation data
+            actorId: notif.actorId,
+            postId: notif.postId,
+            commentId: notif.commentId,
+            challengeId: notif.challengeId,
+            // Actor profile for display
+            actor: notif.actor ? {
+                id: notif.actor.id,
+                username: notif.actor.username,
+                displayName: notif.actor.display_name,
+                profilePicture: notif.actor.profile_picture
+            } : null,
+            // Post preview for display
+            post: notif.post ? {
+                id: notif.post.id,
+                title: notif.post.title,
+                videoUrl: notif.post.video_url,
+                thumbnailUrl: notif.post.thumbnail_url
+            } : null
+        }));
+
         res.json({
             status: 'success',
-            data: { notifications }
+            data: { notifications: formattedNotifications }
         });
     } catch (error) {
         console.error('Notifications fetch error:', error);
@@ -711,6 +758,15 @@ exports.markNotificationAsRead = async (req, res) => {
     try {
         const { notificationId } = req.params;
         
+        // Convert notificationId to integer
+        const notificationIdInt = parseInt(notificationId, 10);
+        if (isNaN(notificationIdInt)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid notification ID'
+            });
+        }
+        
         // Get user's username first
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
@@ -727,7 +783,7 @@ exports.markNotificationAsRead = async (req, res) => {
         // Check if notification exists and belongs to user
         const notification = await prisma.notification.findFirst({
             where: {
-                id: notificationId,
+                id: notificationIdInt,
                 userID: user.username
             }
         });
@@ -741,7 +797,7 @@ exports.markNotificationAsRead = async (req, res) => {
 
         // Update notification
         const updatedNotification = await prisma.notification.update({
-            where: { id: notificationId },
+            where: { id: notificationIdInt },
             data: { isRead: true }
         });
 
@@ -765,6 +821,15 @@ exports.deleteNotification = async (req, res) => {
     try {
         const { notificationId } = req.params;
         
+        // Convert notificationId to integer
+        const notificationIdInt = parseInt(notificationId, 10);
+        if (isNaN(notificationIdInt)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid notification ID'
+            });
+        }
+        
         // Get user's username first
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
@@ -781,7 +846,7 @@ exports.deleteNotification = async (req, res) => {
         // Check if notification exists and belongs to user
         const notification = await prisma.notification.findFirst({
             where: {
-                id: notificationId,
+                id: notificationIdInt,
                 userID: user.username
             }
         });
@@ -795,7 +860,7 @@ exports.deleteNotification = async (req, res) => {
 
         // Delete notification
         await prisma.notification.delete({
-            where: { id: notificationId }
+            where: { id: notificationIdInt }
         });
 
         res.json({
