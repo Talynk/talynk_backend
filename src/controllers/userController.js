@@ -26,6 +26,7 @@ exports.getProfile = async (req, res) => {
                 phone1: true,
                 phone2: true,
                 selected_category: true,
+                bio: true,
                 status: true,
                 role: true,
                 last_login: true,
@@ -63,7 +64,18 @@ exports.getProfile = async (req, res) => {
             }
         });
         
+        // Get total post views for this user
+        const totalPostViews = await prisma.post.aggregate({
+            where: {
+                user_id: userId
+            },
+            _sum: {
+                views: true
+            }
+        });
+        
         transformedUser.followingCount = followingCount;
+        transformedUser.totalPostViews = totalPostViews._sum.views || 0;
         transformedUser.coverPhoto = null; // Add coverPhoto field for consistency
         
         // Add timestamps
@@ -92,12 +104,13 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { phone1, phone2 } = req.body;
+    const { phone1, phone2, bio } = req.body;
     
     // Create an update object with only allowed fields
     const updateData = {};
     if (phone1 !== undefined) updateData.phone1 = phone1;
     if (phone2 !== undefined) updateData.phone2 = phone2;
+    if (bio !== undefined) updateData.bio = bio ? String(bio).trim() : null;
     
     // Handle profile picture upload if it exists
     if (req.file) {
@@ -140,6 +153,7 @@ exports.updateProfile = async (req, res) => {
         phone1: true,
         phone2: true,
         profile_picture: true,
+        bio: true,
         posts_count: true,
         follower_count: true,
         total_profile_views: true,
@@ -398,6 +412,7 @@ exports.getCurrentUser = async (req, res) => {
                 phone1: true,
                 phone2: true,
                 profile_picture: true,
+                bio: true,
                 posts_count: true,
                 follower_count: true,
                 total_profile_views: true,
@@ -450,6 +465,7 @@ exports.getAllUsers = async (req, res) => {
                 phone1: true,
                 phone2: true,
                 profile_picture: true,
+                bio: true,
                 posts_count: true,
                 follower_count: true,
                 total_profile_views: true,
@@ -472,9 +488,28 @@ exports.getAllUsers = async (req, res) => {
             }
         });
 
+        // Calculate total post views for each user
+        const userViews = await prisma.post.groupBy({
+            by: ['user_id'],
+            _sum: {
+                views: true
+            }
+        });
+
+        const totalViewsMap = {};
+        userViews.forEach(view => {
+            totalViewsMap[view.user_id] = view._sum.views || 0;
+        });
+
+        // Enhance users with total post views
+        const enhancedUsers = users.map(user => ({
+            ...user,
+            totalPostViews: totalViewsMap[user.id] || 0
+        }));
+
         res.json({
             status: 'success',
-            data: users
+            data: enhancedUsers
         });
     } catch (error) {
         console.error('Error getting all users:', error);
@@ -496,6 +531,7 @@ exports.getUser = async (req, res) => {
                 phone1: true,
                 phone2: true,
                 profile_picture: true,
+                bio: true,
                 posts_count: true,
                 follower_count: true,
                 total_profile_views: true,
@@ -716,6 +752,7 @@ exports.getUserProfileById = async (req, res) => {
                 username: true,
                 email: true,
                 profile_picture: true,
+                bio: true,
                 posts_count: true,
                 follower_count: true,
                 total_profile_views: true,
@@ -748,6 +785,7 @@ exports.getUserProfileById = async (req, res) => {
             email: user.email,
             fullName: user.username,
             profilePicture: user.profile_picture,
+            bio: user.bio,
             postsCount: user.posts_count,
             followersCount: user.follower_count,
             coverPhoto: null,
