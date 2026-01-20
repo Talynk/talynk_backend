@@ -101,42 +101,87 @@ exports.getAllCategories = async (req, res) => {
                             return a.sort_order - b.sort_order;
                         });
                     } else {
-                        // Create "Other" subcategory if it doesn't exist
+                        // Create "Other" subcategory for this parent if it doesn't exist
                         const maxSortOrder = category.children?.length > 0
                             ? Math.max(...category.children.map(c => c.sort_order))
                             : 0;
                         
-                        const newOther = await prisma.category.create({
-                            data: {
-                                name: 'Other',
-                                description: `Other under ${category.name}`,
-                                status: 'active',
-                                level: 2,
-                                parent_id: category.id,
-                                sort_order: maxSortOrder + 1
-                            }
-                        });
+                        try {
+                            const newOther = await prisma.category.create({
+                                data: {
+                                    name: 'Other',
+                                    description: `Other under ${category.name}`,
+                                    status: 'active',
+                                    level: 2,
+                                    parent_id: category.id,
+                                    sort_order: maxSortOrder + 1
+                                }
+                            });
 
-                        if (!category.children) {
-                            category.children = [];
-                        }
-                        category.children.push({
-                            id: newOther.id,
-                            name: newOther.name,
-                            description: newOther.description,
-                            status: newOther.status,
-                            level: newOther.level,
-                            sort_order: newOther.sort_order,
-                            _count: {
-                                posts: 0
+                            if (!category.children) {
+                                category.children = [];
                             }
-                        });
-                        // Re-sort to ensure "Other" is last
-                        category.children.sort((a, b) => {
-                            if (a.name === 'Other') return 1;
-                            if (b.name === 'Other') return -1;
-                            return a.sort_order - b.sort_order;
-                        });
+                            category.children.push({
+                                id: newOther.id,
+                                name: newOther.name,
+                                description: newOther.description,
+                                status: newOther.status,
+                                level: newOther.level,
+                                sort_order: newOther.sort_order,
+                                _count: {
+                                    posts: 0
+                                }
+                            });
+                            // Re-sort to ensure "Other" is last
+                            category.children.sort((a, b) => {
+                                if (a.name === 'Other') return 1;
+                                if (b.name === 'Other') return -1;
+                                return a.sort_order - b.sort_order;
+                            });
+                        } catch (createError) {
+                            // Handle unique constraint error - if "Other" already exists for this parent
+                            if (createError.code === 'P2002') {
+                                // Fetch the existing "Other" for this parent
+                                const existingOther = await prisma.category.findFirst({
+                                    where: {
+                                        parent_id: category.id,
+                                        name: 'Other',
+                                        level: 2
+                                    }
+                                });
+                                
+                                if (existingOther) {
+                                    if (!category.children) {
+                                        category.children = [];
+                                    }
+                                    category.children.push({
+                                        id: existingOther.id,
+                                        name: existingOther.name,
+                                        description: existingOther.description,
+                                        status: existingOther.status,
+                                        level: existingOther.level,
+                                        sort_order: existingOther.sort_order,
+                                        _count: {
+                                            posts: await prisma.post.count({
+                                                where: {
+                                                    category_id: existingOther.id,
+                                                    status: 'active',
+                                                    is_frozen: false
+                                                }
+                                            })
+                                        }
+                                    });
+                                    // Re-sort to ensure "Other" is last
+                                    category.children.sort((a, b) => {
+                                        if (a.name === 'Other') return 1;
+                                        if (b.name === 'Other') return -1;
+                                        return a.sort_order - b.sort_order;
+                                    });
+                                }
+                            } else {
+                                throw createError;
+                            }
+                        }
                     }
                 } else {
                     // Ensure "Other" is always last in the list
@@ -238,39 +283,76 @@ exports.getSubcategories = async (req, res) => {
                     }
                 });
             } else {
-                // Create "Other" subcategory if it doesn't exist
-                const maxSortOrder = subcategories.length > 0
-                    ? Math.max(...subcategories.map(s => s.sort_order))
-                    : 0;
-                
+                // Create "Other" subcategory for this parent if it doesn't exist
                 const parentCategory = await prisma.category.findUnique({
                     where: { id: parseInt(parentId) }
                 });
 
                 if (parentCategory) {
-                    const newOther = await prisma.category.create({
-                        data: {
-                            name: 'Other',
-                            description: `Other under ${parentCategory.name}`,
-                            status: 'active',
-                            level: 2,
-                            parent_id: parseInt(parentId),
-                            sort_order: maxSortOrder + 1
-                        }
-                    });
+                    const maxSortOrder = subcategories.length > 0
+                        ? Math.max(...subcategories.map(s => s.sort_order))
+                        : 0;
+                    
+                    try {
+                        const newOther = await prisma.category.create({
+                            data: {
+                                name: 'Other',
+                                description: `Other under ${parentCategory.name}`,
+                                status: 'active',
+                                level: 2,
+                                parent_id: parseInt(parentId),
+                                sort_order: maxSortOrder + 1
+                            }
+                        });
 
-                    subcategories.push({
-                        id: newOther.id,
-                        name: newOther.name,
-                        description: newOther.description,
-                        status: newOther.status,
-                        level: newOther.level,
-                        sort_order: newOther.sort_order,
-                        parent_id: newOther.parent_id,
-                        _count: {
-                            posts: 0
+                        subcategories.push({
+                            id: newOther.id,
+                            name: newOther.name,
+                            description: newOther.description,
+                            status: newOther.status,
+                            level: newOther.level,
+                            sort_order: newOther.sort_order,
+                            parent_id: newOther.parent_id,
+                            _count: {
+                                posts: 0
+                            }
+                        });
+                    } catch (createError) {
+                        // Handle unique constraint error - if "Other" already exists for this parent
+                        if (createError.code === 'P2002') {
+                            // Fetch the existing "Other" for this parent
+                            const existingOther = await prisma.category.findFirst({
+                                where: {
+                                    parent_id: parseInt(parentId),
+                                    name: 'Other',
+                                    level: 2
+                                }
+                            });
+                            
+                            if (existingOther) {
+                                subcategories.push({
+                                    id: existingOther.id,
+                                    name: existingOther.name,
+                                    description: existingOther.description,
+                                    status: existingOther.status,
+                                    level: existingOther.level,
+                                    sort_order: existingOther.sort_order,
+                                    parent_id: existingOther.parent_id,
+                                    _count: {
+                                        posts: await prisma.post.count({
+                                            where: {
+                                                category_id: existingOther.id,
+                                                status: 'active',
+                                                is_frozen: false
+                                            }
+                                        })
+                                    }
+                                });
+                            }
+                        } else {
+                            throw createError;
                         }
-                    });
+                    }
                 }
             }
         }

@@ -128,7 +128,7 @@ model Post {
 
 model Category {
   id          Int      @id @default(autoincrement())
-  name        String   @unique
+  name        String
   description String?  @db.Text
   status      CategoryStatus @default(active)
   parent_id   Int?     // Reference to parent category
@@ -141,6 +141,7 @@ model Category {
   parent      Category? @relation("CategoryHierarchy", fields: [parent_id], references: [id])
   children    Category[] @relation("CategoryHierarchy")
 
+  @@unique([name, parent_id])
   @@map("categories")
 }
 
