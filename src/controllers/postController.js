@@ -265,6 +265,7 @@ exports.getAllPosts = async (req, res) => {
             sort = 'default', // default, newest, oldest, most_liked, most_viewed, most_commented
             status = 'active', // active, all, pending, suspended
             category_id,
+            subcategory_id,
             featured_first = 'true' // true by default
         } = req.query;
         
@@ -272,7 +273,7 @@ exports.getAllPosts = async (req, res) => {
         const shouldFeatureFirst = featured_first === 'true';
 
         // Create cache key with all parameters
-        const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${sort}_${status}_${category_id || 'all'}_${country_id || 'all'}_${featured_first}`;
+        const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${sort}_${status}_${category_id || 'all'}_${subcategory_id || 'all'}_${country_id || 'all'}_${featured_first}`;
         
         // Try to get from cache first
         const cachedData = await getAllPostsCache(cacheKey);
@@ -304,9 +305,27 @@ exports.getAllPosts = async (req, res) => {
             baseWhereClause.status = 'active';
         }
 
-        // Filter by category
-        if (category_id) {
-            baseWhereClause.category_id = parseInt(category_id);
+        // Filter by category (main category) or subcategory
+        if (subcategory_id) {
+            // If subcategory_id is provided, filter by that specific subcategory
+            baseWhereClause.category_id = parseInt(subcategory_id);
+        } else if (category_id) {
+            // If only category_id is provided, filter by main category
+            // Get all subcategories of this main category
+            const subcategories = await prisma.category.findMany({
+                where: {
+                    parent_id: parseInt(category_id),
+                    level: 2,
+                    status: 'active'
+                },
+                select: { id: true }
+            });
+            
+            const subcategoryIds = subcategories.map(s => s.id);
+            // Include both the main category and all its subcategories
+            baseWhereClause.category_id = {
+                in: [parseInt(category_id), ...subcategoryIds]
+            };
         }
 
         // Determine sort order for non-featured posts
@@ -352,7 +371,7 @@ exports.getAllPosts = async (req, res) => {
                 postFilter.status = baseWhereClause.status;
             }
             
-            // Add category filter if present
+            // Add category filter if present (handle both single ID and array)
             if (baseWhereClause.category_id) {
                 postFilter.category_id = baseWhereClause.category_id;
             }
@@ -387,7 +406,16 @@ exports.getAllPosts = async (req, res) => {
                             category: {
                                 select: {
                                     id: true,
-                                    name: true
+                                    name: true,
+                                    level: true,
+                                    parent_id: true,
+                                    parent: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                            level: true
+                                        }
+                                    }
                                 }
                             },
                             _count: {
@@ -450,7 +478,16 @@ exports.getAllPosts = async (req, res) => {
                     category: {
                         select: {
                             id: true,
-                            name: true
+                            name: true,
+                            level: true,
+                            parent_id: true,
+                            parent: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    level: true
+                                }
+                            }
                         }
                     },
                     _count: {
@@ -542,7 +579,16 @@ exports.getAllPosts = async (req, res) => {
                     category: {
                         select: {
                             id: true,
-                            name: true
+                            name: true,
+                            level: true,
+                            parent_id: true,
+                            parent: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    level: true
+                                }
+                            }
                         }
                     },
                     _count: {
@@ -572,11 +618,37 @@ exports.getAllPosts = async (req, res) => {
             ? featuredCount + totalRegular
             : totalRegular;
 
-        // Add full URLs for files (Supabase URLs are already complete)
+        // Add full URLs for files and enrich with category info
         const postsWithUrls = allPosts.map(post => {
             if (post.video_url) {
                 post.fullUrl = post.video_url; // Supabase URL is already complete
             }
+            
+            // Enrich with main category and subcategory info
+            if (post.category) {
+                if (post.category.level === 2 && post.category.parent) {
+                    // Post has a subcategory, include both main and sub
+                    post.mainCategory = {
+                        id: post.category.parent.id,
+                        name: post.category.parent.name,
+                        level: post.category.parent.level
+                    };
+                    post.subCategory = {
+                        id: post.category.id,
+                        name: post.category.name,
+                        level: post.category.level
+                    };
+                } else if (post.category.level === 1) {
+                    // Post has only a main category (no subcategory)
+                    post.mainCategory = {
+                        id: post.category.id,
+                        name: post.category.name,
+                        level: post.category.level
+                    };
+                    post.subCategory = null;
+                }
+            }
+            
             return post;
         });
 
@@ -593,6 +665,7 @@ exports.getAllPosts = async (req, res) => {
                 sort,
                 status,
                 category_id: category_id || null,
+                subcategory_id: subcategory_id || null,
                 country_id: null, // Disabled for now
                 featured_first: shouldFeatureFirst
             }
@@ -680,7 +753,16 @@ exports.getPostById = async (req, res) => {
                     select: {
                         id: true,
                         name: true,
-                        description: true
+                        description: true,
+                        level: true,
+                        parent_id: true,
+                        parent: {
+                            select: {
+                                id: true,
+                                name: true,
+                                level: true
+                            }
+                        }
                     }
                 },
                 comments: {
@@ -729,11 +811,36 @@ exports.getPostById = async (req, res) => {
             }
         }
 
-        // Add full URL for media
+        // Add full URL for media and enrich with category info
         const postWithUrl = {
             ...post,
             fullUrl: post.video_url // Supabase URL is already complete
         };
+        
+        // Enrich with main category and subcategory info
+        if (postWithUrl.category) {
+            if (postWithUrl.category.level === 2 && postWithUrl.category.parent) {
+                // Post has a subcategory, include both main and sub
+                postWithUrl.mainCategory = {
+                    id: postWithUrl.category.parent.id,
+                    name: postWithUrl.category.parent.name,
+                    level: postWithUrl.category.parent.level
+                };
+                postWithUrl.subCategory = {
+                    id: postWithUrl.category.id,
+                    name: postWithUrl.category.name,
+                    level: postWithUrl.category.level
+                };
+            } else if (postWithUrl.category.level === 1) {
+                // Post has only a main category (no subcategory)
+                postWithUrl.mainCategory = {
+                    id: postWithUrl.category.id,
+                    name: postWithUrl.category.name,
+                    level: postWithUrl.category.level
+                };
+                postWithUrl.subCategory = null;
+            }
+        }
 
         const responseData = { post: postWithUrl };
 
