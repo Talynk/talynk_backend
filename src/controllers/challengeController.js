@@ -446,11 +446,6 @@ exports.getChallengeParticipants = async (req, res) => {
                             posts_count: true,
                             follower_count: true
                         }
-                    },
-                    _count: {
-                        select: {
-                            // Count posts submitted to this challenge by this user
-                        }
                     }
                 }
             }),

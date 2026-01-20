@@ -106,12 +106,43 @@ const categoryHierarchy = [
 ];
 
 async function upsertCategory({ name, description, level, sort_order, parent_id = null }) {
-    // If you have a composite unique constraint, adjust the where clause accordingly.
-    return prisma.category.upsert({
-        where: { name },
-        update: { description, status: CATEGORY_STATUS, level, sort_order, parent_id },
-        create: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
-    });
+    // For level 1 categories (parent_id is null), we can't use composite unique constraint
+    // because Prisma doesn't allow null in composite unique where clauses
+    if (parent_id === null) {
+        // Check if category exists
+        const existing = await prisma.category.findFirst({
+            where: {
+                name,
+                level: 1,
+                parent_id: null
+            }
+        });
+
+        if (existing) {
+            // Update existing category
+            return prisma.category.update({
+                where: { id: existing.id },
+                data: { description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+            });
+        } else {
+            // Create new category
+            return prisma.category.create({
+                data: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+            });
+        }
+    } else {
+        // For level 2 categories (parent_id is not null), use composite unique constraint
+        return prisma.category.upsert({
+            where: { 
+                name_parent_id: {
+                    name,
+                    parent_id
+                }
+            },
+            update: { description, status: CATEGORY_STATUS, level, sort_order, parent_id },
+            create: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+        });
+    }
 }
 
 exports.seedCategories = async (req, res) => {
@@ -154,8 +185,11 @@ exports.seedCategories = async (req, res) => {
                 existingSubcategories.map(sub => [sub.name.toLowerCase(), sub])
             );
 
+            // Filter out "Other" from children to handle it separately
+            const childrenWithoutOther = top.children.filter(child => child.toLowerCase() !== 'other');
+            
             let childOrder = 1;
-            for (const childName of top.children) {
+            for (const childName of childrenWithoutOther) {
                 const childLower = childName.toLowerCase();
                 const existing = existingMap.get(childLower);
 
@@ -180,7 +214,7 @@ exports.seedCategories = async (req, res) => {
                 }
             }
 
-            // Ensure "Other" is the last subcategory
+            // Ensure "Other" subcategory exists and is always last
             const otherSubcategory = await prisma.category.findFirst({
                 where: {
                     parent_id: parent.id,
@@ -189,27 +223,44 @@ exports.seedCategories = async (req, res) => {
                 }
             });
 
-            if (otherSubcategory) {
-                // Get the highest sort_order among subcategories
-                const maxSortOrder = await prisma.category.findFirst({
-                    where: {
-                        parent_id: parent.id,
-                        level: 2
-                    },
-                    orderBy: {
-                        sort_order: 'desc'
-                    },
-                    select: {
-                        sort_order: true
+            // Get the highest sort_order among all subcategories (excluding "Other")
+            const maxSortOrderResult = await prisma.category.findFirst({
+                where: {
+                    parent_id: parent.id,
+                    level: 2,
+                    name: {
+                        not: 'Other'
                     }
-                });
+                },
+                orderBy: {
+                    sort_order: 'desc'
+                },
+                select: {
+                    sort_order: true
+                }
+            });
 
-                // Update "Other" to be last
+            const maxSortOrder = maxSortOrderResult?.sort_order || 0;
+            const otherSortOrder = maxSortOrder + 1;
+
+            if (otherSubcategory) {
+                // Update existing "Other" subcategory to be last
                 await prisma.category.update({
                     where: { id: otherSubcategory.id },
                     data: {
-                        sort_order: (maxSortOrder?.sort_order || 0) + 1
+                        sort_order: otherSortOrder,
+                        description: `Other under ${top.name}`,
+                        status: CATEGORY_STATUS
                     }
+                });
+            } else {
+                // Create "Other" subcategory if it doesn't exist
+                await upsertCategory({
+                    name: 'Other',
+                    description: `Other under ${top.name}`,
+                    level: 2,
+                    sort_order: otherSortOrder,
+                    parent_id: parent.id
                 });
             }
         }
