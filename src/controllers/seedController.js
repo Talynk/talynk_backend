@@ -106,17 +106,43 @@ const categoryHierarchy = [
 ];
 
 async function upsertCategory({ name, description, level, sort_order, parent_id = null }) {
-    // Use composite unique constraint (name, parent_id)
-    return prisma.category.upsert({
-        where: { 
-            name_parent_id: {
+    // For level 1 categories (parent_id is null), we can't use composite unique constraint
+    // because Prisma doesn't allow null in composite unique where clauses
+    if (parent_id === null) {
+        // Check if category exists
+        const existing = await prisma.category.findFirst({
+            where: {
                 name,
-                parent_id
+                level: 1,
+                parent_id: null
             }
-        },
-        update: { description, status: CATEGORY_STATUS, level, sort_order, parent_id },
-        create: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
-    });
+        });
+
+        if (existing) {
+            // Update existing category
+            return prisma.category.update({
+                where: { id: existing.id },
+                data: { description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+            });
+        } else {
+            // Create new category
+            return prisma.category.create({
+                data: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+            });
+        }
+    } else {
+        // For level 2 categories (parent_id is not null), use composite unique constraint
+        return prisma.category.upsert({
+            where: { 
+                name_parent_id: {
+                    name,
+                    parent_id
+                }
+            },
+            update: { description, status: CATEGORY_STATUS, level, sort_order, parent_id },
+            create: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
+        });
+    }
 }
 
 exports.seedCategories = async (req, res) => {
