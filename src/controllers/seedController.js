@@ -106,9 +106,14 @@ const categoryHierarchy = [
 ];
 
 async function upsertCategory({ name, description, level, sort_order, parent_id = null }) {
-    // If you have a composite unique constraint, adjust the where clause accordingly.
+    // Use composite unique constraint (name, parent_id)
     return prisma.category.upsert({
-        where: { name },
+        where: { 
+            name_parent_id: {
+                name,
+                parent_id
+            }
+        },
         update: { description, status: CATEGORY_STATUS, level, sort_order, parent_id },
         create: { name, description, status: CATEGORY_STATUS, level, sort_order, parent_id }
     });
