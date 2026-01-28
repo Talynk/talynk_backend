@@ -127,15 +127,27 @@ exports.createChallenge = async (req, res) => {
     }
 };
 
-// Get all approved and active challenges
+// Get all approved and active challenges (public endpoint)
+// Pending challenges are never returned in public endpoints
 exports.getAllChallenges = async (req, res) => {
     try {
         const { status, page = 1, limit = 20 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
+        // Only allow approved, active, or ended status - never pending or rejected
+        const allowedStatuses = ['approved', 'active', 'ended'];
+        let statusFilter = ['approved', 'active']; // Default to approved/active
+        
+        if (status) {
+            // Only use the status if it's in the allowed list (exclude pending/rejected)
+            if (allowedStatuses.includes(status)) {
+                statusFilter = [status];
+            }
+        }
+
         const where = {
             status: {
-                in: status ? [status] : ['approved', 'active']
+                in: statusFilter
             }
         };
 
@@ -204,7 +216,180 @@ exports.getAllChallenges = async (req, res) => {
     }
 };
 
-// Get a single challenge by ID
+// Get active challenges (public endpoint)
+exports.getActiveChallenges = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const now = new Date();
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    },
+                    start_date: {
+                        lte: now
+                    },
+                    end_date: {
+                        gte: now
+                    }
+                },
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            profile_picture: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    },
+                    start_date: {
+                        lte: now
+                    },
+                    end_date: {
+                        gte: now
+                    }
+                }
+            })
+        ]);
+
+        const challengesWithStatus = challenges.map(challenge => ({
+            ...challenge,
+            is_currently_active: true
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStatus,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching active challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch active challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get ended challenges (public endpoint)
+exports.getEndedChallenges = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const now = new Date();
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where: {
+                    OR: [
+                        {
+                            status: 'ended'
+                        },
+                        {
+                            status: {
+                                in: ['approved', 'active']
+                            },
+                            end_date: {
+                                lt: now
+                            }
+                        }
+                    ]
+                },
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    end_date: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            profile_picture: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    OR: [
+                        {
+                            status: 'ended'
+                        },
+                        {
+                            status: {
+                                in: ['approved', 'active']
+                            },
+                            end_date: {
+                                lt: now
+                            }
+                        }
+                    ]
+                }
+            })
+        ]);
+
+        const challengesWithStatus = challenges.map(challenge => ({
+            ...challenge,
+            is_currently_active: false
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStatus,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching ended challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch ended challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get a single challenge by ID (public endpoint)
+// Pending and rejected challenges are not accessible to unauthenticated users
 exports.getChallengeById = async (req, res) => {
     try {
         const { challengeId } = req.params;
@@ -235,6 +420,18 @@ exports.getChallengeById = async (req, res) => {
                 status: 'error',
                 message: 'Challenge not found'
             });
+        }
+
+        // Hide pending and rejected challenges from public view
+        // Only authenticated users who are organizers can see their own pending challenges
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            // Allow organizer to see their own pending/rejected challenges
+            if (!userId || challenge.organizer_id !== userId) {
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Challenge not found'
+                });
+            }
         }
 
         // Check if user is a participant
@@ -385,11 +582,11 @@ exports.joinChallenge = async (req, res) => {
     }
 };
 
-// Get participants of a challenge (for organizer and participants)
+// Get participants of a challenge (public endpoint - accessible to unauthenticated users)
 exports.getChallengeParticipants = async (req, res) => {
     try {
         const { challengeId } = req.params;
-        const userId = req.user.id;
+        const userId = req.user?.id; // Optional - user might not be authenticated
         const { page = 1, limit = 50 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -410,22 +607,16 @@ exports.getChallengeParticipants = async (req, res) => {
             });
         }
 
-        // Check if user is organizer or participant
-        const isOrganizer = challenge.organizer_id === userId;
-        const isParticipant = await prisma.challengeParticipant.findUnique({
-            where: {
-                unique_challenge_participant: {
-                    challenge_id: challengeId,
-                    user_id: userId
-                }
+        // Hide pending and rejected challenges from public view
+        // Only authenticated users who are organizers can see their own pending challenges
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            // Allow organizer to see their own pending/rejected challenges
+            if (!userId || challenge.organizer_id !== userId) {
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Challenge not found'
+                });
             }
-        });
-
-        if (!isOrganizer && !isParticipant) {
-            return res.status(403).json({
-                status: 'error',
-                message: 'You do not have permission to view participants'
-            });
         }
 
         const [participants, total] = await Promise.all([
@@ -491,7 +682,7 @@ exports.getChallengeParticipants = async (req, res) => {
     }
 };
 
-// Get posts for a challenge
+// Get posts for a challenge (public endpoint - accessible to unauthenticated users)
 exports.getChallengePosts = async (req, res) => {
     try {
         const { challengeId } = req.params;
@@ -504,6 +695,14 @@ exports.getChallengePosts = async (req, res) => {
         });
 
         if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        // Only return posts from active/approved/ended challenges (not pending or rejected)
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
             return res.status(404).json({
                 status: 'error',
                 message: 'Challenge not found'

@@ -104,28 +104,50 @@ exports.createPost = async (req, res) => {
                 });
             }
         }
-        // Handle file upload
-        let video_url = '';
-        let fileType = 'text';
-        let filePath = '';
-        let mimetype = '';
-        if (req.file) {
-            // File was uploaded to R2 (or local storage as fallback)
-            video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
-            fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
-            filePath = req.file.path;
-            mimetype = req.file.mimetype;
-            console.log("File uploaded successfully:", {
-                url: video_url,
-                filename: req.file.filename,
-                path: req.file.path,
-                mimetype: req.file.mimetype,
-                size: req.file.size,
-                storage: req.file.r2Url ? 'R2' : 'local'
+        // Handle file upload - Media is required for post creation
+        if (!req.file) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Media file is required',
+                details: 'A valid image or video file must be uploaded to create a post. Please ensure the file is included in the request with the field name "file".'
             });
-        } else {
-            console.log("No file was uploaded. Check if the request is using multipart/form-data and the file field is named 'file'");
         }
+    
+        // Verify that the file upload was successful
+        const video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
+        
+        if (!video_url || video_url.trim() === '') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Media upload failed',
+                details: 'The file upload was not successful. Please try again with a valid image or video file.'
+            });
+        }
+
+        // Verify file type is valid (image or video)
+        const isValidMediaType = req.file.mimetype.startsWith('image/') || req.file.mimetype.startsWith('video/');
+        if (!isValidMediaType) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid file type',
+                details: 'Only image and video files are allowed. Please upload a valid image (jpg, png, gif, etc.) or video (mp4, mov, etc.) file.',
+                received_mimetype: req.file.mimetype
+            });
+        }
+
+        // Determine file type
+        const fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
+        const filePath = req.file.path;
+        const mimetype = req.file.mimetype;
+
+        console.log("File uploaded successfully:", {
+            url: video_url,
+            filename: req.file.filename,
+            path: req.file.path,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+            storage: req.file.r2Url ? 'R2' : 'local'
+        });
 
         const post = await prisma.post.create({
             data: {
