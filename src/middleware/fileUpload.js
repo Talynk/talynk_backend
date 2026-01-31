@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs').promises;
 const os = require('os');
 const { uploadFileToR2, isR2Configured } = require('../services/r2Storage');
+const { processVideoInBackground, generateAndUploadThumbnail } = require('../services/videoProcessingService');
 
 // Check if R2 is enabled
 const USE_R2 = process.env.USE_R2 === 'true' || process.env.USE_R2 === '1';
@@ -85,6 +86,7 @@ const handleFileUpload = async (req, res, next) => {
     let fileUrl;
     let fileName;
     let filePath;
+    const isVideo = req.file.mimetype.startsWith('video/');
 
     if (R2_ENABLED) {
       // Upload to R2
@@ -95,7 +97,7 @@ const handleFileUpload = async (req, res, next) => {
         // Get file buffer from memory storage
         const fileBuffer = req.file.buffer;
         
-        // Save buffer to temp file for processing (if video/image)
+        // Save buffer to temp file for HLS processing (if video)
         // This allows background worker to process without downloading from R2
         const isMedia = req.file.mimetype.startsWith('video/') || req.file.mimetype.startsWith('image/');
         let tempFilePath = null;
@@ -130,7 +132,19 @@ const handleFileUpload = async (req, res, next) => {
         req.file.localUrl = fileUrl; // For backward compatibility
         req.file.supabaseUrl = fileUrl; // For backward compatibility
         req.file.key = result.key; // R2 key for future deletion if needed
-        req.file.tempPath = tempFilePath; // Temp file path for processing (if media)
+        req.file.tempPath = tempFilePath; // Temp file path for HLS processing (if video)
+        req.file.needsHlsProcessing = isVideo; // Flag for HLS processing
+        
+        // Generate quick thumbnail for videos (non-blocking)
+        if (isVideo && tempFilePath) {
+          try {
+            const thumbnailUrl = await generateAndUploadThumbnail(tempFilePath, uuidv4());
+            req.file.quickThumbnailUrl = thumbnailUrl;
+            console.log('[UPLOAD] Quick thumbnail generated:', thumbnailUrl);
+          } catch (thumbError) {
+            console.warn('[UPLOAD] Quick thumbnail generation failed:', thumbError.message);
+          }
+        }
       } catch (r2Error) {
         console.error('[UPLOAD] R2 upload failed, falling back to local storage:', r2Error);
         // Fallback to local storage if R2 fails
@@ -146,6 +160,8 @@ const handleFileUpload = async (req, res, next) => {
         req.file.path = `uploads/${fileName}`;
         req.file.localUrl = fileUrl;
         req.file.supabaseUrl = fileUrl;
+        req.file.tempPath = filePath; // Use local path for HLS processing
+        req.file.needsHlsProcessing = isVideo;
         
         console.log('[UPLOAD] File saved to local storage (fallback):', fileUrl);
       }
@@ -162,6 +178,8 @@ const handleFileUpload = async (req, res, next) => {
       req.file.path = filePath;
       req.file.localUrl = fileUrl;
       req.file.supabaseUrl = fileUrl; // Keep for backward compatibility
+      req.file.tempPath = filePath; // Use local path for HLS processing
+      req.file.needsHlsProcessing = isVideo;
     }
     
     console.log('[UPLOAD] File processing completed successfully');

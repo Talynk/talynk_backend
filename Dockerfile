@@ -40,8 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=base /app /app
 
-# Ensure uploads directory exists and is writable
-RUN mkdir -p /app/uploads && chown -R node:node /app
+# Ensure uploads and tmp directories exist and are writable for HLS processing
+RUN mkdir -p /app/uploads /app/tmp/hls /app/tmp/uploads /app/tmp/thumbnails && chown -R node:node /app
 
 # Expose app port
 EXPOSE 3000

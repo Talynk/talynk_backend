@@ -25,4 +25,8 @@ router.get('/:postId', postController.getPostById);
 router.post('/:postId/like', authenticate, likeController.toggleLike);
 router.delete('/:postId', authenticate, postController.deletePost);
 
+// Video processing routes
+router.get('/:postId/processing-status', postController.getVideoProcessingStatus);
+router.post('/:postId/retry-processing', authenticate, postController.retryVideoProcessing);
+
 module.exports = router;

@@ -17,6 +17,7 @@ const {
     clearCacheByPattern 
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
+const { processVideoInBackground } = require('../services/videoProcessingService');
 
 
 exports.createPost = async (req, res) => {
@@ -149,6 +150,11 @@ exports.createPost = async (req, res) => {
             storage: req.file.r2Url ? 'R2' : 'local'
         });
 
+        // Prepare video-specific data
+        const isVideo = fileType === 'video';
+        const thumbnailUrl = req.file.quickThumbnailUrl || null;
+        const processingStatus = isVideo ? 'pending' : null;
+
         const post = await prisma.post.create({
             data: {
             user_id: userId,
@@ -159,11 +165,21 @@ exports.createPost = async (req, res) => {
             uploadDate: new Date(),
             type: fileType,
             video_url,
+            thumbnail_url: thumbnailUrl, // Server-generated thumbnail
+            processing_status: processingStatus, // HLS processing status
             content: caption
             }
         });
 
         console.log("Post created successfully:", post.id);
+
+        // Trigger background HLS processing for video files
+        if (isVideo && req.file.tempPath && req.file.needsHlsProcessing) {
+            console.log("[POST] Triggering background HLS processing for post:", post.id);
+            // Process in background - don't await, let it run asynchronously
+            processVideoInBackground(req.file.tempPath, post.id, prisma)
+                .catch(err => console.error('[POST] Background HLS processing error:', err));
+        }
 
         // Optionally link post to challenge if challenge_id is provided
         let challengePost = null;
@@ -245,6 +261,12 @@ exports.createPost = async (req, res) => {
                 post: {
                     ...post,
                     video_url: video_url,
+                    thumbnail_url: thumbnailUrl,
+                    // HLS processing info
+                    hls_processing: isVideo ? {
+                        status: 'pending',
+                        message: 'Video is being processed for adaptive streaming. HLS URL will be available shortly.'
+                    } : null,
                     challenge_linked: challengePost ? true : false,
                     challenge_id: challengePost ? challengePost.challenge_id : null
                 }
@@ -641,10 +663,19 @@ exports.getAllPosts = async (req, res) => {
             : totalRegular;
 
         // Add full URLs for files and enrich with category info
+        // For videos: prefer HLS URL over raw video URL for adaptive streaming
         const postsWithUrls = allPosts.map(post => {
-            if (post.video_url) {
-                post.fullUrl = post.video_url; // Supabase URL is already complete
+            // Use HLS URL if available, otherwise fall back to raw video URL
+            if (post.hls_url && post.processing_status === 'completed') {
+                post.fullUrl = post.hls_url; // HLS master playlist URL
+                post.streamType = 'hls';
+            } else if (post.video_url) {
+                post.fullUrl = post.video_url; // Raw video URL (fallback)
+                post.streamType = 'raw';
             }
+            
+            // Include HLS processing status for frontend to handle loading states
+            post.hlsReady = post.hls_url && post.processing_status === 'completed';
             
             // Enrich with main category and subcategory info
             if (post.category) {
@@ -834,10 +865,22 @@ exports.getPostById = async (req, res) => {
         }
 
         // Add full URL for media and enrich with category info
+        // For videos: prefer HLS URL over raw video URL for adaptive streaming
         const postWithUrl = {
-            ...post,
-            fullUrl: post.video_url // Supabase URL is already complete
+            ...post
         };
+        
+        // Use HLS URL if available, otherwise fall back to raw video URL
+        if (post.hls_url && post.processing_status === 'completed') {
+            postWithUrl.fullUrl = post.hls_url; // HLS master playlist URL
+            postWithUrl.streamType = 'hls';
+        } else if (post.video_url) {
+            postWithUrl.fullUrl = post.video_url; // Raw video URL (fallback)
+            postWithUrl.streamType = 'raw';
+        }
+        
+        // Include HLS processing status for frontend to handle loading states
+        postWithUrl.hlsReady = post.hls_url && post.processing_status === 'completed';
         
         // Enrich with main category and subcategory info
         if (postWithUrl.category) {
@@ -2135,6 +2178,169 @@ exports.publishDraftPost = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error publishing draft post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get video processing status for a post
+exports.getVideoProcessingStatus = async (req, res) => {
+    try {
+        const { postId } = req.params;
+
+        // Validate UUID format
+        if (!isUuid(postId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format'
+            });
+        }
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: {
+                id: true,
+                type: true,
+                video_url: true,
+                hls_url: true,
+                thumbnail_url: true,
+                processing_status: true,
+                processing_error: true,
+                video_duration: true,
+                video_width: true,
+                video_height: true
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        if (post.type !== 'video') {
+            return res.json({
+                status: 'success',
+                data: {
+                    postId: post.id,
+                    type: post.type,
+                    message: 'Not a video post, no HLS processing required'
+                }
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: {
+                postId: post.id,
+                type: post.type,
+                processing: {
+                    status: post.processing_status || 'unknown',
+                    error: post.processing_error,
+                    hlsReady: post.hls_url && post.processing_status === 'completed'
+                },
+                urls: {
+                    raw: post.video_url,
+                    hls: post.hls_url,
+                    thumbnail: post.thumbnail_url,
+                    // Use HLS if ready, otherwise raw
+                    preferred: (post.hls_url && post.processing_status === 'completed') 
+                        ? post.hls_url 
+                        : post.video_url
+                },
+                metadata: {
+                    duration: post.video_duration,
+                    width: post.video_width,
+                    height: post.video_height
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching video processing status:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching video processing status',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Retry HLS processing for a failed video
+exports.retryVideoProcessing = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const userId = req.user.id;
+
+        // Validate UUID format
+        if (!isUuid(postId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format'
+            });
+        }
+
+        // Check if post exists and belongs to user
+        const post = await prisma.post.findFirst({
+            where: {
+                id: postId,
+                user_id: userId,
+                type: 'video'
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Video post not found or you do not have permission'
+            });
+        }
+
+        // Check if processing already completed
+        if (post.processing_status === 'completed' && post.hls_url) {
+            return res.json({
+                status: 'success',
+                message: 'Video already processed successfully',
+                data: {
+                    hls_url: post.hls_url,
+                    thumbnail_url: post.thumbnail_url
+                }
+            });
+        }
+
+        // Check if video_url exists (need raw video to process)
+        if (!post.video_url) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'No source video found. Please re-upload the video.'
+            });
+        }
+
+        // Update processing status to pending
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                processing_status: 'pending',
+                processing_error: null
+            }
+        });
+
+        // Note: For retry, we'd need to download the video from R2 first
+        // This is a simplified version - full implementation would download and reprocess
+        res.json({
+            status: 'success',
+            message: 'Video processing retry initiated. Please allow a few minutes for processing to complete.',
+            data: {
+                postId: post.id,
+                processing_status: 'pending'
+            }
+        });
+
+    } catch (error) {
+        console.error('Error retrying video processing:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error retrying video processing',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

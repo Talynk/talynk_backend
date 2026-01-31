@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
+const { processVideoInBackground } = require('../services/videoProcessingService');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -1114,13 +1115,19 @@ exports.createPostInChallenge = async (req, res) => {
         let fileType = 'text';
         let filePath = '';
         let mimetype = '';
+        let thumbnailUrl = null;
         if (req.file) {
             // File was uploaded to R2 (or local storage as fallback)
             video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
             filePath = req.file.path;
             mimetype = req.file.mimetype;
+            thumbnailUrl = req.file.quickThumbnailUrl || null;
         }
+
+        // Prepare video-specific data for HLS processing
+        const isVideo = fileType === 'video';
+        const processingStatus = isVideo ? 'pending' : null;
 
         // Create the post (always active when posting to challenge)
         const post = await prisma.post.create({
@@ -1133,9 +1140,19 @@ exports.createPostInChallenge = async (req, res) => {
                 uploadDate: new Date(),
                 type: fileType,
                 video_url,
+                thumbnail_url: thumbnailUrl, // Server-generated thumbnail
+                processing_status: processingStatus, // HLS processing status
                 content: caption
             }
         });
+
+        // Trigger background HLS processing for video files
+        if (isVideo && req.file && req.file.tempPath && req.file.needsHlsProcessing) {
+            console.log("[CHALLENGE] Triggering background HLS processing for post:", post.id);
+            // Process in background - don't await, let it run asynchronously
+            processVideoInBackground(req.file.tempPath, post.id, prisma)
+                .catch(err => console.error('[CHALLENGE] Background HLS processing error:', err));
+        }
 
         // Update user's post count
         await prisma.user.update({
@@ -1172,7 +1189,7 @@ exports.createPostInChallenge = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
-        // Video processing/watermarking is handled on the frontend
+        // HLS video processing is handled in the background
 
         res.status(201).json({
             status: 'success',
@@ -1180,7 +1197,13 @@ exports.createPostInChallenge = async (req, res) => {
             data: {
                 post: {
                     ...post,
-                    video_url: video_url
+                    video_url: video_url,
+                    thumbnail_url: thumbnailUrl,
+                    // HLS processing info
+                    hls_processing: isVideo ? {
+                        status: 'pending',
+                        message: 'Video is being processed for adaptive streaming. HLS URL will be available shortly.'
+                    } : null
                 },
                 challenge_post: challengePost
             }
