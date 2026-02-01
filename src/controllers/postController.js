@@ -18,7 +18,7 @@ const {
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 const { processVideoInBackground } = require('../services/videoProcessingService');
-
+const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 exports.createPost = async (req, res) => {
     try {
@@ -662,47 +662,24 @@ exports.getAllPosts = async (req, res) => {
             ? featuredCount + totalRegular
             : totalRegular;
 
-        // Add full URLs for files and enrich with category info
-        // For videos: prefer HLS URL over raw video URL for adaptive streaming
+        // Add full URLs for playback (HLS when ready, else raw) and enrich with category info
         const postsWithUrls = allPosts.map(post => {
-            // Use HLS URL if available, otherwise fall back to raw video URL
-            if (post.hls_url && post.processing_status === 'completed') {
-                post.fullUrl = post.hls_url; // HLS master playlist URL
-                post.streamType = 'hls';
-            } else if (post.video_url) {
-                post.fullUrl = post.video_url; // Raw video URL (fallback)
-                post.streamType = 'raw';
-            }
-            
-            // Include HLS processing status for frontend to handle loading states
-            post.hlsReady = post.hls_url && post.processing_status === 'completed';
-            
+            const p = withVideoPlaybackUrl(post);
             // Enrich with main category and subcategory info
             if (post.category) {
                 if (post.category.level === 2 && post.category.parent) {
-                    // Post has a subcategory, include both main and sub
-                    post.mainCategory = {
+                    p.mainCategory = {
                         id: post.category.parent.id,
                         name: post.category.parent.name,
                         level: post.category.parent.level
                     };
-                    post.subCategory = {
-                        id: post.category.id,
-                        name: post.category.name,
-                        level: post.category.level
-                    };
+                    p.subCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
                 } else if (post.category.level === 1) {
-                    // Post has only a main category (no subcategory)
-                    post.mainCategory = {
-                        id: post.category.id,
-                        name: post.category.name,
-                        level: post.category.level
-                    };
-                    post.subCategory = null;
+                    p.mainCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
+                    p.subCategory = null;
                 }
             }
-            
-            return post;
+            return p;
         });
 
         const responseData = {
@@ -864,45 +841,14 @@ exports.getPostById = async (req, res) => {
             }
         }
 
-        // Add full URL for media and enrich with category info
-        // For videos: prefer HLS URL over raw video URL for adaptive streaming
-        const postWithUrl = {
-            ...post
-        };
-        
-        // Use HLS URL if available, otherwise fall back to raw video URL
-        if (post.hls_url && post.processing_status === 'completed') {
-            postWithUrl.fullUrl = post.hls_url; // HLS master playlist URL
-            postWithUrl.streamType = 'hls';
-        } else if (post.video_url) {
-            postWithUrl.fullUrl = post.video_url; // Raw video URL (fallback)
-            postWithUrl.streamType = 'raw';
-        }
-        
-        // Include HLS processing status for frontend to handle loading states
-        postWithUrl.hlsReady = post.hls_url && post.processing_status === 'completed';
-        
-        // Enrich with main category and subcategory info
-        if (postWithUrl.category) {
-            if (postWithUrl.category.level === 2 && postWithUrl.category.parent) {
-                // Post has a subcategory, include both main and sub
-                postWithUrl.mainCategory = {
-                    id: postWithUrl.category.parent.id,
-                    name: postWithUrl.category.parent.name,
-                    level: postWithUrl.category.parent.level
-                };
-                postWithUrl.subCategory = {
-                    id: postWithUrl.category.id,
-                    name: postWithUrl.category.name,
-                    level: postWithUrl.category.level
-                };
-            } else if (postWithUrl.category.level === 1) {
-                // Post has only a main category (no subcategory)
-                postWithUrl.mainCategory = {
-                    id: postWithUrl.category.id,
-                    name: postWithUrl.category.name,
-                    level: postWithUrl.category.level
-                };
+        // Add full URL for playback (HLS when ready, else raw) and enrich with category info
+        const postWithUrl = withVideoPlaybackUrl(post);
+        if (post.category) {
+            if (post.category.level === 2 && post.category.parent) {
+                postWithUrl.mainCategory = { id: post.category.parent.id, name: post.category.parent.name, level: post.category.parent.level };
+                postWithUrl.subCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
+            } else if (post.category.level === 1) {
+                postWithUrl.mainCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
                 postWithUrl.subCategory = null;
             }
         }
@@ -1347,16 +1293,8 @@ exports.getUserPosts = async (req, res) => {
             }
         });
 
-        // Add full URLs for files (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
-            const postData = { ...post };
-            if (postData.video_url) {
-                postData.fullUrl = postData.video_url; // Supabase URL is already complete
-            }
-            console.log(` Posts: ${JSON.stringify(postData)}`)
-            return postData;
-        });
-        console.log(` Posts: ${JSON.stringify(postsWithUrls)}`)
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = posts.map(post => withVideoPlaybackUrl(post));
         res.json({
             status: 'success',
             data: { posts: postsWithUrls }
@@ -1613,11 +1551,8 @@ exports.searchPosts = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for videos (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => ({
-            ...post,
-            fullUrl: post.video_url // Supabase URL is already complete
-        }));
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = posts.map(post => withVideoPlaybackUrl(post));
 
         const responseData = {
             posts: postsWithUrls,
@@ -1818,11 +1753,11 @@ exports.getFollowingPosts = async (req, res) => {
         ]);
 
         // Process posts to add full URLs and optimize response
-        const processedPosts = followingPosts.map(post => ({
-            ...post,
-            fullUrl: post.video_url, // Supabase URLs are already complete
-            isFromFollowing: true
-        }));
+        const processedPosts = followingPosts.map(post => {
+            const p = withVideoPlaybackUrl(post);
+            p.isFromFollowing = true;
+            return p;
+        });
 
         const responseData = {
             posts: processedPosts,
@@ -1934,15 +1869,13 @@ exports.getOptimizedFeed = async (req, res) => {
             });
 
             featuredPosts.forEach(featured => {
-                feedPosts.push({
-                    ...featured.post,
-                    fullUrl: featured.post.video_url,
-                    isFeatured: true,
-                    featuredAt: featured.createdAt,
-                    expiresAt: featured.expires_at,
-                    featuredBy: featured.admin?.username,
-                    featuredReason: featured.reason
-                });
+                const p = withVideoPlaybackUrl(featured.post);
+                p.isFeatured = true;
+                p.featuredAt = featured.createdAt;
+                p.expiresAt = featured.expires_at;
+                p.featuredBy = featured.admin?.username;
+                p.featuredReason = featured.reason;
+                feedPosts.push(p);
             });
         }
 
@@ -1996,11 +1929,9 @@ exports.getOptimizedFeed = async (req, res) => {
             });
 
             followingPosts.forEach(post => {
-                feedPosts.push({
-                    ...post,
-                    fullUrl: post.video_url,
-                    isFromFollowing: true
-                });
+                const p = withVideoPlaybackUrl(post);
+                p.isFromFollowing = true;
+                feedPosts.push(p);
             });
         }
 
@@ -2082,11 +2013,8 @@ exports.getUserDraftPosts = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for files
-        const postsWithUrls = draftPosts.map(post => ({
-            ...post,
-            fullUrl: post.video_url
-        }));
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = draftPosts.map(post => withVideoPlaybackUrl(post));
 
         res.json({
             status: 'success',

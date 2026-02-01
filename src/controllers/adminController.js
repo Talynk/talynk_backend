@@ -1,4 +1,5 @@
 const prisma = require('../lib/prisma');
+const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 /**
  * Get Admin ID from user (handles both Admin records and Users with admin role)
@@ -4649,13 +4650,8 @@ exports.getRejectedPosts = async (req, res) => {
             }
         });
 
-        // Add full URLs for files (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
-            if (post.video_url) {
-                post.fullUrl = post.video_url; // Supabase URL is already complete
-            }
-            return post;
-        });
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = posts.map(post => withVideoPlaybackUrl(post));
 
         res.json({
             status: 'success',
