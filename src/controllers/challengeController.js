@@ -3,7 +3,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { processVideoInBackground, generateAndUploadThumbnail } = require('../services/videoProcessingService');
+const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
+const { addVideoJob } = require('../queues/videoQueue');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -138,7 +139,7 @@ exports.getAllChallenges = async (req, res) => {
         // Only allow approved, active, or ended status - never pending or rejected
         const allowedStatuses = ['approved', 'active', 'ended'];
         let statusFilter = ['approved', 'active']; // Default to approved/active
-        
+
         if (status) {
             // Only use the status if it's in the allowed list (exclude pending/rejected)
             if (allowedStatuses.includes(status)) {
@@ -185,7 +186,7 @@ exports.getAllChallenges = async (req, res) => {
             const now = new Date();
             const startDate = new Date(challenge.start_date);
             const endDate = new Date(challenge.end_date);
-            
+
             let isActive = false;
             if (challenge.status === 'active' || challenge.status === 'approved') {
                 isActive = now >= startDate && now <= endDate;
@@ -454,7 +455,7 @@ exports.getChallengeById = async (req, res) => {
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
         const isActive = (challenge.status === 'active' || challenge.status === 'approved') &&
-                        now >= startDate && now <= endDate;
+            now >= startDate && now <= endDate;
 
         res.json({
             status: 'success',
@@ -1149,7 +1150,7 @@ exports.createPostInChallenge = async (req, res) => {
         if (isVideo && req.file && req.file.tempPath) {
             const thumbId = post.id; // Use post ID as thumbnail identifier
             console.log("[CHALLENGE] Triggering background thumbnail generation for post:", post.id);
-            
+
             // Generate thumbnail in background - don't await
             generateAndUploadThumbnail(req.file.tempPath, thumbId)
                 .then(thumbnailUrl => {
@@ -1167,12 +1168,27 @@ exports.createPostInChallenge = async (req, res) => {
                 });
         }
 
-        // Trigger background HLS processing for video files
+        // Add video to processing queue for HLS transcoding
         if (isVideo && req.file && req.file.tempPath && req.file.needsHlsProcessing) {
-            console.log("[CHALLENGE] Triggering background HLS processing for post:", post.id);
-            // Process in background - don't await, let it run asynchronously
-            processVideoInBackground(req.file.tempPath, post.id, prisma)
-                .catch(err => console.error('[CHALLENGE] Background HLS processing error:', err));
+            console.log("[CHALLENGE] Adding video to processing queue for post:", post.id);
+            try {
+                let videoDuration = 30;
+                try {
+                    const metadata = await getVideoMetadata(req.file.tempPath);
+                    videoDuration = metadata.duration || 30;
+                } catch (metaErr) {
+                    console.warn('[CHALLENGE] Could not get video duration, using default:', metaErr.message);
+                }
+
+                await addVideoJob(post.id, req.file.tempPath, videoDuration);
+                console.log(`[CHALLENGE] Video queued successfully for post ${post.id}`);
+            } catch (queueErr) {
+                console.error('[CHALLENGE] Failed to queue video job:', queueErr.message);
+                await prisma.post.update({
+                    where: { id: post.id },
+                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                });
+            }
         }
 
         // Update user's post count
@@ -1231,7 +1247,7 @@ exports.createPostInChallenge = async (req, res) => {
         });
     } catch (error) {
         console.error('Error creating post in challenge:', error);
-        
+
         // Handle specific Prisma errors
         if (error.code === 'P2003') {
             return res.status(400).json({
