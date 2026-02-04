@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
+const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
+const { addVideoJob } = require('../queues/videoQueue');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -127,15 +129,27 @@ exports.createChallenge = async (req, res) => {
     }
 };
 
-// Get all approved and active challenges
+// Get all approved and active challenges (public endpoint)
+// Pending challenges are never returned in public endpoints
 exports.getAllChallenges = async (req, res) => {
     try {
         const { status, page = 1, limit = 20 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
+        // Only allow approved, active, or ended status - never pending or rejected
+        const allowedStatuses = ['approved', 'active', 'ended'];
+        let statusFilter = ['approved', 'active']; // Default to approved/active
+
+        if (status) {
+            // Only use the status if it's in the allowed list (exclude pending/rejected)
+            if (allowedStatuses.includes(status)) {
+                statusFilter = [status];
+            }
+        }
+
         const where = {
             status: {
-                in: status ? [status] : ['approved', 'active']
+                in: statusFilter
             }
         };
 
@@ -172,7 +186,7 @@ exports.getAllChallenges = async (req, res) => {
             const now = new Date();
             const startDate = new Date(challenge.start_date);
             const endDate = new Date(challenge.end_date);
-            
+
             let isActive = false;
             if (challenge.status === 'active' || challenge.status === 'approved') {
                 isActive = now >= startDate && now <= endDate;
@@ -204,7 +218,180 @@ exports.getAllChallenges = async (req, res) => {
     }
 };
 
-// Get a single challenge by ID
+// Get active challenges (public endpoint)
+exports.getActiveChallenges = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const now = new Date();
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    },
+                    start_date: {
+                        lte: now
+                    },
+                    end_date: {
+                        gte: now
+                    }
+                },
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            profile_picture: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    status: {
+                        in: ['approved', 'active']
+                    },
+                    start_date: {
+                        lte: now
+                    },
+                    end_date: {
+                        gte: now
+                    }
+                }
+            })
+        ]);
+
+        const challengesWithStatus = challenges.map(challenge => ({
+            ...challenge,
+            is_currently_active: true
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStatus,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching active challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch active challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get ended challenges (public endpoint)
+exports.getEndedChallenges = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const now = new Date();
+
+        const [challenges, total] = await Promise.all([
+            prisma.challenge.findMany({
+                where: {
+                    OR: [
+                        {
+                            status: 'ended'
+                        },
+                        {
+                            status: {
+                                in: ['approved', 'active']
+                            },
+                            end_date: {
+                                lt: now
+                            }
+                        }
+                    ]
+                },
+                skip,
+                take: parseInt(limit),
+                orderBy: {
+                    end_date: 'desc'
+                },
+                include: {
+                    organizer: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            profile_picture: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            participants: true,
+                            posts: true
+                        }
+                    }
+                }
+            }),
+            prisma.challenge.count({
+                where: {
+                    OR: [
+                        {
+                            status: 'ended'
+                        },
+                        {
+                            status: {
+                                in: ['approved', 'active']
+                            },
+                            end_date: {
+                                lt: now
+                            }
+                        }
+                    ]
+                }
+            })
+        ]);
+
+        const challengesWithStatus = challenges.map(challenge => ({
+            ...challenge,
+            is_currently_active: false
+        }));
+
+        res.json({
+            status: 'success',
+            data: challengesWithStatus,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching ended challenges:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch ended challenges',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get a single challenge by ID (public endpoint)
+// Pending and rejected challenges are not accessible to unauthenticated users
 exports.getChallengeById = async (req, res) => {
     try {
         const { challengeId } = req.params;
@@ -237,6 +424,18 @@ exports.getChallengeById = async (req, res) => {
             });
         }
 
+        // Hide pending and rejected challenges from public view
+        // Only authenticated users who are organizers can see their own pending challenges
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            // Allow organizer to see their own pending/rejected challenges
+            if (!userId || challenge.organizer_id !== userId) {
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Challenge not found'
+                });
+            }
+        }
+
         // Check if user is a participant
         let isParticipant = false;
         if (userId) {
@@ -256,7 +455,7 @@ exports.getChallengeById = async (req, res) => {
         const startDate = new Date(challenge.start_date);
         const endDate = new Date(challenge.end_date);
         const isActive = (challenge.status === 'active' || challenge.status === 'approved') &&
-                        now >= startDate && now <= endDate;
+            now >= startDate && now <= endDate;
 
         res.json({
             status: 'success',
@@ -385,11 +584,11 @@ exports.joinChallenge = async (req, res) => {
     }
 };
 
-// Get participants of a challenge (for organizer and participants)
+// Get participants of a challenge (public endpoint - accessible to unauthenticated users)
 exports.getChallengeParticipants = async (req, res) => {
     try {
         const { challengeId } = req.params;
-        const userId = req.user.id;
+        const userId = req.user?.id; // Optional - user might not be authenticated
         const { page = 1, limit = 50 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -410,22 +609,16 @@ exports.getChallengeParticipants = async (req, res) => {
             });
         }
 
-        // Check if user is organizer or participant
-        const isOrganizer = challenge.organizer_id === userId;
-        const isParticipant = await prisma.challengeParticipant.findUnique({
-            where: {
-                unique_challenge_participant: {
-                    challenge_id: challengeId,
-                    user_id: userId
-                }
+        // Hide pending and rejected challenges from public view
+        // Only authenticated users who are organizers can see their own pending challenges
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            // Allow organizer to see their own pending/rejected challenges
+            if (!userId || challenge.organizer_id !== userId) {
+                return res.status(404).json({
+                    status: 'error',
+                    message: 'Challenge not found'
+                });
             }
-        });
-
-        if (!isOrganizer && !isParticipant) {
-            return res.status(403).json({
-                status: 'error',
-                message: 'You do not have permission to view participants'
-            });
         }
 
         const [participants, total] = await Promise.all([
@@ -491,7 +684,7 @@ exports.getChallengeParticipants = async (req, res) => {
     }
 };
 
-// Get posts for a challenge
+// Get posts for a challenge (public endpoint - accessible to unauthenticated users)
 exports.getChallengePosts = async (req, res) => {
     try {
         const { challengeId } = req.params;
@@ -504,6 +697,14 @@ exports.getChallengePosts = async (req, res) => {
         });
 
         if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        // Only return posts from active/approved/ended challenges (not pending or rejected)
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
             return res.status(404).json({
                 status: 'error',
                 message: 'Challenge not found'
@@ -915,6 +1116,7 @@ exports.createPostInChallenge = async (req, res) => {
         let fileType = 'text';
         let filePath = '';
         let mimetype = '';
+        let thumbnailUrl = null;
         if (req.file) {
             // File was uploaded to R2 (or local storage as fallback)
             video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
@@ -922,6 +1124,10 @@ exports.createPostInChallenge = async (req, res) => {
             filePath = req.file.path;
             mimetype = req.file.mimetype;
         }
+
+        // Prepare video-specific data for HLS processing
+        const isVideo = fileType === 'video';
+        const processingStatus = isVideo ? 'pending' : null;
 
         // Create the post (always active when posting to challenge)
         const post = await prisma.post.create({
@@ -934,9 +1140,56 @@ exports.createPostInChallenge = async (req, res) => {
                 uploadDate: new Date(),
                 type: fileType,
                 video_url,
+                thumbnail_url: null, // Will be populated by background thumbnail generation
+                processing_status: processingStatus, // HLS processing status
                 content: caption
             }
         });
+
+        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
+        if (isVideo && req.file && req.file.tempPath) {
+            const thumbId = post.id; // Use post ID as thumbnail identifier
+            console.log("[CHALLENGE] Triggering background thumbnail generation for post:", post.id);
+
+            // Generate thumbnail in background - don't await
+            generateAndUploadThumbnail(req.file.tempPath, thumbId)
+                .then(thumbnailUrl => {
+                    // Update post with thumbnail once ready
+                    return prisma.post.update({
+                        where: { id: post.id },
+                        data: { thumbnail_url: thumbnailUrl }
+                    });
+                })
+                .then(() => {
+                    console.log(`[CHALLENGE] Thumbnail updated for post ${post.id}`);
+                })
+                .catch(err => {
+                    console.warn('[CHALLENGE] Thumbnail generation/update failed:', err.message);
+                });
+        }
+
+        // Add video to processing queue for HLS transcoding
+        if (isVideo && req.file && req.file.tempPath && req.file.needsHlsProcessing) {
+            console.log("[CHALLENGE] Adding video to processing queue for post:", post.id);
+            try {
+                let videoDuration = 30;
+                try {
+                    const metadata = await getVideoMetadata(req.file.tempPath);
+                    videoDuration = metadata.duration || 30;
+                } catch (metaErr) {
+                    console.warn('[CHALLENGE] Could not get video duration, using default:', metaErr.message);
+                }
+
+                await addVideoJob(post.id, req.file.tempPath, videoDuration);
+                console.log(`[CHALLENGE] Video queued successfully for post ${post.id}`);
+            } catch (queueErr) {
+                console.error('[CHALLENGE] Failed to queue video job:', queueErr.message);
+                await prisma.post.update({
+                    where: { id: post.id },
+                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                });
+            }
+        }
 
         // Update user's post count
         await prisma.user.update({
@@ -973,7 +1226,7 @@ exports.createPostInChallenge = async (req, res) => {
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
-        // Video processing/watermarking is handled on the frontend
+        // HLS video processing is handled in the background
 
         res.status(201).json({
             status: 'success',
@@ -981,14 +1234,20 @@ exports.createPostInChallenge = async (req, res) => {
             data: {
                 post: {
                     ...post,
-                    video_url: video_url
+                    video_url: video_url,
+                    thumbnail_url: thumbnailUrl,
+                    // HLS processing info
+                    hls_processing: isVideo ? {
+                        status: 'pending',
+                        message: 'Video is being processed for adaptive streaming. HLS URL will be available shortly.'
+                    } : null
                 },
                 challenge_post: challengePost
             }
         });
     } catch (error) {
         console.error('Error creating post in challenge:', error);
-        
+
         // Handle specific Prisma errors
         if (error.code === 'P2003') {
             return res.status(400).json({

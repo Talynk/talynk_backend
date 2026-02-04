@@ -6,6 +6,7 @@ const {
     clearCacheByPattern 
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
+const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 // Get featured posts with optimized queries and caching
 exports.getFeaturedPosts = async (req, res) => {
@@ -95,21 +96,16 @@ exports.getFeaturedPosts = async (req, res) => {
             })
         ]);
 
-        // Process posts to add full URLs and optimize response
+        // Process posts: add full URLs for playback (HLS when ready, else raw)
         const processedPosts = featuredPosts.map(featured => {
             const post = featured.post;
-            return {
-                id: featured.id,
-                post: {
-                    ...post,
-                    fullUrl: post.video_url, // Supabase URLs are already complete
-                    isFeatured: true,
-                    featuredAt: featured.createdAt,
-                    expiresAt: featured.expires_at,
-                    featuredBy: featured.admin.username,
-                    featuredReason: featured.reason
-                }
-            };
+            const p = withVideoPlaybackUrl(post);
+            p.isFeatured = true;
+            p.featuredAt = featured.createdAt;
+            p.expiresAt = featured.expires_at;
+            p.featuredBy = featured.admin?.username;
+            p.featuredReason = featured.reason;
+            return { id: featured.id, post: p };
         });
 
         const responseData = {

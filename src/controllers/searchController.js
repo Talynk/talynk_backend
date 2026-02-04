@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
 const { getSearchCache, setSearchCache } = require('../utils/cache');
+const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 /**
  * Comprehensive search endpoint that searches posts, users, and challenges
@@ -202,13 +203,13 @@ exports.search = async (req, res) => {
                 prisma.post.count({ where: postWhere })
             ]);
 
-            results.posts = posts.map(post => ({
-                ...post,
-                fullUrl: post.video_url,
-                likeCount: post.likes,
-                viewCount: post.views,
-                commentCount: post._count.comments
-            }));
+            results.posts = posts.map(post => {
+                const p = withVideoPlaybackUrl(post);
+                p.likeCount = post.likes;
+                p.viewCount = post.views;
+                p.commentCount = post._count.comments;
+                return p;
+            });
             results.pagination.total += postsTotal;
         }
 

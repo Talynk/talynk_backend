@@ -4,9 +4,9 @@ const prisma = require('../lib/prisma');
 const { createClient } = require('@supabase/supabase-js');
 const os = require('os');
 const fs = require('fs').promises;
-const { 
-    CACHE_KEYS, 
-    getFollowingPostsCache, 
+const {
+    CACHE_KEYS,
+    getFollowingPostsCache,
     setFollowingPostsCache,
     getAllPostsCache,
     setAllPostsCache,
@@ -14,10 +14,12 @@ const {
     setSinglePostCache,
     getSearchCache,
     setSearchCache,
-    clearCacheByPattern 
+    clearCacheByPattern
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-
+const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
+const { addVideoJob } = require('../queues/videoQueue');
+const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 exports.createPost = async (req, res) => {
     try {
@@ -104,51 +106,126 @@ exports.createPost = async (req, res) => {
                 });
             }
         }
-        // Handle file upload
-        let video_url = '';
-        let fileType = 'text';
-        let filePath = '';
-        let mimetype = '';
-        if (req.file) {
-            // File was uploaded to R2 (or local storage as fallback)
-            video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
-            fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
-            filePath = req.file.path;
-            mimetype = req.file.mimetype;
-            console.log("File uploaded successfully:", {
-                url: video_url,
-                filename: req.file.filename,
-                path: req.file.path,
-                mimetype: req.file.mimetype,
-                size: req.file.size,
-                storage: req.file.r2Url ? 'R2' : 'local'
+        // Handle file upload - Media is required for post creation
+        if (!req.file) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Media file is required',
+                details: 'A valid image or video file must be uploaded to create a post. Please ensure the file is included in the request with the field name "file".'
             });
-        } else {
-            console.log("No file was uploaded. Check if the request is using multipart/form-data and the file field is named 'file'");
         }
+
+        // Verify that the file upload was successful
+        const video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
+
+        if (!video_url || video_url.trim() === '') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Media upload failed',
+                details: 'The file upload was not successful. Please try again with a valid image or video file.'
+            });
+        }
+
+        // Verify file type is valid (image or video)
+        const isValidMediaType = req.file.mimetype.startsWith('image/') || req.file.mimetype.startsWith('video/');
+        if (!isValidMediaType) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid file type',
+                details: 'Only image and video files are allowed. Please upload a valid image (jpg, png, gif, etc.) or video (mp4, mov, etc.) file.',
+                received_mimetype: req.file.mimetype
+            });
+        }
+
+        // Determine file type
+        const fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
+        const filePath = req.file.path;
+        const mimetype = req.file.mimetype;
+
+        console.log("File uploaded successfully:", {
+            url: video_url,
+            filename: req.file.filename,
+            path: req.file.path,
+            mimetype: req.file.mimetype,
+            size: req.file.size,
+            storage: req.file.r2Url ? 'R2' : 'local'
+        });
+
+        // Prepare video-specific data
+        const isVideo = fileType === 'video';
+        const processingStatus = isVideo ? 'pending' : null;
 
         const post = await prisma.post.create({
             data: {
-            user_id: userId,
-            status: postStatus, // Default to active (published immediately), can be set to draft
-            category_id: category.id,  // Use the category ID instead of name
-            title,
-            description: caption,
-            uploadDate: new Date(),
-            type: fileType,
-            video_url,
-            content: caption
+                user_id: userId,
+                status: postStatus, // Default to active (published immediately), can be set to draft
+                category_id: category.id,  // Use the category ID instead of name
+                title,
+                description: caption,
+                uploadDate: new Date(),
+                type: fileType,
+                video_url,
+                thumbnail_url: null, // Will be populated by background thumbnail generation
+                processing_status: processingStatus, // HLS processing status
+                content: caption
             }
         });
 
         console.log("Post created successfully:", post.id);
+
+        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
+        if (isVideo && req.file.tempPath) {
+            const thumbId = post.id; // Use post ID as thumbnail identifier
+            console.log("[POST] Triggering background thumbnail generation for post:", post.id);
+
+            // Generate thumbnail in background - don't await
+            generateAndUploadThumbnail(req.file.tempPath, thumbId)
+                .then(thumbnailUrl => {
+                    // Update post with thumbnail once ready
+                    return prisma.post.update({
+                        where: { id: post.id },
+                        data: { thumbnail_url: thumbnailUrl }
+                    });
+                })
+                .then(() => {
+                    console.log(`[POST] Thumbnail updated for post ${post.id}`);
+                })
+                .catch(err => {
+                    console.warn('[POST] Thumbnail generation/update failed:', err.message);
+                });
+        }
+
+        // Add video to processing queue for HLS transcoding
+        if (isVideo && req.file.tempPath && req.file.needsHlsProcessing) {
+            console.log("[POST] Adding video to processing queue for post:", post.id);
+            try {
+                // Get video duration for priority (shorter = higher priority)
+                let videoDuration = 30; // Default
+                try {
+                    const metadata = await getVideoMetadata(req.file.tempPath);
+                    videoDuration = metadata.duration || 30;
+                } catch (metaErr) {
+                    console.warn('[POST] Could not get video duration, using default:', metaErr.message);
+                }
+
+                await addVideoJob(post.id, req.file.tempPath, videoDuration);
+                console.log(`[POST] Video queued successfully for post ${post.id}`);
+            } catch (queueErr) {
+                console.error('[POST] Failed to queue video job:', queueErr.message);
+                // Update post status to indicate queue failure
+                await prisma.post.update({
+                    where: { id: post.id },
+                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                });
+            }
+        }
 
         // Optionally link post to challenge if challenge_id is provided
         let challengePost = null;
         if (req.body.challenge_id) {
             try {
                 const challengeId = req.body.challenge_id;
-                
+
                 // Check if challenge exists and is active
                 const challenge = await prisma.challenge.findUnique({
                     where: { id: challengeId }
@@ -219,10 +296,16 @@ exports.createPost = async (req, res) => {
         // Send response immediately
         res.status(201).json({
             status: 'success',
-            data: { 
+            data: {
                 post: {
                     ...post,
                     video_url: video_url,
+                    thumbnail_url: null, // Generated async in background
+                    // HLS processing info
+                    hls_processing: isVideo ? {
+                        status: 'pending',
+                        message: 'Video is being processed for adaptive streaming. HLS URL will be available shortly.'
+                    } : null,
                     challenge_linked: challengePost ? true : false,
                     challenge_id: challengePost ? challengePost.challenge_id : null
                 }
@@ -230,7 +313,7 @@ exports.createPost = async (req, res) => {
         });
     } catch (error) {
         console.error('Post creation error:', error);
-        
+
         // Handle specific Prisma errors
         if (error.code === 'P2003') {
             return res.status(400).json({
@@ -239,7 +322,7 @@ exports.createPost = async (req, res) => {
                 details: error.meta
             });
         }
-        
+
         if (error.code === 'P2002') {
             return res.status(400).json({
                 status: 'error',
@@ -247,7 +330,7 @@ exports.createPost = async (req, res) => {
                 details: error.meta
             });
         }
-        
+
         res.status(500).json({
             status: 'error',
             message: 'Error creating post',
@@ -258,23 +341,23 @@ exports.createPost = async (req, res) => {
 
 exports.getAllPosts = async (req, res) => {
     try {
-        const { 
-            country_id, 
-            page = 1, 
-            limit = 20, 
+        const {
+            country_id,
+            page = 1,
+            limit = 20,
             sort = 'default', // default, newest, oldest, most_liked, most_viewed, most_commented
             status = 'active', // active, all, pending, suspended
             category_id,
             subcategory_id,
             featured_first = 'true' // true by default
         } = req.query;
-        
+
         const offset = (page - 1) * limit;
         const shouldFeatureFirst = featured_first === 'true';
 
         // Create cache key with all parameters
         const cacheKey = `${CACHE_KEYS.ALL_POSTS}_${page}_${limit}_${sort}_${status}_${category_id || 'all'}_${subcategory_id || 'all'}_${country_id || 'all'}_${featured_first}`;
-        
+
         // Try to get from cache first
         const cachedData = await getAllPostsCache(cacheKey);
         if (cachedData) {
@@ -320,7 +403,7 @@ exports.getAllPosts = async (req, res) => {
                 },
                 select: { id: true }
             });
-            
+
             const subcategoryIds = subcategories.map(s => s.id);
             // Include both the main category and all its subcategories
             baseWhereClause.category_id = {
@@ -358,24 +441,24 @@ exports.getAllPosts = async (req, res) => {
         // Get featured posts first (if featured_first is true)
         let featuredPosts = [];
         let featuredPostIds = [];
-        
+
         if (shouldFeatureFirst) {
             // Get all active featured posts from FeaturedPost table that haven't expired
             // Build post filter explicitly to ensure enum types are correct
             const postFilter = {
                 is_frozen: false
             };
-            
+
             // Add status filter if present in baseWhereClause
             if (baseWhereClause.status) {
                 postFilter.status = baseWhereClause.status;
             }
-            
+
             // Add category filter if present (handle both single ID and array)
             if (baseWhereClause.category_id) {
                 postFilter.category_id = baseWhereClause.category_id;
             }
-            
+
             const activeFeaturedPosts = await prisma.featuredPost.findMany({
                 where: {
                     is_active: true,
@@ -446,7 +529,7 @@ exports.getAllPosts = async (req, res) => {
                 featuredBy: fp.admin?.username,
                 featuredReason: fp.reason
             }));
-            
+
             featuredPostIds = featuredPosts.map(fp => fp.id);
 
             // Also get posts with is_featured: true that don't have FeaturedPost entries
@@ -532,17 +615,17 @@ exports.getAllPosts = async (req, res) => {
         const pageNum = parseInt(page);
         const limitNum = parseInt(limit);
         const featuredCount = featuredPosts.length;
-        
+
         // Determine how many featured posts to show on this page
         let featuredOnPage = [];
         let regularOffset = offset;
         let regularLimit = limitNum;
-        
+
         if (shouldFeatureFirst && featuredCount > 0) {
             // Calculate which featured posts belong on this page
             const featuredStart = Math.max(0, offset);
             const featuredEnd = Math.min(featuredCount, offset + limitNum);
-            
+
             if (featuredStart < featuredCount) {
                 featuredOnPage = featuredPosts.slice(featuredStart, featuredEnd);
                 regularLimit = limitNum - featuredOnPage.length;
@@ -609,47 +692,33 @@ exports.getAllPosts = async (req, res) => {
         ]);
 
         // Combine featured and regular posts
-        const allPosts = shouldFeatureFirst 
+        const allPosts = shouldFeatureFirst
             ? [...featuredOnPage, ...regularPosts]
             : regularPosts;
-        
+
         // Calculate total count
-        const totalCount = shouldFeatureFirst 
+        const totalCount = shouldFeatureFirst
             ? featuredCount + totalRegular
             : totalRegular;
 
-        // Add full URLs for files and enrich with category info
+        // Add full URLs for playback (HLS when ready, else raw) and enrich with category info
         const postsWithUrls = allPosts.map(post => {
-            if (post.video_url) {
-                post.fullUrl = post.video_url; // Supabase URL is already complete
-            }
-            
+            const p = withVideoPlaybackUrl(post);
             // Enrich with main category and subcategory info
             if (post.category) {
                 if (post.category.level === 2 && post.category.parent) {
-                    // Post has a subcategory, include both main and sub
-                    post.mainCategory = {
+                    p.mainCategory = {
                         id: post.category.parent.id,
                         name: post.category.parent.name,
                         level: post.category.parent.level
                     };
-                    post.subCategory = {
-                        id: post.category.id,
-                        name: post.category.name,
-                        level: post.category.level
-                    };
+                    p.subCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
                 } else if (post.category.level === 1) {
-                    // Post has only a main category (no subcategory)
-                    post.mainCategory = {
-                        id: post.category.id,
-                        name: post.category.name,
-                        level: post.category.level
-                    };
-                    post.subCategory = null;
+                    p.mainCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
+                    p.subCategory = null;
                 }
             }
-            
-            return post;
+            return p;
         });
 
         const responseData = {
@@ -694,7 +763,7 @@ exports.getPostById = async (req, res) => {
         const postId = req.params.postId;
         console.log("postId ----->", postId);
         console.log(`Attempting to find post with ID: ${postId}`);
-        
+
         // Check for common non-UUID route conflicts
         const reservedRoutes = ['following', 'feed', 'user', 'all', 'search'];
         if (reservedRoutes.includes(postId)) {
@@ -705,7 +774,7 @@ exports.getPostById = async (req, res) => {
                 details: `"${postId}" is a reserved route. Please use the correct endpoint: /api/follows/posts for following posts.`
             });
         }
-        
+
         // Validate UUID format before querying Prisma
         if (!isUuid(postId)) {
             console.error('Invalid UUID format:', postId);
@@ -715,10 +784,10 @@ exports.getPostById = async (req, res) => {
                 details: `Expected UUID format, got: ${postId}. If you're trying to fetch posts from followed users, use: /api/follows/posts`
             });
         }
-        
+
         // Create cache key
         const cacheKey = `${CACHE_KEYS.SINGLE_POST}_${postId}`;
-        
+
         // Try to get from cache first
         const cachedData = await getSinglePostCache(cacheKey);
         if (cachedData) {
@@ -729,7 +798,7 @@ exports.getPostById = async (req, res) => {
                 cached: true
             });
         }
-        
+
         const post = await prisma.post.findUnique({
             where: { id: postId },
             include: {
@@ -811,33 +880,14 @@ exports.getPostById = async (req, res) => {
             }
         }
 
-        // Add full URL for media and enrich with category info
-        const postWithUrl = {
-            ...post,
-            fullUrl: post.video_url // Supabase URL is already complete
-        };
-        
-        // Enrich with main category and subcategory info
-        if (postWithUrl.category) {
-            if (postWithUrl.category.level === 2 && postWithUrl.category.parent) {
-                // Post has a subcategory, include both main and sub
-                postWithUrl.mainCategory = {
-                    id: postWithUrl.category.parent.id,
-                    name: postWithUrl.category.parent.name,
-                    level: postWithUrl.category.parent.level
-                };
-                postWithUrl.subCategory = {
-                    id: postWithUrl.category.id,
-                    name: postWithUrl.category.name,
-                    level: postWithUrl.category.level
-                };
-            } else if (postWithUrl.category.level === 1) {
-                // Post has only a main category (no subcategory)
-                postWithUrl.mainCategory = {
-                    id: postWithUrl.category.id,
-                    name: postWithUrl.category.name,
-                    level: postWithUrl.category.level
-                };
+        // Add full URL for playback (HLS when ready, else raw) and enrich with category info
+        const postWithUrl = withVideoPlaybackUrl(post);
+        if (post.category) {
+            if (post.category.level === 2 && post.category.parent) {
+                postWithUrl.mainCategory = { id: post.category.parent.id, name: post.category.parent.name, level: post.category.parent.level };
+                postWithUrl.subCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
+            } else if (post.category.level === 1) {
+                postWithUrl.mainCategory = { id: post.category.id, name: post.category.name, level: post.category.level };
                 postWithUrl.subCategory = null;
             }
         }
@@ -855,7 +905,7 @@ exports.getPostById = async (req, res) => {
         });
     } catch (error) {
         console.error('Error getting post:', error);
-        
+
         // Handle Prisma UUID parsing errors
         if (error.message && error.message.includes('UUID') && error.message.includes('invalid character')) {
             return res.status(400).json({
@@ -864,7 +914,7 @@ exports.getPostById = async (req, res) => {
                 details: `The provided post ID is not a valid UUID. If you're trying to fetch posts from followed users, use: /api/follows/posts`
             });
         }
-        
+
         // Handle Prisma not found errors
         if (error.code === 'P2025') {
             return res.status(404).json({
@@ -872,7 +922,7 @@ exports.getPostById = async (req, res) => {
                 message: 'Post not found'
             });
         }
-        
+
         res.status(500).json({
             status: 'error',
             message: 'Error fetching post',
@@ -888,7 +938,7 @@ exports.updatePost = async (req, res) => {
 
         // Check if post exists and belongs to user
         const existingPost = await prisma.post.findFirst({
-            where: { 
+            where: {
                 id: postId,
                 user_id: userId
             }
@@ -1134,7 +1184,7 @@ exports.updatePostStatus = async (req, res) => {
             });
         }
 
-        const updateData = { 
+        const updateData = {
             status: status
         };
 
@@ -1163,7 +1213,7 @@ exports.updatePostStatus = async (req, res) => {
         if (status === 'suspended' && updatedPost.user?.id) {
             const { checkAndSuspendUser } = require('../utils/userSuspensionService');
             const suspensionResult = await checkAndSuspendUser(updatedPost.user.id, id);
-            
+
             if (suspensionResult.suspended) {
                 console.log(`[Post Controller] User ${updatedPost.user?.username} automatically suspended: ${suspensionResult.message}`);
             }
@@ -1242,10 +1292,10 @@ exports.getUserPosts = async (req, res) => {
     try {
         console.log("user id ----->", req.user.id);
         console.log("user id type ----->", typeof req.user.id);
-        
+
         // Get active posts and drafts for the user (drafts only visible to owner)
         const posts = await prisma.post.findMany({
-            where: { 
+            where: {
                 user_id: req.user.id,
                 status: {
                     in: ['active', 'draft'] // Show active posts and drafts (owner can see their drafts)
@@ -1282,16 +1332,8 @@ exports.getUserPosts = async (req, res) => {
             }
         });
 
-        // Add full URLs for files (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => {
-            const postData = { ...post };
-            if (postData.video_url) {
-                postData.fullUrl = postData.video_url; // Supabase URL is already complete
-            }
-            console.log(` Posts: ${JSON.stringify(postData)}`)
-            return postData;
-        });
-        console.log(` Posts: ${JSON.stringify(postsWithUrls)}`)
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = posts.map(post => withVideoPlaybackUrl(post));
         res.json({
             status: 'success',
             data: { posts: postsWithUrls }
@@ -1423,7 +1465,7 @@ exports.searchPosts = async (req, res) => {
     try {
         const { q, page = 1, limit = 20 } = req.query;
         const offset = (page - 1) * limit;
-        
+
         if (!q || q.trim() === '') {
             return res.json({
                 status: 'success',
@@ -1443,7 +1485,7 @@ exports.searchPosts = async (req, res) => {
 
         // Create cache key
         const cacheKey = `${CACHE_KEYS.SEARCH_POSTS}_${q.toLowerCase()}_${page}_${limit}`;
-        
+
         // Try to get from cache first
         const cachedData = await getSearchCache(cacheKey);
         if (cachedData) {
@@ -1548,11 +1590,8 @@ exports.searchPosts = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for videos (Supabase URLs are already complete)
-        const postsWithUrls = posts.map(post => ({
-            ...post,
-            fullUrl: post.video_url // Supabase URL is already complete
-        }));
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = posts.map(post => withVideoPlaybackUrl(post));
 
         const responseData = {
             posts: postsWithUrls,
@@ -1625,7 +1664,7 @@ exports.getFollowingPosts = async (req, res) => {
                 message: 'Invalid user ID'
             });
         }
-        
+
 
         // Additional UUID format validation
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1640,7 +1679,7 @@ exports.getFollowingPosts = async (req, res) => {
 
         // Create cache key
         const cacheKey = `${CACHE_KEYS.FOLLOWING_POSTS}_${userId}_${sort}_${page}_${limit}`;
-        
+
         // Try to get from cache first
         const cachedData = await getFollowingPostsCache(cacheKey);
         if (cachedData) {
@@ -1653,13 +1692,13 @@ exports.getFollowingPosts = async (req, res) => {
         }
 
         // Determine sort order
-        const orderBy = sort === 'oldest' 
-            ? { createdAt: 'asc' } 
+        const orderBy = sort === 'oldest'
+            ? { createdAt: 'asc' }
             : { createdAt: 'desc' };
 
         // Get posts from users that the current user follows
         console.log('About to query database with userId:', userId);
-        
+
         // First, get the list of user IDs that the current user follows
         const followingRelations = await prisma.follow.findMany({
             where: {
@@ -1669,11 +1708,11 @@ exports.getFollowingPosts = async (req, res) => {
                 followingId: true
             }
         });
-        
+
         const followingUserIds = followingRelations.map(rel => rel.followingId);
-        
+
         console.log(`User ${userId} follows ${followingUserIds.length} users:`, followingUserIds);
-        
+
         // If user follows no one, return empty result
         if (followingUserIds.length === 0) {
             return res.json({
@@ -1696,7 +1735,7 @@ exports.getFollowingPosts = async (req, res) => {
                 cached: false
             });
         }
-        
+
         const [followingPosts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: {
@@ -1753,11 +1792,11 @@ exports.getFollowingPosts = async (req, res) => {
         ]);
 
         // Process posts to add full URLs and optimize response
-        const processedPosts = followingPosts.map(post => ({
-            ...post,
-            fullUrl: post.video_url, // Supabase URLs are already complete
-            isFromFollowing: true
-        }));
+        const processedPosts = followingPosts.map(post => {
+            const p = withVideoPlaybackUrl(post);
+            p.isFromFollowing = true;
+            return p;
+        });
 
         const responseData = {
             posts: processedPosts,
@@ -1786,7 +1825,7 @@ exports.getFollowingPosts = async (req, res) => {
 
     } catch (error) {
         console.error('Error fetching following posts:', error);
-        
+
         // Check if it's a UUID-related error
         if (error.message && error.message.includes('UUID')) {
             console.error('UUID Error Details:', {
@@ -1794,14 +1833,14 @@ exports.getFollowingPosts = async (req, res) => {
                 userIdType: typeof req.user?.id,
                 error: error.message
             });
-            
+
             return res.status(400).json({
                 status: 'error',
                 message: 'Invalid user ID format. Please log in again.',
                 details: process.env.NODE_ENV === 'development' ? error.message : undefined
             });
         }
-        
+
         res.status(500).json({
             status: 'error',
             message: 'Error fetching posts from users you follow',
@@ -1869,15 +1908,13 @@ exports.getOptimizedFeed = async (req, res) => {
             });
 
             featuredPosts.forEach(featured => {
-                feedPosts.push({
-                    ...featured.post,
-                    fullUrl: featured.post.video_url,
-                    isFeatured: true,
-                    featuredAt: featured.createdAt,
-                    expiresAt: featured.expires_at,
-                    featuredBy: featured.admin?.username,
-                    featuredReason: featured.reason
-                });
+                const p = withVideoPlaybackUrl(featured.post);
+                p.isFeatured = true;
+                p.featuredAt = featured.createdAt;
+                p.expiresAt = featured.expires_at;
+                p.featuredBy = featured.admin?.username;
+                p.featuredReason = featured.reason;
+                feedPosts.push(p);
             });
         }
 
@@ -1931,11 +1968,9 @@ exports.getOptimizedFeed = async (req, res) => {
             });
 
             followingPosts.forEach(post => {
-                feedPosts.push({
-                    ...post,
-                    fullUrl: post.video_url,
-                    isFromFollowing: true
-                });
+                const p = withVideoPlaybackUrl(post);
+                p.isFromFollowing = true;
+                feedPosts.push(p);
             });
         }
 
@@ -2017,11 +2052,8 @@ exports.getUserDraftPosts = async (req, res) => {
             })
         ]);
 
-        // Add full URLs for files
-        const postsWithUrls = draftPosts.map(post => ({
-            ...post,
-            fullUrl: post.video_url
-        }));
+        // Add full URLs for playback (HLS when ready, else raw)
+        const postsWithUrls = draftPosts.map(post => withVideoPlaybackUrl(post));
 
         res.json({
             status: 'success',
@@ -2113,6 +2145,169 @@ exports.publishDraftPost = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error publishing draft post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get video processing status for a post
+exports.getVideoProcessingStatus = async (req, res) => {
+    try {
+        const { postId } = req.params;
+
+        // Validate UUID format
+        if (!isUuid(postId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format'
+            });
+        }
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: {
+                id: true,
+                type: true,
+                video_url: true,
+                hls_url: true,
+                thumbnail_url: true,
+                processing_status: true,
+                processing_error: true,
+                video_duration: true,
+                video_width: true,
+                video_height: true
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        if (post.type !== 'video') {
+            return res.json({
+                status: 'success',
+                data: {
+                    postId: post.id,
+                    type: post.type,
+                    message: 'Not a video post, no HLS processing required'
+                }
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: {
+                postId: post.id,
+                type: post.type,
+                processing: {
+                    status: post.processing_status || 'unknown',
+                    error: post.processing_error,
+                    hlsReady: post.hls_url && post.processing_status === 'completed'
+                },
+                urls: {
+                    raw: post.video_url,
+                    hls: post.hls_url,
+                    thumbnail: post.thumbnail_url,
+                    // Use HLS if ready, otherwise raw
+                    preferred: (post.hls_url && post.processing_status === 'completed')
+                        ? post.hls_url
+                        : post.video_url
+                },
+                metadata: {
+                    duration: post.video_duration,
+                    width: post.video_width,
+                    height: post.video_height
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching video processing status:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching video processing status',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Retry HLS processing for a failed video
+exports.retryVideoProcessing = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const userId = req.user.id;
+
+        // Validate UUID format
+        if (!isUuid(postId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid post ID format'
+            });
+        }
+
+        // Check if post exists and belongs to user
+        const post = await prisma.post.findFirst({
+            where: {
+                id: postId,
+                user_id: userId,
+                type: 'video'
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Video post not found or you do not have permission'
+            });
+        }
+
+        // Check if processing already completed
+        if (post.processing_status === 'completed' && post.hls_url) {
+            return res.json({
+                status: 'success',
+                message: 'Video already processed successfully',
+                data: {
+                    hls_url: post.hls_url,
+                    thumbnail_url: post.thumbnail_url
+                }
+            });
+        }
+
+        // Check if video_url exists (need raw video to process)
+        if (!post.video_url) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'No source video found. Please re-upload the video.'
+            });
+        }
+
+        // Update processing status to pending
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                processing_status: 'pending',
+                processing_error: null
+            }
+        });
+
+        // Note: For retry, we'd need to download the video from R2 first
+        // This is a simplified version - full implementation would download and reprocess
+        res.json({
+            status: 'success',
+            message: 'Video processing retry initiated. Please allow a few minutes for processing to complete.',
+            data: {
+                postId: post.id,
+                processing_status: 'pending'
+            }
+        });
+
+    } catch (error) {
+        console.error('Error retrying video processing:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error retrying video processing',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

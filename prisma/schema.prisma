@@ -87,6 +87,13 @@ model Post {
   title                 String   @db.VarChar(255)
   description           String?  @db.Text
   video_url             String?  @db.VarChar(255)
+  hls_url               String?  @db.VarChar(500)  // HLS master playlist URL
+  thumbnail_url         String?  @db.VarChar(500)  // Server-generated thumbnail URL
+  video_duration        Int?                        // Video duration in seconds
+  video_width           Int?                        // Video width in pixels
+  video_height          Int?                        // Video height in pixels
+  processing_status     String?  @db.VarChar(50)   // pending, processing, completed, failed
+  processing_error      String?  @db.Text          // Error message if processing failed
   status                PostStatus @default(active)
   user_id               String?  @db.Uuid
   approver_id           String?  @db.Uuid

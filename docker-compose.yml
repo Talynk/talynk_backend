@@ -40,30 +40,13 @@ services:
     env_file:
       - .env
     environment:
-      # Force container DB in compose regardless of host env
-      # Hardcoded password 123 to match actual database password
-      DATABASE_URL: postgresql://postgres:123@db:5432/talynk?schema=public&connection_limit=10&pool_timeout=20
-      DATABASE_LOCAL: postgresql://postgres:123@db:5432/talynk?schema=public&connection_limit=10&pool_timeout=20
-      # Fallbacks for others if .env not present
-      PORT: ${PORT:-3000}
-      NODE_ENV: ${NODE_ENV:-production}
-      JWT_SECRET: ${JWT_SECRET:-dev_secret}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret}
-      SUPABASE_URL: ${SUPABASE_URL:-https://example.supabase.co}
-      SUPABASE_KEY: ${SUPABASE_KEY:-anon_key}
-      SUPABASE_BUCKET_NAME: ${SUPABASE_BUCKET_NAME:-posts}
+      # Database URL from .env with connection pool settings
+      # Uses POSTGRES_PASSWORD from .env automatically
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      DATABASE_LOCAL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=10&pool_timeout=20
+      # Redis URL
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      RESEND_API_KEY: re_arcTye3F_JK7QVBpDpzDRm5PQf2QVGqof
-      RESEND_FROM_EMAIL: noreply@support.ihirwe.art
-      APP_NAME: Talentix
-      # Cloudflare R2 Storage Configuration
-      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
-      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
-      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
-      R2_BUCKET_NAME: ${R2_BUCKET_NAME:-talentix}
-      R2_ENDPOINT: ${R2_ENDPOINT:-https://59d4da31782ae0bffa374a8824a15d6e.r2.cloudflarestorage.com}
-      R2_PUBLIC_DOMAIN: ${R2_PUBLIC_DOMAIN:-https://media.talentix.net}
-      USE_R2: ${USE_R2:-true}
+      # Other settings inherited from .env via env_file
     ports:
       - "3000:3000"
     depends_on:
@@ -73,9 +56,39 @@ services:
         condition: service_healthy
     volumes:
       - uploads_data:/app/uploads
-      - ./src:/app/src  # Mount source code to use local changes
+      - tmp_data:/app/tmp
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  # Dedicated worker for video processing (HLS transcoding)
+  video-worker:
+    image: ghcr.io/ihirwepatrick/talynk-backend:latest
+    container_name: talynk-video-worker
+    command: ["node", "src/queues/videoWorker.js"]
+    env_file:
+      - .env
+    environment:
+      # Database URL with lower connection limit for worker
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=5&pool_timeout=20
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Other settings inherited from .env via env_file
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads_data:/app/uploads
+      - tmp_data:/app/tmp
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+    restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
 
   watchtower:
     image: containrrr/watchtower:latest
@@ -92,5 +105,7 @@ volumes:
   db_data:
   uploads_data:
   redis_data:
+  tmp_data:
+
 
 
