@@ -300,7 +300,7 @@ exports.createPost = async (req, res) => {
                 post: {
                     ...post,
                     video_url: video_url,
-                    thumbnail_url: thumbnailUrl,
+                    thumbnail_url: null, // Generated async in background
                     // HLS processing info
                     hls_processing: isVideo ? {
                         status: 'pending',
