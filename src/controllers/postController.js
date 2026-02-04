@@ -17,7 +17,7 @@ const {
     clearCacheByPattern 
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { processVideoInBackground } = require('../services/videoProcessingService');
+const { processVideoInBackground, generateAndUploadThumbnail } = require('../services/videoProcessingService');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
 exports.createPost = async (req, res) => {
@@ -152,7 +152,6 @@ exports.createPost = async (req, res) => {
 
         // Prepare video-specific data
         const isVideo = fileType === 'video';
-        const thumbnailUrl = req.file.quickThumbnailUrl || null;
         const processingStatus = isVideo ? 'pending' : null;
 
         const post = await prisma.post.create({
@@ -165,13 +164,35 @@ exports.createPost = async (req, res) => {
             uploadDate: new Date(),
             type: fileType,
             video_url,
-            thumbnail_url: thumbnailUrl, // Server-generated thumbnail
+            thumbnail_url: null, // Will be populated by background thumbnail generation
             processing_status: processingStatus, // HLS processing status
             content: caption
             }
         });
 
         console.log("Post created successfully:", post.id);
+
+        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
+        if (isVideo && req.file.tempPath) {
+            const thumbId = post.id; // Use post ID as thumbnail identifier
+            console.log("[POST] Triggering background thumbnail generation for post:", post.id);
+            
+            // Generate thumbnail in background - don't await
+            generateAndUploadThumbnail(req.file.tempPath, thumbId)
+                .then(thumbnailUrl => {
+                    // Update post with thumbnail once ready
+                    return prisma.post.update({
+                        where: { id: post.id },
+                        data: { thumbnail_url: thumbnailUrl }
+                    });
+                })
+                .then(() => {
+                    console.log(`[POST] Thumbnail updated for post ${post.id}`);
+                })
+                .catch(err => {
+                    console.warn('[POST] Thumbnail generation/update failed:', err.message);
+                });
+        }
 
         // Trigger background HLS processing for video files
         if (isVideo && req.file.tempPath && req.file.needsHlsProcessing) {

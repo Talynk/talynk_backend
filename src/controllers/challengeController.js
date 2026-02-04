@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { processVideoInBackground } = require('../services/videoProcessingService');
+const { processVideoInBackground, generateAndUploadThumbnail } = require('../services/videoProcessingService');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -1122,7 +1122,6 @@ exports.createPostInChallenge = async (req, res) => {
             fileType = req.file.mimetype.startsWith('image') ? 'image' : 'video';
             filePath = req.file.path;
             mimetype = req.file.mimetype;
-            thumbnailUrl = req.file.quickThumbnailUrl || null;
         }
 
         // Prepare video-specific data for HLS processing
@@ -1140,11 +1139,33 @@ exports.createPostInChallenge = async (req, res) => {
                 uploadDate: new Date(),
                 type: fileType,
                 video_url,
-                thumbnail_url: thumbnailUrl, // Server-generated thumbnail
+                thumbnail_url: null, // Will be populated by background thumbnail generation
                 processing_status: processingStatus, // HLS processing status
                 content: caption
             }
         });
+
+        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
+        if (isVideo && req.file && req.file.tempPath) {
+            const thumbId = post.id; // Use post ID as thumbnail identifier
+            console.log("[CHALLENGE] Triggering background thumbnail generation for post:", post.id);
+            
+            // Generate thumbnail in background - don't await
+            generateAndUploadThumbnail(req.file.tempPath, thumbId)
+                .then(thumbnailUrl => {
+                    // Update post with thumbnail once ready
+                    return prisma.post.update({
+                        where: { id: post.id },
+                        data: { thumbnail_url: thumbnailUrl }
+                    });
+                })
+                .then(() => {
+                    console.log(`[CHALLENGE] Thumbnail updated for post ${post.id}`);
+                })
+                .catch(err => {
+                    console.warn('[CHALLENGE] Thumbnail generation/update failed:', err.message);
+                });
+        }
 
         // Trigger background HLS processing for video files
         if (isVideo && req.file && req.file.tempPath && req.file.needsHlsProcessing) {

@@ -13,10 +13,10 @@ ffmpeg.setFfprobePath(ffprobePath);
 // HLS Configuration
 const HLS_CONFIG = {
   // Quality levels for adaptive streaming (resolution: bitrate)
+  // Reduced from 3 to 2 qualities for faster encoding (removed 360p)
   qualities: [
-    { name: '360p', width: 640, height: 360, videoBitrate: '800k', audioBitrate: '96k' },
-    { name: '480p', width: 854, height: 480, videoBitrate: '1400k', audioBitrate: '128k' },
-    { name: '720p', width: 1280, height: 720, videoBitrate: '2800k', audioBitrate: '128k' },
+    { name: '480p', width: 854, height: 480, videoBitrate: '1200k', audioBitrate: '96k' },
+    { name: '720p', width: 1280, height: 720, videoBitrate: '2500k', audioBitrate: '128k' },
   ],
   // HLS segment duration in seconds
   segmentDuration: 4,
@@ -105,7 +105,8 @@ async function transcodeToQuality(inputPath, outputDir, quality) {
       .outputOptions([
         // Video encoding
         '-c:v libx264',
-        '-preset fast',
+        '-preset ultrafast', // Changed from 'fast' for 3-5x faster encoding
+        '-tune zerolatency', // Optimizes for fast encoding
         `-b:v ${quality.videoBitrate}`,
         `-maxrate ${quality.videoBitrate}`,
         `-bufsize ${parseInt(quality.videoBitrate) * 2}k`,
@@ -192,8 +193,10 @@ async function uploadHLSToR2(hlsDir, videoId) {
   const masterPath = path.join(hlsDir, 'master.m3u8');
   uploadedUrls.master = await uploadFile(masterPath, `${r2Folder}/master.m3u8`);
   
-  // Upload each quality level
+  // Upload each quality level with parallel batch uploads
   const qualityDirs = await fs.readdir(hlsDir);
+  const BATCH_SIZE = 5; // Upload 5 segments in parallel
+  
   for (const dir of qualityDirs) {
     const qualityPath = path.join(hlsDir, dir);
     const stat = await fs.stat(qualityPath);
@@ -201,10 +204,14 @@ async function uploadHLSToR2(hlsDir, videoId) {
     if (stat.isDirectory()) {
       const files = await fs.readdir(qualityPath);
       
-      for (const file of files) {
-        const filePath = path.join(qualityPath, file);
-        const r2Key = `${r2Folder}/${dir}/${file}`;
-        await uploadFile(filePath, r2Key);
+      // Upload files in parallel batches
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(file => {
+          const filePath = path.join(qualityPath, file);
+          const r2Key = `${r2Folder}/${dir}/${file}`;
+          return uploadFile(filePath, r2Key);
+        }));
       }
       
       uploadedUrls[dir] = `${R2_PUBLIC_DOMAIN}/${r2Folder}/${dir}/playlist.m3u8`;

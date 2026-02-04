@@ -135,16 +135,9 @@ const handleFileUpload = async (req, res, next) => {
         req.file.tempPath = tempFilePath; // Temp file path for HLS processing (if video)
         req.file.needsHlsProcessing = isVideo; // Flag for HLS processing
         
-        // Generate quick thumbnail for videos (non-blocking)
-        if (isVideo && tempFilePath) {
-          try {
-            const thumbnailUrl = await generateAndUploadThumbnail(tempFilePath, uuidv4());
-            req.file.quickThumbnailUrl = thumbnailUrl;
-            console.log('[UPLOAD] Quick thumbnail generated:', thumbnailUrl);
-          } catch (thumbError) {
-            console.warn('[UPLOAD] Quick thumbnail generation failed:', thumbError.message);
-          }
-        }
+        // Thumbnail generation moved to postController after post creation (non-blocking)
+        // This prevents blocking the upload response
+        req.file.quickThumbnailUrl = null; // Will be populated later in background
       } catch (r2Error) {
         console.error('[UPLOAD] R2 upload failed, falling back to local storage:', r2Error);
         // Fallback to local storage if R2 fails
