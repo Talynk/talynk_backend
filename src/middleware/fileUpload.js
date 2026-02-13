@@ -4,7 +4,6 @@ const { v4: uuidv4 } = require('uuid');
 const fs = require('fs').promises;
 const os = require('os');
 const { uploadFileToR2, isR2Configured } = require('../services/r2Storage');
-const { processVideoInBackground, generateAndUploadThumbnail } = require('../services/videoProcessingService');
 
 // Check if R2 is enabled
 const USE_R2 = process.env.USE_R2 === 'true' || process.env.USE_R2 === '1';
@@ -93,25 +92,12 @@ const handleFileUpload = async (req, res, next) => {
       try {
         // Determine folder based on file type or route
         const folder = req.route?.path?.includes('profile') ? 'profiles' : 'media';
-        
+
         // Get file buffer from memory storage
         const fileBuffer = req.file.buffer;
-        
-        // Save buffer to temp file for HLS processing (if video)
-        // This allows background worker to process without downloading from R2
-        const isMedia = req.file.mimetype.startsWith('video/') || req.file.mimetype.startsWith('image/');
-        let tempFilePath = null;
-        
-        if (isMedia) {
-          const tmpDir = path.join(process.cwd(), 'tmp', 'uploads');
-          await fs.mkdir(tmpDir, { recursive: true });
-          const fileExt = path.extname(req.file.originalname);
-          tempFilePath = path.join(tmpDir, `${Date.now()}-${uuidv4()}${fileExt}`);
-          await fs.writeFile(tempFilePath, fileBuffer);
-          console.log('[UPLOAD] Saved buffer to temp file for processing:', tempFilePath);
-        }
-        
+
         // Upload to R2
+        // Note: Video processor will download from R2 URL for HLS encoding
         const result = await uploadFileToR2(
           fileBuffer,
           req.file.originalname,
@@ -124,7 +110,7 @@ const handleFileUpload = async (req, res, next) => {
         filePath = result.key;
 
         console.log('[UPLOAD] File uploaded successfully to R2:', fileUrl);
-        
+
         // Add file info to request
         req.file.filename = fileName;
         req.file.path = filePath;
@@ -132,30 +118,25 @@ const handleFileUpload = async (req, res, next) => {
         req.file.localUrl = fileUrl; // For backward compatibility
         req.file.supabaseUrl = fileUrl; // For backward compatibility
         req.file.key = result.key; // R2 key for future deletion if needed
-        req.file.tempPath = tempFilePath; // Temp file path for HLS processing (if video)
-        req.file.needsHlsProcessing = isVideo; // Flag for HLS processing
-        
-        // Thumbnail generation moved to postController after post creation (non-blocking)
-        // This prevents blocking the upload response
-        req.file.quickThumbnailUrl = null; // Will be populated later in background
+
+        // Note: Thumbnails are now generated on the frontend during upload
+        // Video processing (HLS encoding) happens on remote VPS via queue
       } catch (r2Error) {
         console.error('[UPLOAD] R2 upload failed, falling back to local storage:', r2Error);
         // Fallback to local storage if R2 fails
         const fileExt = path.extname(req.file.originalname);
         fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
         filePath = path.join(uploadsDir, fileName);
-        
+
         // Save to disk
         await fs.writeFile(filePath, req.file.buffer);
-        
+
         fileUrl = `/uploads/${fileName}`;
         req.file.filename = fileName;
         req.file.path = `uploads/${fileName}`;
         req.file.localUrl = fileUrl;
         req.file.supabaseUrl = fileUrl;
-        req.file.tempPath = filePath; // Use local path for HLS processing
-        req.file.needsHlsProcessing = isVideo;
-        
+
         console.log('[UPLOAD] File saved to local storage (fallback):', fileUrl);
       }
     } else {
@@ -163,18 +144,16 @@ const handleFileUpload = async (req, res, next) => {
       fileName = req.file.filename;
       filePath = req.file.path;
       fileUrl = `/uploads/${fileName}`;
-      
+
       console.log('[UPLOAD] File saved to local storage:', fileUrl);
-      
+
       // Add file info to request
       req.file.filename = fileName;
       req.file.path = filePath;
       req.file.localUrl = fileUrl;
       req.file.supabaseUrl = fileUrl; // Keep for backward compatibility
-      req.file.tempPath = filePath; // Use local path for HLS processing
-      req.file.needsHlsProcessing = isVideo;
     }
-    
+
     console.log('[UPLOAD] File processing completed successfully');
     next();
   } catch (error) {

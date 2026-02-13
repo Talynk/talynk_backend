@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
 const { addVideoJob } = require('../queues/videoQueue');
 
 // Create a new challenge request
@@ -1146,41 +1145,15 @@ exports.createPostInChallenge = async (req, res) => {
             }
         });
 
-        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
-        if (isVideo && req.file && req.file.tempPath) {
-            const thumbId = post.id; // Use post ID as thumbnail identifier
-            console.log("[CHALLENGE] Triggering background thumbnail generation for post:", post.id);
 
-            // Generate thumbnail in background - don't await
-            generateAndUploadThumbnail(req.file.tempPath, thumbId)
-                .then(thumbnailUrl => {
-                    // Update post with thumbnail once ready
-                    return prisma.post.update({
-                        where: { id: post.id },
-                        data: { thumbnail_url: thumbnailUrl }
-                    });
-                })
-                .then(() => {
-                    console.log(`[CHALLENGE] Thumbnail updated for post ${post.id}`);
-                })
-                .catch(err => {
-                    console.warn('[CHALLENGE] Thumbnail generation/update failed:', err.message);
-                });
-        }
+        // Note: Thumbnails are now generated on the frontend and passed in the request
 
         // Add video to processing queue for HLS transcoding
-        if (isVideo && req.file && req.file.tempPath && req.file.needsHlsProcessing) {
+        if (isVideo && video_url) {
             console.log("[CHALLENGE] Adding video to processing queue for post:", post.id);
             try {
-                let videoDuration = 30;
-                try {
-                    const metadata = await getVideoMetadata(req.file.tempPath);
-                    videoDuration = metadata.duration || 30;
-                } catch (metaErr) {
-                    console.warn('[CHALLENGE] Could not get video duration, using default:', metaErr.message);
-                }
-
-                await addVideoJob(post.id, req.file.tempPath, videoDuration);
+                // Pass R2 URL to the queue instead of local temp path
+                await addVideoJob(post.id, video_url);
                 console.log(`[CHALLENGE] Video queued successfully for post ${post.id}`);
             } catch (queueErr) {
                 console.error('[CHALLENGE] Failed to queue video job:', queueErr.message);

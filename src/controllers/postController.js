@@ -17,7 +17,6 @@ const {
     clearCacheByPattern
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
 const { addVideoJob } = require('../queues/videoQueue');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
@@ -173,42 +172,15 @@ exports.createPost = async (req, res) => {
 
         console.log("Post created successfully:", post.id);
 
-        // Trigger non-blocking thumbnail generation for videos (fire-and-forget)
-        if (isVideo && req.file.tempPath) {
-            const thumbId = post.id; // Use post ID as thumbnail identifier
-            console.log("[POST] Triggering background thumbnail generation for post:", post.id);
-
-            // Generate thumbnail in background - don't await
-            generateAndUploadThumbnail(req.file.tempPath, thumbId)
-                .then(thumbnailUrl => {
-                    // Update post with thumbnail once ready
-                    return prisma.post.update({
-                        where: { id: post.id },
-                        data: { thumbnail_url: thumbnailUrl }
-                    });
-                })
-                .then(() => {
-                    console.log(`[POST] Thumbnail updated for post ${post.id}`);
-                })
-                .catch(err => {
-                    console.warn('[POST] Thumbnail generation/update failed:', err.message);
-                });
-        }
 
         // Add video to processing queue for HLS transcoding
-        if (isVideo && req.file.tempPath && req.file.needsHlsProcessing) {
+        // Note: Thumbnails are now generated on the frontend and passed in the request
+        if (isVideo && video_url) {
             console.log("[POST] Adding video to processing queue for post:", post.id);
             try {
-                // Get video duration for priority (shorter = higher priority)
-                let videoDuration = 30; // Default
-                try {
-                    const metadata = await getVideoMetadata(req.file.tempPath);
-                    videoDuration = metadata.duration || 30;
-                } catch (metaErr) {
-                    console.warn('[POST] Could not get video duration, using default:', metaErr.message);
-                }
-
-                await addVideoJob(post.id, req.file.tempPath, videoDuration);
+                // Pass R2 URL to the queue instead of local temp path
+                // The remote video processor will download from R2
+                await addVideoJob(post.id, video_url);
                 console.log(`[POST] Video queued successfully for post ${post.id}`);
             } catch (queueErr) {
                 console.error('[POST] Failed to queue video job:', queueErr.message);
@@ -2292,8 +2264,15 @@ exports.retryVideoProcessing = async (req, res) => {
             }
         });
 
-        // Note: For retry, we'd need to download the video from R2 first
-        // This is a simplified version - full implementation would download and reprocess
+        // Re-queue for processing (Redis/BullMQ mode) - video processor worker will pick it up
+        // In polling mode, video processor will fetch via GET /api/internal/pending-videos
+        try {
+            await addVideoJob(post.id, post.video_url);
+            console.log(`[POST] Video re-queued for retry, post ${post.id}`);
+        } catch (queueErr) {
+            console.warn('[POST] Failed to re-queue video (polling mode may still pick it up):', queueErr.message);
+        }
+
         res.json({
             status: 'success',
             message: 'Video processing retry initiated. Please allow a few minutes for processing to complete.',

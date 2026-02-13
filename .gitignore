@@ -20,5 +20,6 @@ tmp/
 *.env
 export.env
 
-
+# Exclude video processor (separate repository)
+talynk-video-processor/
 
