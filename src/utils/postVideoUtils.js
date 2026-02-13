@@ -1,3 +1,5 @@
+const { getProcessingStatusLabel } = require('./postFilters');
+
 /**
  * Normalize a post with the correct video URL for playback.
  * Prefers HLS when processing is complete; otherwise falls back to raw video_url.
@@ -9,10 +11,8 @@
  * Frontend usage:
  * - fullUrl: Use this as the src for <video> or HLS player - backend chooses best option
  * - streamType: 'hls' | 'raw' - tells frontend which player to use
- *   - 'hls': Use HLS.js or native MSE - fetch .m3u8 playlist, segments load on-demand
- *   - 'raw': Use standard <video src="..."> - fetches entire MP4
  * - hlsReady: true when HLS is available; false when still processing or failed (use raw)
- * - thumbnail_url: Server-generated thumbnail for profile grids, preload placeholders
+ * - processingStatus, processingStatusLabel: For profile display (e.g. "Processing", "Waiting in queue")
  */
 function withVideoPlaybackUrl(post) {
     const p = typeof post?.toJSON === 'function' ? post.toJSON() : { ...(post || {}) };
@@ -24,6 +24,10 @@ function withVideoPlaybackUrl(post) {
         p.streamType = 'raw';
     }
     p.hlsReady = !!(p.hls_url && p.processing_status === 'completed');
+    if (p.type === 'video') {
+        p.processingStatus = p.processing_status || null;
+        p.processingStatusLabel = getProcessingStatusLabel(p.processing_status);
+    }
     return p;
 }
 

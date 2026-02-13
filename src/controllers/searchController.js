@@ -1,6 +1,7 @@
 const prisma = require('../lib/prisma');
 const { getSearchCache, setSearchCache } = require('../utils/cache');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
+const { andFeedReadyFilter } = require('../utils/postFilters');
 
 /**
  * Comprehensive search endpoint that searches posts, users, and challenges
@@ -163,7 +164,7 @@ exports.search = async (req, res) => {
 
             const [posts, postsTotal] = await Promise.all([
                 prisma.post.findMany({
-                    where: postWhere,
+                    where: andFeedReadyFilter(postWhere),
                     include: {
                         user: {
                             select: {
@@ -200,7 +201,7 @@ exports.search = async (req, res) => {
                     take: parseInt(limit),
                     skip: offset
                 }),
-                prisma.post.count({ where: postWhere })
+                prisma.post.count({ where: andFeedReadyFilter(postWhere) })
             ]);
 
             results.posts = posts.map(post => {

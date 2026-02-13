@@ -1171,7 +1171,9 @@ exports.getUserPostsById = async (req, res) => {
             })
         ]);
 
-        // Transform to match the expected format
+        const { getProcessingStatusLabel } = require('../utils/postFilters');
+
+        // Transform to match the expected format (include processing status for profile UX)
         const formattedPosts = posts.map(post => ({
             id: post.id,
             title: post.title,
@@ -1184,7 +1186,10 @@ exports.getUserPostsById = async (req, res) => {
             categoryName: post.category?.name,
             commentsCount: post.comment_count || 0,
             authorName: post.user?.username,
-            authorProfilePicture: post.user?.profile_picture
+            authorProfilePicture: post.user?.profile_picture,
+            processingStatus: post.processing_status,
+            processingStatusLabel: post.video_url ? getProcessingStatusLabel(post.processing_status) : null,
+            hlsReady: !!(post.hls_url && post.processing_status === 'completed')
         }));
 
         // Check if user liked these posts
@@ -1283,7 +1288,9 @@ exports.getUserApprovedPosts = async (req, res) => {
             })
         ]);
 
-        // Transform to match the expected format
+        const { getProcessingStatusLabel } = require('../utils/postFilters');
+
+        // Transform to match the expected format (include processing status for profile UX)
         const formattedPosts = posts.map(post => ({
             id: post.id,
             title: post.title,
@@ -1296,7 +1303,10 @@ exports.getUserApprovedPosts = async (req, res) => {
             categoryName: post.category?.name,
             commentsCount: post.comment_count || 0,
             authorName: post.user?.username,
-            authorProfilePicture: post.user?.profile_picture
+            authorProfilePicture: post.user?.profile_picture,
+            processingStatus: post.processing_status,
+            processingStatusLabel: post.video_url ? getProcessingStatusLabel(post.processing_status) : null,
+            hlsReady: !!(post.hls_url && post.processing_status === 'completed')
         }));
 
         // Check if user liked these posts
