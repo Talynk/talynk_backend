@@ -3,7 +3,6 @@ const path = require('path');
 const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
 const { addVideoJob } = require('../queues/videoQueue');
 
 // Create a new challenge request

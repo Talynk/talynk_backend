@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { videoProcessingCallback } = require('../controllers/internalController');
+const { videoProcessingCallback, getPendingVideoPosts } = require('../controllers/internalController');
 const { authenticateInternalAPI } = require('../middleware/internalAuth');
 
 /**
@@ -9,7 +9,10 @@ const { authenticateInternalAPI } = require('../middleware/internalAuth');
  * Requires INTERNAL_API_KEY authentication
  */
 
-// Video processing callback
+// Video processor: get posts pending HLS transcoding (polling mode)
+router.get('/pending-videos', authenticateInternalAPI, getPendingVideoPosts);
+
+// Video processor: callback after processing (both Redis and polling mode)
 router.post('/video-callback', authenticateInternalAPI, videoProcessingCallback);
 
 module.exports = router;

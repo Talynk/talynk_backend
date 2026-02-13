@@ -2,9 +2,58 @@ const prisma = require('../lib/prisma');
 const { clearCacheByPattern } = require('../utils/cache');
 
 /**
- * Internal Video Processing Callback Controller
- * Receives status updates from the remote video processor VPS
+ * Internal Video Processing API Controller
+ * Used by the remote video processor VPS (talynk-video-processor)
+ * 
+ * Two integration modes:
+ * 1. Redis/BullMQ: Video processor runs Worker, consumes from same queue as backend
+ * 2. Polling: Video processor polls GET /pending-videos, processes, calls POST /video-callback
  */
+
+/**
+ * Get posts pending video processing (for polling-mode video processor)
+ * GET /api/internal/pending-videos
+ * 
+ * Returns posts with processing_status='pending' and valid video_url.
+ * Video processor should poll this endpoint, process each post, then call video-callback.
+ */
+exports.getPendingVideoPosts = async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+
+        const posts = await prisma.post.findMany({
+            where: {
+                processing_status: 'pending',
+                type: 'video',
+                video_url: { not: null }
+            },
+            select: {
+                id: true,
+                video_url: true,
+                title: true
+            },
+            orderBy: { uploadDate: 'asc' },
+            take: limit
+        });
+
+        res.json({
+            status: 'success',
+            count: posts.length,
+            posts: posts.map(p => ({
+                id: p.id,
+                video_url: p.video_url,
+                title: p.title
+            }))
+        });
+    } catch (error) {
+        console.error('[InternalAPI] Error fetching pending videos:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch pending videos',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
 
 /**
  * Handle video processing callback
@@ -15,6 +64,7 @@ const { clearCacheByPattern } = require('../utils/cache');
  *   postId: string,
  *   status: 'processing' | 'completed' | 'failed',
  *   hlsUrl?: string,
+ *   thumbnailUrl?: string,
  *   videoDuration?: number,
  *   videoWidth?: number,
  *   videoHeight?: number,
@@ -23,7 +73,7 @@ const { clearCacheByPattern } = require('../utils/cache');
  */
 exports.videoProcessingCallback = async (req, res) => {
     try {
-        const { postId, status, hlsUrl, videoDuration, videoWidth, videoHeight, error } = req.body;
+        const { postId, status, hlsUrl, thumbnailUrl, videoDuration, videoWidth, videoHeight, error } = req.body;
 
         console.log('[VideoCallback] Received callback', { postId, status });
 
@@ -68,6 +118,9 @@ exports.videoProcessingCallback = async (req, res) => {
             updateData.video_width = videoWidth;
             updateData.video_height = videoHeight;
             updateData.processing_error = null;
+            if (thumbnailUrl) {
+                updateData.thumbnail_url = thumbnailUrl;
+            }
 
             console.log('[VideoCallback] Processing completed', { postId, hlsUrl });
         } else if (status === 'failed') {

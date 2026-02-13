@@ -17,7 +17,6 @@ const {
     clearCacheByPattern
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { generateAndUploadThumbnail, getVideoMetadata } = require('../services/videoProcessingService');
 const { addVideoJob } = require('../queues/videoQueue');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
 
@@ -2265,8 +2264,15 @@ exports.retryVideoProcessing = async (req, res) => {
             }
         });
 
-        // Note: For retry, we'd need to download the video from R2 first
-        // This is a simplified version - full implementation would download and reprocess
+        // Re-queue for processing (Redis/BullMQ mode) - video processor worker will pick it up
+        // In polling mode, video processor will fetch via GET /api/internal/pending-videos
+        try {
+            await addVideoJob(post.id, post.video_url);
+            console.log(`[POST] Video re-queued for retry, post ${post.id}`);
+        } catch (queueErr) {
+            console.warn('[POST] Failed to re-queue video (polling mode may still pick it up):', queueErr.message);
+        }
+
         res.json({
             status: 'success',
             message: 'Video processing retry initiated. Please allow a few minutes for processing to complete.',
