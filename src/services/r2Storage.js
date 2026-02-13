@@ -1,4 +1,5 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
@@ -228,6 +229,54 @@ function isR2Configured() {
   return USE_R2 && s3Client !== null;
 }
 
+/**
+ * Generate a presigned PUT URL for direct client upload to R2.
+ * Client uploads file directly to this URL (no backend proxy).
+ * @param {string} key - R2 object key (e.g. 'media/123456-uuid.mp4')
+ * @param {string} contentType - MIME type (e.g. 'video/mp4')
+ * @param {number} expiresIn - URL expiry in seconds (default 600 = 10 min)
+ * @returns {Promise<{uploadUrl: string, publicUrl: string, key: string}>}
+ */
+async function getSignedUploadUrl(key, contentType = 'video/mp4', expiresIn = 600) {
+  if (!USE_R2 || !s3Client) {
+    throw new Error('R2 storage is not configured.');
+  }
+
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn });
+  const publicUrl = `${R2_PUBLIC_DOMAIN}/${key}`;
+
+  return { uploadUrl, publicUrl, key };
+}
+
+/**
+ * Check if a file exists in R2
+ * @param {string} key - R2 object key
+ * @returns {Promise<boolean>}
+ */
+async function fileExistsInR2(key) {
+  if (!USE_R2 || !s3Client) {
+    return false;
+  }
+  try {
+    await s3Client.send(new HeadObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    }));
+    return true;
+  } catch (err) {
+    if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+      return false;
+    }
+    throw err;
+  }
+}
+
 module.exports = {
   uploadToR2,
   uploadFileToR2,
@@ -235,6 +284,8 @@ module.exports = {
   downloadFromR2,
   extractKeyFromUrl,
   isR2Configured,
+  getSignedUploadUrl,
+  fileExistsInR2,
   R2_PUBLIC_DOMAIN,
   R2_BUCKET_NAME,
 };

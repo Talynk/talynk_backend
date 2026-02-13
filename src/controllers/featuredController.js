@@ -7,6 +7,7 @@ const {
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
+const { applyFeedReadyFilter } = require('../utils/postFilters');
 
 // Get featured posts with optimized queries and caching
 exports.getFeaturedPosts = async (req, res) => {
@@ -29,13 +30,14 @@ exports.getFeaturedPosts = async (req, res) => {
             });
         }
 
-        // Build optimized where clause
+        // Build optimized where clause (only feed-ready posts)
         const whereClause = {
             is_active: true,
             OR: [
                 { expires_at: null },
                 { expires_at: { gt: currentDate } }
-            ]
+            ],
+            post: applyFeedReadyFilter({})
         };
 
         // Determine sort order

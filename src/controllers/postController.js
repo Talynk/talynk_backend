@@ -17,8 +17,216 @@ const {
     clearCacheByPattern
 } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
-const { addVideoJob } = require('../queues/videoQueue');
+const { addVideoJob, getJobStatus, getQueueStats } = require('../queues/videoQueue');
 const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
+const { getSignedUploadUrl, fileExistsInR2, isR2Configured } = require('../services/r2Storage');
+const { getClient: getRedisClient } = require('../lib/redis');
+const { applyFeedReadyFilter, getProcessingStatusLabel } = require('../utils/postFilters');
+
+const UPLOAD_SESSION_TTL = 600; // 10 minutes
+const UPLOAD_SESSION_PREFIX = 'upload:';
+
+/**
+ * Create video upload - returns signed URL for direct client upload to R2.
+ * POST /api/posts/create-upload
+ * Body: { title, caption, post_category, status?: 'draft'|'active' }
+ * Client uploads file via PUT to uploadUrl, then calls upload-complete.
+ */
+exports.createVideoUpload = async (req, res) => {
+    try {
+        const { title, caption, post_category, status } = req.body;
+        const userId = req.user.id;
+
+        if (!title || !post_category) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'title and post_category are required',
+            });
+        }
+
+        if (!isR2Configured()) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Direct upload not available. R2 storage is not configured.',
+            });
+        }
+
+        const redis = getRedisClient();
+        if (!redis) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Direct upload not available. Redis is not configured.',
+            });
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+
+        const category = await prisma.category.findFirst({
+            where: { name: { mode: 'insensitive', equals: post_category.trim() }, status: 'active' },
+        });
+        if (!category) {
+            return res.status(400).json({ status: 'error', message: 'Invalid category' });
+        }
+
+        const postStatus = status === 'draft' ? 'draft' : 'active';
+        if (postStatus === 'draft') {
+            const draftCount = await prisma.post.count({ where: { user_id: userId, status: 'draft' } });
+            if (draftCount >= 3) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Maximum draft limit reached',
+                });
+            }
+        }
+
+        const post = await prisma.post.create({
+            data: {
+                user_id: userId,
+                status: postStatus,
+                category_id: category.id,
+                title,
+                description: caption || null,
+                content: caption || null,
+                type: 'video',
+                video_url: null,
+                thumbnail_url: null,
+                processing_status: 'uploading',
+                uploadDate: new Date(),
+            },
+        });
+
+        const fileExt = '.mp4';
+        const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
+        const r2Key = `media/${fileName}`;
+
+        const { uploadUrl, publicUrl } = await getSignedUploadUrl(r2Key, 'video/mp4', UPLOAD_SESSION_TTL);
+
+        await redis.setex(`${UPLOAD_SESSION_PREFIX}${post.id}`, UPLOAD_SESSION_TTL, r2Key);
+
+        res.json({
+            status: 'success',
+            data: {
+                postId: post.id,
+                uploadUrl,
+                videoUrl: publicUrl,
+                expiresIn: UPLOAD_SESSION_TTL,
+            },
+        });
+    } catch (error) {
+        console.error('[createVideoUpload] Error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create upload session',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        });
+    }
+};
+
+/**
+ * Complete video upload - verify file in R2, update post, queue processing.
+ * POST /api/posts/upload-complete
+ * Body: { postId }
+ */
+exports.completeVideoUpload = async (req, res) => {
+    try {
+        const { postId } = req.body;
+        const userId = req.user.id;
+
+        if (!postId) {
+            return res.status(400).json({ status: 'error', message: 'postId is required' });
+        }
+
+        const redis = getRedisClient();
+        if (!redis) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Redis not configured',
+            });
+        }
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+        });
+
+        if (!post) {
+            return res.status(404).json({ status: 'error', message: 'Post not found' });
+        }
+        if (post.user_id !== userId) {
+            return res.status(403).json({ status: 'error', message: 'Not authorized' });
+        }
+        if (post.processing_status !== 'uploading') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Post is not in uploading state',
+                processing_status: post.processing_status,
+            });
+        }
+
+        const r2Key = await redis.get(`${UPLOAD_SESSION_PREFIX}${postId}`);
+        await redis.del(`${UPLOAD_SESSION_PREFIX}${postId}`);
+
+        if (!r2Key) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Upload session expired or invalid. Please start a new upload.',
+            });
+        }
+
+        const exists = await fileExistsInR2(r2Key);
+        if (!exists) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Video file not found in storage. Please complete the upload first.',
+            });
+        }
+
+        const { R2_PUBLIC_DOMAIN } = require('../services/r2Storage');
+        const publicVideoUrl = `${R2_PUBLIC_DOMAIN}/${r2Key}`;
+
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                video_url: publicVideoUrl,
+                processing_status: 'pending',
+            },
+        });
+
+        try {
+            await addVideoJob(postId, publicVideoUrl);
+            console.log(`[POST] Video queued (direct upload) for post ${postId}`);
+        } catch (queueErr) {
+            console.error('[POST] Failed to queue video job:', queueErr.message);
+            await prisma.post.update({
+                where: { id: postId },
+                data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' },
+            });
+            return res.status(500).json({
+                status: 'error',
+                message: 'Upload complete but processing queue failed',
+            });
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Upload complete. Video is being processed.',
+            data: {
+                postId,
+                video_url: publicVideoUrl,
+                processing_status: 'pending',
+            },
+        });
+    } catch (error) {
+        console.error('[completeVideoUpload] Error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to complete upload',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+        });
+    }
+};
 
 exports.createPost = async (req, res) => {
     try {
@@ -383,7 +591,8 @@ exports.getAllPosts = async (req, res) => {
             };
         }
 
-        // Determine sort order for non-featured posts
+        // Determine sort order for non-featured posts.
+        // When sorting by likes/views/comments, tie-break by latest first (createdAt desc).
         let orderBy = {};
         switch (sort) {
             case 'newest':
@@ -393,22 +602,25 @@ exports.getAllPosts = async (req, res) => {
                 orderBy = { createdAt: 'asc' };
                 break;
             case 'most_liked':
-                orderBy = { likes: 'desc' };
+                orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'most_viewed':
-                orderBy = { views: 'desc' };
+                orderBy = [{ views: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'most_commented':
-                orderBy = { comment_count: 'desc' };
+                orderBy = [{ comment_count: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'default':
             default:
-                // Default: most liked for non-featured posts
-                orderBy = { likes: 'desc' };
+                // Default: most liked for non-featured posts; same likes → latest first
+                orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
                 break;
         }
 
         const currentDate = new Date();
+
+        // Only show video posts in feed when processing is complete
+        const feedReadyBaseWhere = applyFeedReadyFilter(baseWhereClause);
 
         // Get featured posts first (if featured_first is true)
         let featuredPosts = [];
@@ -416,20 +628,7 @@ exports.getAllPosts = async (req, res) => {
 
         if (shouldFeatureFirst) {
             // Get all active featured posts from FeaturedPost table that haven't expired
-            // Build post filter explicitly to ensure enum types are correct
-            const postFilter = {
-                is_frozen: false
-            };
-
-            // Add status filter if present in baseWhereClause
-            if (baseWhereClause.status) {
-                postFilter.status = baseWhereClause.status;
-            }
-
-            // Add category filter if present (handle both single ID and array)
-            if (baseWhereClause.category_id) {
-                postFilter.category_id = baseWhereClause.category_id;
-            }
+            const postFilter = { ...feedReadyBaseWhere, is_frozen: false };
 
             const activeFeaturedPosts = await prisma.featuredPost.findMany({
                 where: {
@@ -508,7 +707,7 @@ exports.getAllPosts = async (req, res) => {
             // (posts featured via the alternative route)
             const postsWithFeaturedFlag = await prisma.post.findMany({
                 where: {
-                    ...baseWhereClause,
+                    ...feedReadyBaseWhere,
                     is_featured: true,
                     id: {
                         notIn: featuredPostIds // Exclude already found featured posts
@@ -574,7 +773,7 @@ exports.getAllPosts = async (req, res) => {
 
         // Build where clause for regular posts (exclude featured if featured_first is true)
         const regularWhereClause = {
-            ...baseWhereClause
+            ...feedReadyBaseWhere
         };
 
         if (shouldFeatureFirst && featuredPostIds.length > 0) {
@@ -1710,13 +1909,11 @@ exports.getFollowingPosts = async (req, res) => {
 
         const [followingPosts, totalCount] = await Promise.all([
             prisma.post.findMany({
-                where: {
+                where: applyFeedReadyFilter({
                     status: 'active',
                     is_frozen: false,
-                    user_id: {
-                        in: followingUserIds
-                    }
-                },
+                    user_id: { in: followingUserIds }
+                }),
                 include: {
                     user: {
                         select: {
@@ -1830,7 +2027,7 @@ exports.getOptimizedFeed = async (req, res) => {
 
         const feedPosts = [];
 
-        // Get featured posts if requested
+        // Get featured posts if requested (only feed-ready posts)
         if (includeFeatured === 'true') {
             const featuredPosts = await prisma.featuredPost.findMany({
                 where: {
@@ -1838,7 +2035,8 @@ exports.getOptimizedFeed = async (req, res) => {
                     OR: [
                         { expires_at: null },
                         { expires_at: { gt: new Date() } }
-                    ]
+                    ],
+                    post: applyFeedReadyFilter({})
                 },
                 include: {
                     post: {
@@ -1893,17 +2091,15 @@ exports.getOptimizedFeed = async (req, res) => {
         // Get following posts if requested
         if (includeFollowing === 'true') {
             const followingPosts = await prisma.post.findMany({
-                where: {
+                where: applyFeedReadyFilter({
                     status: 'active',
                     is_frozen: false,
                     user: {
                         followers: {
-                            some: {
-                                followerId: userId
-                            }
+                            some: { followerId: userId }
                         }
                     }
-                },
+                }),
                 include: {
                     user: {
                         select: {
@@ -2169,21 +2365,52 @@ exports.getVideoProcessingStatus = async (req, res) => {
             });
         }
 
+        const processingStatus = post.processing_status || 'unknown';
+        let queueInfo = null;
+
+        if (['pending', 'processing'].includes(processingStatus)) {
+            try {
+                const [jobStatus, queueStats] = await Promise.all([
+                    getJobStatus(post.id),
+                    getQueueStats()
+                ]);
+                const waiting = queueStats.waiting || 0;
+                const active = queueStats.active || 0;
+                const isActive = jobStatus?.state === 'active';
+                const position = isActive ? 1 : (waiting + 1);
+                const avgSecondsPerVideo = 45;
+                const estimatedSecondsRemaining = isActive
+                    ? Math.round(avgSecondsPerVideo * (1 - (jobStatus?.progress || 0) / 100))
+                    : (waiting + 1) * avgSecondsPerVideo;
+
+                queueInfo = {
+                    positionInQueue: position,
+                    jobsWaiting: waiting,
+                    jobsActive: active,
+                    estimatedSecondsRemaining: Math.max(0, estimatedSecondsRemaining),
+                    statusLabel: getProcessingStatusLabel(processingStatus)
+                };
+            } catch (qErr) {
+                queueInfo = { statusLabel: getProcessingStatusLabel(processingStatus), error: 'Queue stats unavailable' };
+            }
+        }
+
         res.json({
             status: 'success',
             data: {
                 postId: post.id,
                 type: post.type,
                 processing: {
-                    status: post.processing_status || 'unknown',
+                    status: processingStatus,
+                    statusLabel: getProcessingStatusLabel(processingStatus),
                     error: post.processing_error,
-                    hlsReady: post.hls_url && post.processing_status === 'completed'
+                    hlsReady: post.hls_url && post.processing_status === 'completed',
+                    queue: queueInfo
                 },
                 urls: {
                     raw: post.video_url,
                     hls: post.hls_url,
                     thumbnail: post.thumbnail_url,
-                    // Use HLS if ready, otherwise raw
                     preferred: (post.hls_url && post.processing_status === 'completed')
                         ? post.hls_url
                         : post.video_url

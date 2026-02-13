@@ -4,6 +4,7 @@ const fs = require('fs').promises;
 const { clearCacheByPattern } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 const { addVideoJob } = require('../queues/videoQueue');
+const { applyFeedReadyFilter } = require('../utils/postFilters');
 
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
@@ -712,7 +713,10 @@ exports.getChallengePosts = async (req, res) => {
 
         const [challengePosts, total] = await Promise.all([
             prisma.challengePost.findMany({
-                where: { challenge_id: challengeId },
+                where: {
+                    challenge_id: challengeId,
+                    post: applyFeedReadyFilter({})
+                },
                 skip,
                 take: parseInt(limit),
                 orderBy: {
@@ -755,7 +759,10 @@ exports.getChallengePosts = async (req, res) => {
                 }
             }),
             prisma.challengePost.count({
-                where: { challenge_id: challengeId }
+                where: {
+                    challenge_id: challengeId,
+                    post: applyFeedReadyFilter({})
+                }
             })
         ]);
 

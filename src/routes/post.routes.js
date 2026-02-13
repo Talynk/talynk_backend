@@ -10,6 +10,10 @@ const postController = require('../controllers/postController');
 const likeController = require('../controllers/likeController');
 
 // Post routes (all protected)
+// Direct upload (signed URL) - client uploads to R2, then calls upload-complete
+router.post('/create-upload', authenticate, postController.createVideoUpload);
+router.post('/upload-complete', authenticate, postController.completeVideoUpload);
+// Legacy: single request with file (file passes through backend)
 router.post('/', authenticate, ...upload.single('file'), postController.createPost);
 
 // SPECIFIC ROUTES FIRST - before parameterized routes
