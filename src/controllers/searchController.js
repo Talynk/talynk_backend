@@ -140,7 +140,7 @@ exports.search = async (req, res) => {
                 };
             }
 
-            // Determine sort order
+            // Determine sort order. Same likes/views → latest first (createdAt desc).
             let postOrderBy = {};
             switch (sort) {
                 case 'newest':
@@ -150,10 +150,10 @@ exports.search = async (req, res) => {
                     postOrderBy = { createdAt: 'asc' };
                     break;
                 case 'most_liked':
-                    postOrderBy = { likes: 'desc' };
+                    postOrderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
                     break;
                 case 'most_viewed':
-                    postOrderBy = { views: 'desc' };
+                    postOrderBy = [{ views: 'desc' }, { createdAt: 'desc' }];
                     break;
                 case 'relevance':
                 default:

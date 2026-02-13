@@ -591,7 +591,8 @@ exports.getAllPosts = async (req, res) => {
             };
         }
 
-        // Determine sort order for non-featured posts
+        // Determine sort order for non-featured posts.
+        // When sorting by likes/views/comments, tie-break by latest first (createdAt desc).
         let orderBy = {};
         switch (sort) {
             case 'newest':
@@ -601,18 +602,18 @@ exports.getAllPosts = async (req, res) => {
                 orderBy = { createdAt: 'asc' };
                 break;
             case 'most_liked':
-                orderBy = { likes: 'desc' };
+                orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'most_viewed':
-                orderBy = { views: 'desc' };
+                orderBy = [{ views: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'most_commented':
-                orderBy = { comment_count: 'desc' };
+                orderBy = [{ comment_count: 'desc' }, { createdAt: 'desc' }];
                 break;
             case 'default':
             default:
-                // Default: most liked for non-featured posts
-                orderBy = { likes: 'desc' };
+                // Default: most liked for non-featured posts; same likes → latest first
+                orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
                 break;
         }
 
