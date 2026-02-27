@@ -381,7 +381,7 @@ exports.getEndedChallenges = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error fetching ended challenges:', error);
+        console.error(`[${new Date().toISOString()}] Error fetching ended challenges:`, error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch ended challenges',
@@ -396,6 +396,15 @@ exports.getChallengeById = async (req, res) => {
     try {
         const { challengeId } = req.params;
         const userId = req.user?.id;
+
+        // Validate challengeId is a valid UUID to avoid Prisma P2023 errors
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(challengeId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid challenge ID format.'
+            });
+        }
 
         const challenge = await prisma.challenge.findUnique({
             where: { id: challengeId },
@@ -466,7 +475,7 @@ exports.getChallengeById = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Error fetching challenge:', error);
+        console.error(`[${new Date().toISOString()}] Error fetching challenge:`, error);
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch challenge',

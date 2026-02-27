@@ -100,8 +100,7 @@ exports.addComment = async (req, res) => {
                             type: 'comment',
                             isRead: false,
                             actorId: resolvedUser.id,  // User who commented
-                            postId: postId,            // Post that was commented on
-                            commentId: comment.id      // Comment ID
+                            postId: postId             // Post that was commented on
                         }
                     });
 
