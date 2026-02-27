@@ -16,8 +16,9 @@ const HLS_CONFIG = {
   // Quality levels for adaptive streaming (resolution: bitrate)
   // Reduced from 3 to 2 qualities for faster encoding (removed 360p)
   qualities: [
-    { name: '480p', width: 854, height: 480, videoBitrate: '1200k', audioBitrate: '96k' },
-    { name: '720p', width: 1280, height: 720, videoBitrate: '2500k', audioBitrate: '128k' },
+    // Mobile-optimized bitrate ladder (roughly matches 360p/720p tiers)
+    { name: '480p', width: 854, height: 480, videoBitrate: '700k', audioBitrate: '96k' },
+    { name: '720p', width: 1280, height: 720, videoBitrate: '1600k', audioBitrate: '128k' },
   ],
   // HLS segment duration in seconds
   segmentDuration: 4,
@@ -106,12 +107,18 @@ async function transcodeToQuality(inputPath, outputDir, quality) {
       .outputOptions([
         // Video encoding
         '-c:v libx264',
-        '-preset ultrafast', // Changed from 'fast' for 3-5x faster encoding
-        '-tune zerolatency', // Optimizes for fast encoding
+        '-preset veryfast',
+        '-profile:v main',
+        '-level 4.0',
+        '-pix_fmt yuv420p',
+        '-movflags +faststart',
         `-b:v ${quality.videoBitrate}`,
         `-maxrate ${quality.videoBitrate}`,
         `-bufsize ${parseInt(quality.videoBitrate) * 2}k`,
         `-vf scale=${quality.width}:${quality.height}:force_original_aspect_ratio=decrease,pad=${quality.width}:${quality.height}:(ow-iw)/2:(oh-ih)/2`,
+        '-g', '120',
+        '-keyint_min', '120',
+        '-sc_threshold', '0',
         // Audio encoding
         '-c:a aac',
         `-b:a ${quality.audioBitrate}`,
@@ -121,7 +128,8 @@ async function transcodeToQuality(inputPath, outputDir, quality) {
         `-hls_time ${HLS_CONFIG.segmentDuration}`,
         '-hls_list_size 0', // Include all segments in playlist
         '-hls_segment_filename', segmentPattern,
-        '-hls_playlist_type vod'
+        '-hls_playlist_type vod',
+        '-hls_flags', 'independent_segments'
       ])
       .output(playlistPath)
       .on('start', (cmd) => {
@@ -373,6 +381,17 @@ async function processVideoInBackground(inputPath, postId, prisma) {
   console.log(`[VideoProcessing] Starting background processing for post: ${postId}`);
 
   try {
+    // Idempotency: if post is already completed with HLS URL, skip re-processing
+    const existing = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { hls_url: true, processing_status: true },
+    });
+
+    if (existing && existing.processing_status === 'completed' && existing.hls_url) {
+      console.log(`[VideoProcessing] Post ${postId} already completed, skipping re-processing`);
+      return;
+    }
+
     const result = await processVideo(inputPath, { videoId: postId });
 
     // Update post with HLS URL and thumbnail

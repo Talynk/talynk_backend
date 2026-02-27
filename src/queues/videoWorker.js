@@ -24,9 +24,9 @@ const connection = new IORedis(REDIS_URL, {
     enableReadyCheck: false,
 });
 
-// Concurrency: 2 jobs at a time for 6-core server with 12GB RAM
+// Concurrency: 3 jobs at a time for 12-core server with 48GB RAM
 // Each FFmpeg process uses ~1-2 CPU cores and 500MB-1GB RAM
-const CONCURRENCY = 2;
+const CONCURRENCY = 3;
 
 console.log('[VideoWorker] Starting video processing worker...');
 console.log(`[VideoWorker] Redis URL: ${REDIS_URL}`);
