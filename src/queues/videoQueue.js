@@ -1,11 +1,19 @@
 const { Queue, QueueEvents } = require('bullmq');
 const IORedis = require('ioredis');
 
-// Redis connection for queue
+// Redis connection for queue (must match video processor server REDIS_URL for jobs to be consumed)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const connection = new IORedis(REDIS_URL, {
     maxRetriesPerRequest: null, // Required by BullMQ
     enableReadyCheck: false,
+});
+
+const redisHostForLog = REDIS_URL.replace(/\/\/([^:@]+)(:[^@]+)?@/, '//$1****@');
+connection.on('connect', () => {
+    console.log('[VideoQueue] Redis connected', { host: redisHostForLog });
+});
+connection.on('error', (err) => {
+    console.error('[VideoQueue] Redis error', { message: err?.message });
 });
 
 // Create video processing queue
@@ -45,14 +53,19 @@ queueEvents.on('progress', ({ jobId, data }) => {
 /**
  * Add a video processing job to the queue
  * @param {string} postId - Post ID to update after processing
- * @param {string} inputPath - Path to the video file to process
+ * @param {string} inputPath - R2 URL of the video (or local path for legacy flow)
  * @param {number} videoDuration - Optional video duration in seconds (for priority)
  * @returns {Promise<Job>} The created job
  */
 async function addVideoJob(postId, inputPath, videoDuration = 30) {
-    // Priority: shorter videos get higher priority (lower number = higher priority)
-    // 1-10 sec = priority 1, 11-20 sec = priority 2, etc.
+    if (!postId || !inputPath) {
+        const err = new Error('addVideoJob requires postId and inputPath (video URL)');
+        console.error('[VideoQueue] Invalid args', { postId: !!postId, inputPath: !!inputPath });
+        throw err;
+    }
+
     const priority = Math.max(1, Math.ceil(videoDuration / 10));
+    const jobId = `video-${postId}-${Date.now()}`;
 
     const job = await videoQueue.add(
         'transcode-hls',
@@ -63,21 +76,37 @@ async function addVideoJob(postId, inputPath, videoDuration = 30) {
         },
         {
             priority,
-            jobId: `video-${postId}`, // Use postId as job ID to prevent duplicates
+            jobId,
         }
     );
 
-    console.log(`[VideoQueue] Added job ${job.id} for post ${postId} with priority ${priority}`);
+    console.log('[VideoQueue] Job enqueued', {
+        jobId: job.id,
+        postId,
+        priority,
+        inputPathPrefix: typeof inputPath === 'string' ? inputPath.slice(0, 60) : '(invalid)',
+    });
     return job;
 }
 
 /**
- * Get job status by post ID
+ * Get job status by post ID (finds most recent job for this post)
  * @param {string} postId - Post ID
  * @returns {Promise<Object|null>} Job status or null if not found
  */
 async function getJobStatus(postId) {
-    const job = await videoQueue.getJob(`video-${postId}`);
+    const [waiting, active, completed, failed] = await Promise.all([
+        videoQueue.getJobs(['waiting'], 0, 100),
+        videoQueue.getJobs(['active'], 0, 100),
+        videoQueue.getJobs(['completed'], 0, 50),
+        videoQueue.getJobs(['failed'], 0, 50),
+    ]);
+    const byPostId = (j) => j.data && j.data.postId === postId;
+    const job =
+        active.find(byPostId) ||
+        waiting.find(byPostId) ||
+        failed.find(byPostId) ||
+        completed.find(byPostId);
     if (!job) return null;
 
     const state = await job.getState();

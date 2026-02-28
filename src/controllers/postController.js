@@ -195,17 +195,29 @@ exports.completeVideoUpload = async (req, res) => {
         });
 
         try {
-            await addVideoJob(postId, publicVideoUrl);
-            console.log(`[POST] Video queued (direct upload) for post ${postId}`);
+            const queueJob = await addVideoJob(postId, publicVideoUrl);
+            console.log('[POST] Video queued (direct upload)', {
+                postId,
+                jobId: queueJob?.id,
+                message: 'Processor should log this jobId when it picks up the job',
+            });
         } catch (queueErr) {
-            console.error('[POST] Failed to queue video job:', queueErr.message);
+            const errMsg = queueErr?.message || 'Failed to queue video for processing';
+            console.error('[POST] Failed to queue video job', {
+                postId,
+                error: errMsg,
+                code: queueErr?.code,
+            });
             await prisma.post.update({
                 where: { id: postId },
-                data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' },
+                data: {
+                    processing_status: 'failed',
+                    processing_error: errMsg.slice(0, 500),
+                },
             });
             return res.status(500).json({
                 status: 'error',
-                message: 'Upload complete but processing queue failed',
+                message: 'Upload complete but processing queue failed. Post left in failed state; you can retry from profile.',
             });
         }
 
@@ -386,16 +398,17 @@ exports.createPost = async (req, res) => {
         if (isVideo && video_url) {
             console.log("[POST] Adding video to processing queue for post:", post.id);
             try {
-                // Pass R2 URL to the queue instead of local temp path
-                // The remote video processor will download from R2
-                await addVideoJob(post.id, video_url);
-                console.log(`[POST] Video queued successfully for post ${post.id}`);
+                const queueJob = await addVideoJob(post.id, video_url);
+                console.log('[POST] Video queued', { postId: post.id, jobId: queueJob?.id });
             } catch (queueErr) {
-                console.error('[POST] Failed to queue video job:', queueErr.message);
-                // Update post status to indicate queue failure
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                console.error('[POST] Failed to queue video job', { postId: post.id, error: errMsg });
                 await prisma.post.update({
                     where: { id: post.id },
-                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                    data: {
+                        processing_status: 'failed',
+                        processing_error: errMsg.slice(0, 500),
+                    },
                 });
             }
         }
@@ -2491,13 +2504,22 @@ exports.retryVideoProcessing = async (req, res) => {
             }
         });
 
-        // Re-queue for processing (Redis/BullMQ mode) - video processor worker will pick it up
-        // In polling mode, video processor will fetch via GET /api/internal/pending-videos
+        // Re-queue for processing (Redis/BullMQ) - video processor server must use same REDIS_URL
         try {
-            await addVideoJob(post.id, post.video_url);
-            console.log(`[POST] Video re-queued for retry, post ${post.id}`);
+            const queueJob = await addVideoJob(post.id, post.video_url);
+            console.log('[POST] Video re-queued for retry', { postId: post.id, jobId: queueJob?.id });
         } catch (queueErr) {
-            console.warn('[POST] Failed to re-queue video (polling mode may still pick it up):', queueErr.message);
+            const errMsg = queueErr?.message || 'Failed to re-queue video';
+            console.error('[POST] Retry queue failed', { postId: post.id, error: errMsg });
+            await prisma.post.update({
+                where: { id: postId },
+                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) },
+            });
+            return res.status(503).json({
+                status: 'error',
+                message: 'Retry failed: processing queue unavailable. Try again later.',
+                error: process.env.NODE_ENV === 'development' ? errMsg : undefined,
+            });
         }
 
         res.json({

@@ -371,82 +371,6 @@ async function copyDirectory(src, dest) {
 }
 
 /**
- * Process video in background (non-blocking)
- * Updates the post with HLS URL and thumbnail after processing
- * @param {string} inputPath - Path to input video file
- * @param {string} postId - Post ID to update after processing
- * @param {Object} prisma - Prisma client instance
- */
-async function processVideoInBackground(inputPath, postId, prisma) {
-  console.log(`[VideoProcessing] Starting background processing for post: ${postId}`);
-
-  try {
-    // Idempotency: if post is already completed with HLS URL, skip re-processing
-    const existing = await prisma.post.findUnique({
-      where: { id: postId },
-      select: { hls_url: true, processing_status: true },
-    });
-
-    if (existing && existing.processing_status === 'completed' && existing.hls_url) {
-      console.log(`[VideoProcessing] Post ${postId} already completed, skipping re-processing`);
-      return;
-    }
-
-    const result = await processVideo(inputPath, { videoId: postId });
-
-    // Update post with HLS URL and thumbnail
-    await prisma.post.update({
-      where: { id: postId },
-      data: {
-        hls_url: result.hlsUrl,
-        thumbnail_url: result.thumbnailUrl,
-        video_duration: result.metadata.duration ? Math.round(result.metadata.duration) : null,
-        video_width: result.metadata.width,
-        video_height: result.metadata.height,
-        processing_status: 'completed'
-      }
-    });
-
-    console.log(`[VideoProcessing] Post ${postId} updated with HLS URL`);
-
-    // Clear caches so fresh data with HLS URLs is served
-    try {
-      await clearCacheByPattern('all_posts');
-      await clearCacheByPattern('single_post');
-      await clearCacheByPattern('search_posts');
-      await clearCacheByPattern('following_posts');
-      console.log('[VideoProcessing] Caches cleared after video processing');
-    } catch (cacheErr) {
-      console.warn('[VideoProcessing] Failed to clear cache:', cacheErr.message);
-    }
-
-    // Cleanup the temp input file
-    try {
-      await fs.unlink(inputPath);
-      console.log('[VideoProcessing] Cleaned up input file');
-    } catch (err) {
-      console.warn('[VideoProcessing] Failed to cleanup input file:', err.message);
-    }
-
-  } catch (error) {
-    console.error(`[VideoProcessing] Background processing failed for post ${postId}:`, error);
-
-    // Update post with error status
-    try {
-      await prisma.post.update({
-        where: { id: postId },
-        data: {
-          processing_status: 'failed',
-          processing_error: error.message
-        }
-      });
-    } catch (updateError) {
-      console.error('[VideoProcessing] Failed to update post with error status:', updateError);
-    }
-  }
-}
-
-/**
  * Generate thumbnail only (without HLS transcoding)
  * Useful for quick thumbnail generation
  * @param {string} inputPath - Path to input video file
@@ -482,7 +406,6 @@ async function generateAndUploadThumbnail(inputPath, videoId) {
 
 module.exports = {
   processVideo,
-  processVideoInBackground,
   generateThumbnail,
   generateAndUploadThumbnail,
   getVideoMetadata,

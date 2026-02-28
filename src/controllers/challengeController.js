@@ -1168,14 +1168,17 @@ exports.createPostInChallenge = async (req, res) => {
         if (isVideo && video_url) {
             console.log("[CHALLENGE] Adding video to processing queue for post:", post.id);
             try {
-                // Pass R2 URL to the queue instead of local temp path
-                await addVideoJob(post.id, video_url);
-                console.log(`[CHALLENGE] Video queued successfully for post ${post.id}`);
+                const queueJob = await addVideoJob(post.id, video_url);
+                console.log('[CHALLENGE] Video queued', { postId: post.id, jobId: queueJob?.id });
             } catch (queueErr) {
-                console.error('[CHALLENGE] Failed to queue video job:', queueErr.message);
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                console.error('[CHALLENGE] Failed to queue video job', { postId: post.id, error: errMsg });
                 await prisma.post.update({
                     where: { id: post.id },
-                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                    data: {
+                        processing_status: 'failed',
+                        processing_error: errMsg.slice(0, 500),
+                    },
                 });
             }
         }
