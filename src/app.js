@@ -1,4 +1,6 @@
+require("./instrument.js");
 require('dotenv').config();
+const Sentry = require("@sentry/node");
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -86,7 +88,7 @@ const corsOptions = {
            'https://talynk.vercel.app', 'https://talentix.net', 'https://admin.talentix.net'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers', 'sentry-trace', 'baggage'],
   preflightContinue: false,
   optionsSuccessStatus: 204
 };
@@ -158,6 +160,10 @@ app.use(helmet({
 // Add specific CORS handling for problematic routes (using same config)
 app.use('/api/posts/all', cors(corsOptions));
 
+// Request-scoped Sentry context (request_id, path, method) for trace-connected logs
+const sentryContext = require('./middleware/sentryContext');
+app.use(sentryContext);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
@@ -170,7 +176,7 @@ app.use('/uploads', (req, res, next) => {
     // Set CORS headers specifically for media files
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, sentry-trace, baggage');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     
@@ -205,6 +211,16 @@ app.get('/', (req, res) => {
         }
     });
 });
+
+// Sentry test route (disabled in production)
+if (process.env.NODE_ENV !== "production") {
+    app.get("/debug-sentry", (req, res) => {
+        throw new Error("My first Sentry error!");
+    });
+}
+
+// The error handler must be registered before any other error middleware and after all controllers
+Sentry.setupExpressErrorHandler(app);
 
 // Error Handling Middleware
 const notFoundHandler = (req, res) => {
