@@ -483,6 +483,7 @@ exports.createPost = async (req, res) => {
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('all_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
@@ -1160,6 +1161,7 @@ exports.updatePost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:updated', { postId, userId });
 
@@ -1230,6 +1232,7 @@ exports.deletePost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:deleted', { postId, userId: userID });
 
@@ -2313,6 +2316,7 @@ exports.publishDraftPost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:published', { postId, userId });
 

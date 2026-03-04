@@ -130,6 +130,9 @@ model Post {
   challengePosts        ChallengePost[]
   notifications         Notification[]
 
+  @@index([createdAt(sort: Desc)])
+  @@index([user_id])
+  @@index([status, createdAt(sort: Desc)])
   @@map("posts")
 }
 
@@ -164,6 +167,7 @@ model Comment {
   user             User     @relation(fields: [commentor_id], references: [id])
   post             Post     @relation(fields: [post_id], references: [id])
 
+  @@index([post_id])
   @@map("comments")
 }
 
@@ -179,6 +183,7 @@ model PostLike {
   post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, post_id], name: "unique_user_post_like")
+  @@index([post_id, user_id])
   @@map("post_likes")
 }
 
@@ -211,6 +216,7 @@ model Follow {
   following    User     @relation("UserFollowers", fields: [followingId], references: [id])
 
   @@unique([followerId, followingId])
+  @@index([followingId, followerId])
   @@map("follows")
 }
 

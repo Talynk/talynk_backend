@@ -22,6 +22,7 @@ const countryRoutes = require('./country.routes');
 const challengeRoutes = require('./challenge.routes');
 const searchRoutes = require('./search.routes');
 const internalRoutes = require('./internal.routes');
+const feedRoutes = require('./feed.routes');
 
 // Test route
 router.get('/test', (req, res) => {
@@ -50,5 +51,6 @@ router.use('/countries', countryRoutes);
 router.use('/challenges', challengeRoutes);
 router.use('/search', searchRoutes);
 router.use('/internal', internalRoutes);
+router.use('/feed', feedRoutes);
 
 module.exports = router; 

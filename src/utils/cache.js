@@ -29,7 +29,9 @@ const CACHE_KEYS = {
     SINGLE_POST: 'single_post',
     SEARCH_POSTS: 'search_posts',
     USER_FOLLOWING: 'user_following',
-    USER_FOLLOWERS: 'user_followers'
+    USER_FOLLOWERS: 'user_followers',
+    FEED_PUBLIC: 'feed:public',
+    FEED_USER: 'feed:user'
 };
 
 /**
