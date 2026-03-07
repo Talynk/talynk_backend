@@ -43,7 +43,9 @@ exports.createChallenge = async (req, res) => {
             start_date,
             end_date,
             min_content_per_account,
-            scoring_criteria
+            scoring_criteria,
+            eligibility_criteria,
+            what_you_do
         } = req.body;
 
         const userId = req.user.id;
@@ -135,6 +137,8 @@ exports.createChallenge = async (req, res) => {
                 end_date: endDate,
                 min_content_per_account: min_content_per_account || 1,
                 scoring_criteria: scoring_criteria?.trim() || null,
+                eligibility_criteria: eligibility_criteria?.trim() || null,
+                what_you_do: what_you_do?.trim() || null,
                 status: 'pending'
             },
             include: {
@@ -179,7 +183,9 @@ exports.updateChallenge = async (req, res) => {
             start_date,
             end_date,
             min_content_per_account,
-            scoring_criteria
+            scoring_criteria,
+            eligibility_criteria,
+            what_you_do
         } = req.body;
 
         const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -246,6 +252,8 @@ exports.updateChallenge = async (req, res) => {
         }
         if (min_content_per_account !== undefined) updateData.min_content_per_account = min_content_per_account;
         if (scoring_criteria !== undefined) updateData.scoring_criteria = scoring_criteria?.trim() || null;
+        if (eligibility_criteria !== undefined) updateData.eligibility_criteria = eligibility_criteria?.trim() || null;
+        if (what_you_do !== undefined) updateData.what_you_do = what_you_do?.trim() || null;
 
         if (start_date !== undefined || end_date !== undefined) {
             const startDate = start_date ? new Date(start_date) : new Date(challenge.start_date);

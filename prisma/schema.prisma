@@ -501,6 +501,8 @@ model Challenge {
   end_date              DateTime
   min_content_per_account Int    @default(1)
   scoring_criteria      String?  @db.Text
+  eligibility_criteria String?  @db.Text  // Who can participate (asked when creating challenge)
+  what_you_do           String?  @db.Text  // What participants do in the challenge (asked when creating)
   status                ChallengeStatus @default(pending)
   approved_by           String?  @db.Uuid
   approved_at           DateTime?
