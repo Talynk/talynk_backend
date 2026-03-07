@@ -40,6 +40,9 @@ router.get('/:challengeId/posts', challengeController.getChallengePosts);
 // Create a new challenge request
 router.post('/', authenticate, challengeController.createChallenge);
 
+// Edit a challenge (only while pending, organizer only)
+router.put('/:challengeId', authenticate, challengeController.updateChallenge);
+
 // Join a challenge
 router.post('/:challengeId/join', authenticate, challengeController.joinChallenge);
 

@@ -6908,6 +6908,10 @@ exports.stopChallenge = async (req, res) => {
             }
         });
 
+        // Snapshot like counts for each challenge post (for ranking and transparency after challenge ends)
+        const { snapshotLikesAtChallengeEnd } = require('./challengeController');
+        await snapshotLikesAtChallengeEnd(challengeId);
+
         // Notify organizer
         await prisma.notification.create({
             data: {

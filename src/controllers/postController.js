@@ -1039,6 +1039,20 @@ exports.getPostById = async (req, res) => {
                         comments: true,
                         postViews: true
                     }
+                },
+                challengePosts: {
+                    select: {
+                        likes_at_challenge_end: true,
+                        challenge_id: true,
+                        challenge: {
+                            select: {
+                                id: true,
+                                name: true,
+                                status: true,
+                                end_date: true
+                            }
+                        }
+                    }
                 }
             }
         });

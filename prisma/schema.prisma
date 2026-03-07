@@ -531,16 +531,17 @@ model ChallengeParticipant {
 }
 
 model ChallengePost {
-  id          String   @id @default(uuid()) @db.Uuid
-  challenge_id String  @db.Uuid
-  post_id     String   @db.Uuid
-  user_id     String   @db.Uuid
-  submitted_at DateTime @default(now())
+  id                    String   @id @default(uuid()) @db.Uuid
+  challenge_id          String   @db.Uuid
+  post_id               String   @db.Uuid
+  user_id               String   @db.Uuid
+  submitted_at          DateTime @default(now())
+  likes_at_challenge_end Int?    // Snapshot of post likes when challenge ended (for ranking & transparency)
 
   // Relations
-  challenge   Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
-  post        Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  challenge             Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  post                  Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([challenge_id, post_id], name: "unique_challenge_post")
   @@map("challenge_posts")
