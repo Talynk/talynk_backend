@@ -44,14 +44,17 @@ router.get('/content-management/stats', authenticate, isAdmin, adminController.g
 router.put('/posts/:postId/featured', authenticate, isAdmin, adminController.setPostFeatured);
 router.put('/posts/:postId/freeze', authenticate, isAdmin, adminController.freezePost);
 router.put('/posts/:postId/unfreeze', authenticate, isAdmin, adminController.unfreezePost);
+router.put('/posts/:postId/suspend', authenticate, isAdmin, adminController.suspendPost);
+router.delete('/posts/:postId', authenticate, isAdmin, adminController.adminDeletePost);
 router.get('/posts/:postId/reports', authenticate, isAdmin, adminController.getPostReports);
 router.get('/posts/analytics', authenticate, isAdmin, adminController.getAdminPosts);
 
 // Appeals Management
 router.get('/appeals', authenticate, isAdmin, adminController.getAllAppeals);
 
-// Broadcast Notifications
+// Notifications
 router.post('/notifications/broadcast', authenticate, isAdmin, adminController.sendBroadcastNotification);
+router.post('/notifications/send/:userId', authenticate, isAdmin, adminController.sendNotificationToUser);
 
 // Challenge Management
 router.get('/challenges', authenticate, isAdmin, adminController.getAllChallenges);

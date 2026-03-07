@@ -1174,10 +1174,28 @@ exports.manageUserAccount = async (req, res) => {
                     message: 'User is not frozen and cannot be reactivated'
                 });
             }
+        } else if (action === 'suspend') {
+            if (user.status === 'active' || user.status === 'frozen') {
+                newStatus = 'suspended';
+            } else {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'User is already suspended'
+                });
+            }
+        } else if (action === 'unsuspend') {
+            if (user.status === 'suspended') {
+                newStatus = 'active';
+            } else {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'User is not suspended and cannot be unsuspended'
+                });
+            }
         } else {
             return res.status(400).json({
                 status: 'error',
-                message: 'Invalid action. Use "freeze" or "reactivate"'
+                message: 'Invalid action. Use "freeze", "reactivate", "suspend", or "unsuspend"'
             });
         }
 
@@ -5867,8 +5885,7 @@ exports.freezePost = async (req, res) => {
             data: {
                 is_frozen: true,
                 status: 'suspended', // Use suspended status when freezing
-                frozen_at: new Date(),
-                frozen_reason: reason
+                frozen_at: new Date()
             },
             include: {
                 user: {
@@ -5925,7 +5942,6 @@ exports.unfreezePost = async (req, res) => {
                 is_frozen: false,
                 status: 'active',
                 frozen_at: null,
-                frozen_reason: null,
                 report_count: 0 // Reset report count
             },
             include: {
@@ -5966,6 +5982,126 @@ exports.unfreezePost = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error unfreezing post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Suspend a post (admin) – set status to suspended and notify owner
+exports.suspendPost = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { reason } = req.body || {};
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: { id: true, username: true }
+                }
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                status: 'suspended',
+                is_frozen: true,
+                frozen_at: new Date()
+            }
+        });
+
+        if (post.user?.username) {
+            await prisma.notification.create({
+                data: {
+                    userID: post.user.username,
+                    message: `Your post "${post.title}" has been suspended.${reason ? ' Reason: ' + reason : ''}`,
+                    type: 'post_suspended',
+                    isRead: false
+                }
+            });
+            emitEvent('notification:created', {
+                userId: post.user.id,
+                userID: post.user.username,
+                notification: { type: 'post_suspended', message: `Your post has been suspended.${reason ? ' Reason: ' + reason : ''}` }
+            });
+        }
+
+        loggers.audit('admin_suspend_post', { adminId: req.user.id, postId, reason: reason || null });
+
+        res.json({
+            status: 'success',
+            message: 'Post suspended successfully',
+            data: { postId }
+        });
+    } catch (error) {
+        console.error('Suspend post error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error suspending post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Delete a post (admin) – permanent delete
+exports.adminDeletePost = async (req, res) => {
+    try {
+        const { postId } = req.params;
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            select: { id: true, user_id: true }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        await prisma.comment.deleteMany({ where: { post_id: postId } });
+        await prisma.featuredPost.deleteMany({ where: { post_id: postId } });
+        await prisma.challengePost.deleteMany({ where: { post_id: postId } });
+        await prisma.share.deleteMany({ where: { post_id: postId } });
+        await prisma.notification.updateMany({ where: { postId: postId }, data: { postId: null } });
+        await prisma.post.delete({ where: { id: postId } });
+
+        if (post.user_id) {
+            await prisma.user.update({
+                where: { id: post.user_id },
+                data: { posts_count: { decrement: 1 } }
+            });
+        }
+
+        const { clearCacheByPattern } = require('../utils/cache');
+        await clearCacheByPattern('single_post');
+        await clearCacheByPattern('all_posts');
+        await clearCacheByPattern('following_posts');
+        await clearCacheByPattern('featured_posts');
+        await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
+
+        loggers.audit('admin_delete_post', { adminId: req.user.id, postId });
+
+        res.json({
+            status: 'success',
+            message: 'Post deleted successfully',
+            data: { postId }
+        });
+    } catch (error) {
+        console.error('Admin delete post error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error deleting post',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -6086,9 +6222,9 @@ exports.sendBroadcastNotification = async (req, res) => {
             });
         }
 
-        // Get all active users with their IDs
+        // Get all active users with username (required for Notification.userID FK)
         const users = await prisma.user.findMany({
-            where: { status: 'active' },
+            where: { status: 'active', username: { not: null } },
             select: { id: true, username: true }
         });
 
@@ -6159,6 +6295,84 @@ exports.sendBroadcastNotification = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error sending broadcast notification',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Send a notification to a single user (admin)
+exports.sendNotificationToUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { message, type = 'admin_message' } = req.body;
+
+        if (!message || typeof message !== 'string' || !message.trim()) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'message is required and must be a non-empty string'
+            });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { id: true, username: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        if (!user.username) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'User has no username; cannot send notification (notifications are linked by username)'
+            });
+        }
+
+        const notification = await prisma.notification.create({
+            data: {
+                userID: user.username,
+                message: message.trim(),
+                type: type.trim() || 'admin_message',
+                isRead: false
+            }
+        });
+
+        emitEvent('notification:created', {
+            userId: user.id,
+            userID: user.username,
+            notification: {
+                id: notification.id,
+                type: notification.type,
+                message: notification.message,
+                isRead: notification.isRead,
+                createdAt: notification.createdAt
+            }
+        });
+
+        loggers.audit('admin_send_notification', {
+            adminId: req.user.id,
+            targetUserId: userId,
+            type: notification.type
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Notification sent to user',
+            data: {
+                notificationId: notification.id,
+                userId: user.id,
+                type: notification.type
+            }
+        });
+    } catch (error) {
+        console.error('Send notification to user error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error sending notification to user',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
