@@ -496,6 +496,7 @@ model Challenge {
   organizer_id          String   @db.Uuid
   organizer_name        String   @db.VarChar(255)
   organizer_contact     String   @db.VarChar(255)
+  contact_email        String?  @db.VarChar(255)   // Contact email for the challenge (used when main user email not available); required on create
   start_date            DateTime
   end_date              DateTime
   min_content_per_account Int    @default(1)

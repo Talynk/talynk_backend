@@ -39,6 +39,7 @@ exports.createChallenge = async (req, res) => {
             rewards,
             organizer_name,
             organizer_contact,
+            contact_email,
             start_date,
             end_date,
             min_content_per_account,
@@ -69,10 +70,19 @@ exports.createChallenge = async (req, res) => {
         }
 
         // Validate required fields
-        if (!name || !organizer_name || !organizer_contact || !start_date || !end_date) {
+        if (!name || !organizer_name || !organizer_contact || !contact_email || !start_date || !end_date) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Missing required fields: name, organizer_name, organizer_contact, start_date, end_date'
+                message: 'Missing required fields: name, organizer_name, organizer_contact, contact_email, start_date, end_date'
+            });
+        }
+
+        // Validate contact email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(contact_email.trim())) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid contact email format'
             });
         }
 
@@ -120,6 +130,7 @@ exports.createChallenge = async (req, res) => {
                 organizer_id: userId,
                 organizer_name: organizer_name.trim(),
                 organizer_contact: organizer_contact.trim(),
+                contact_email: contact_email.trim().toLowerCase(),
                 start_date: startDate,
                 end_date: endDate,
                 min_content_per_account: min_content_per_account || 1,
@@ -164,6 +175,7 @@ exports.updateChallenge = async (req, res) => {
             rewards,
             organizer_name,
             organizer_contact,
+            contact_email,
             start_date,
             end_date,
             min_content_per_account,
@@ -222,6 +234,16 @@ exports.updateChallenge = async (req, res) => {
         else if (has_rewards === false) updateData.rewards = null;
         if (organizer_name !== undefined) updateData.organizer_name = organizer_name.trim();
         if (organizer_contact !== undefined) updateData.organizer_contact = organizer_contact.trim();
+        if (contact_email !== undefined) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(contact_email.trim())) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid contact email format'
+                });
+            }
+            updateData.contact_email = contact_email.trim().toLowerCase();
+        }
         if (min_content_per_account !== undefined) updateData.min_content_per_account = min_content_per_account;
         if (scoring_criteria !== undefined) updateData.scoring_criteria = scoring_criteria?.trim() || null;
 
