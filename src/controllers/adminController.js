@@ -6107,6 +6107,257 @@ exports.adminDeletePost = async (req, res) => {
     }
 };
 
+// Get single post by ID with full detail for admin (likers, commenters, reports, appeals, activity)
+exports.getAdminPostById = async (req, res) => {
+    try {
+        const { postId } = req.params;
+
+        const post = await prisma.post.findUnique({
+            where: { id: postId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        email: true,
+                        profile_picture: true,
+                        bio: true,
+                        status: true,
+                        follower_count: true,
+                        posts_count: true,
+                        createdAt: true,
+                        country: {
+                            select: {
+                                id: true,
+                                name: true,
+                                code: true,
+                                flag_emoji: true
+                            }
+                        }
+                    }
+                },
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        description: true,
+                        level: true,
+                        parent: { select: { id: true, name: true } }
+                    }
+                },
+                _count: {
+                    select: {
+                        postLikes: true,
+                        comments: true,
+                        postViews: true,
+                        postShares: true,
+                        reports: true,
+                        appeals: true
+                    }
+                },
+                postLikes: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                profile_picture: true,
+                                createdAt: true
+                            }
+                        }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                },
+                comments: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                profile_picture: true
+                            }
+                        }
+                    },
+                    orderBy: { comment_date: 'desc' }
+                },
+                reports: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                email: true
+                            }
+                        }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                },
+                appeals: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true
+                            }
+                        }
+                    },
+                    orderBy: { createdAt: 'desc' }
+                },
+                challengePosts: {
+                    select: {
+                        id: true,
+                        submitted_at: true,
+                        likes_at_challenge_end: true,
+                        challenge: {
+                            select: {
+                                id: true,
+                                name: true,
+                                status: true,
+                                start_date: true,
+                                end_date: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!post) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Post not found'
+            });
+        }
+
+        // Build activity timeline: recent likes and comments merged by date (for admin "post activity over the past")
+        const likeActivities = (post.postLikes || []).map(like => ({
+            type: 'like',
+            id: like.id,
+            createdAt: like.createdAt,
+            user: like.user
+        }));
+        const commentActivities = (post.comments || []).map(c => ({
+            type: 'comment',
+            id: c.id,
+            createdAt: c.comment_date,
+            comment_text: c.comment_text,
+            user: c.user
+        }));
+        const activity = [...likeActivities, ...commentActivities]
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+            .slice(0, 100);
+
+        const response = {
+            ...post,
+            likers: (post.postLikes || []).map(like => ({
+                id: like.user?.id,
+                username: like.user?.username,
+                display_name: like.user?.display_name,
+                profile_picture: like.user?.profile_picture,
+                liked_at: like.createdAt
+            })),
+            commenters: (post.comments || []).map(c => ({
+                id: c.user?.id,
+                username: c.user?.username,
+                display_name: c.user?.display_name,
+                profile_picture: c.user?.profile_picture,
+                comment_text: c.comment_text,
+                comment_date: c.comment_date
+            })),
+            activity
+        };
+
+        res.json({
+            status: 'success',
+            data: response
+        });
+    } catch (error) {
+        console.error('Get admin post by ID error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching post',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get posts currently waiting for or in processing (system health / pipeline)
+exports.getPostsProcessing = async (req, res) => {
+    try {
+        const { limit = 50 } = req.query;
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+
+        const posts = await prisma.post.findMany({
+            where: {
+                type: 'video',
+                processing_status: {
+                    in: ['pending', 'processing', 'uploading']
+                }
+            },
+            select: {
+                id: true,
+                title: true,
+                status: true,
+                type: true,
+                processing_status: true,
+                processing_error: true,
+                uploadDate: true,
+                createdAt: true,
+                user_id: true,
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: limitNum
+        });
+
+        const counts = await prisma.post.groupBy({
+            by: ['processing_status'],
+            where: {
+                type: 'video',
+                processing_status: { in: ['pending', 'processing', 'uploading'] }
+            },
+            _count: { id: true }
+        });
+
+        const countByStatus = counts.reduce((acc, c) => {
+            acc[c.processing_status || 'unknown'] = c._count.id;
+            return acc;
+        }, {});
+
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                total: posts.length,
+                summary: {
+                    pending: countByStatus.pending || 0,
+                    processing: countByStatus.processing || 0,
+                    uploading: countByStatus.uploading || 0,
+                    totalInPipeline: (countByStatus.pending || 0) + (countByStatus.processing || 0) + (countByStatus.uploading || 0)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get posts processing error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching processing posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Get post reports and reporters
 exports.getPostReports = async (req, res) => {
     try {
@@ -6373,6 +6624,180 @@ exports.sendNotificationToUser = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Error sending notification to user',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Get all posts with full detail for admin (list view with everything needed for moderation)
+exports.getAdminAllPosts = async (req, res) => {
+    try {
+        const { page = 1, limit = 20, status, sort = 'newest' } = req.query;
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const offset = (pageNum - 1) * limitNum;
+
+        const whereClause = {};
+        if (status && status !== 'all') {
+            whereClause.status = status;
+        }
+
+        let orderBy = {};
+        switch (sort) {
+            case 'oldest':
+                orderBy = { createdAt: 'asc' };
+                break;
+            case 'most_liked':
+                orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }];
+                break;
+            case 'most_viewed':
+                orderBy = [{ views: 'desc' }, { createdAt: 'desc' }];
+                break;
+            case 'most_reported':
+                orderBy = [{ report_count: 'desc' }, { createdAt: 'desc' }];
+                break;
+            case 'newest':
+            default:
+                orderBy = { createdAt: 'desc' };
+        }
+
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            display_name: true,
+                            email: true,
+                            profile_picture: true,
+                            bio: true,
+                            status: true,
+                            follower_count: true,
+                            posts_count: true,
+                            createdAt: true,
+                            country: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    code: true,
+                                    flag_emoji: true
+                                }
+                            }
+                        }
+                    },
+                    category: {
+                        select: {
+                            id: true,
+                            name: true,
+                            description: true,
+                            level: true,
+                            parent_id: true,
+                            parent: {
+                                select: {
+                                    id: true,
+                                    name: true
+                                }
+                            }
+                        }
+                    },
+                    _count: {
+                        select: {
+                            postLikes: true,
+                            comments: true,
+                            postViews: true,
+                            postShares: true,
+                            reports: true,
+                            appeals: true
+                        }
+                    },
+                    reports: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    display_name: true
+                                }
+                            }
+                        },
+                        orderBy: { createdAt: 'desc' },
+                        take: 10
+                    },
+                    appeals: {
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    username: true,
+                                    display_name: true
+                                }
+                            }
+                        },
+                        orderBy: { createdAt: 'desc' },
+                        take: 5
+                    },
+                    challengePosts: {
+                        select: {
+                            id: true,
+                            submitted_at: true,
+                            likes_at_challenge_end: true,
+                            challenge: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    status: true,
+                                    end_date: true
+                                }
+                            }
+                        }
+                    }
+                },
+                orderBy,
+                take: limitNum,
+                skip: offset
+            }),
+            prisma.post.count({ where: whereClause })
+        ]);
+
+        const postsWithMeta = posts.map(post => {
+            const totalEngagements = (post.likes || 0) + (post.comment_count || 0) + (post.shares || 0);
+            const engagementRate = post.views > 0 ? (totalEngagements / post.views) * 100 : 0;
+            return {
+                ...post,
+                analytics: {
+                    totalEngagements,
+                    engagementRate: Math.round(engagementRate * 100) / 100,
+                    isHighReport: (post._count?.reports || 0) >= 3,
+                    hasAppeals: (post._count?.appeals || 0) > 0
+                }
+            };
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                posts: postsWithMeta,
+                pagination: {
+                    page: pageNum,
+                    limit: limitNum,
+                    total: totalCount,
+                    totalPages: Math.ceil(totalCount / limitNum),
+                    hasNext: offset + limitNum < totalCount,
+                    hasPrev: pageNum > 1
+                },
+                filters: {
+                    status: status || 'all',
+                    sort: sort || 'newest'
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get admin all posts error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching posts',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

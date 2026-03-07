@@ -40,14 +40,17 @@ router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
 router.get('/analytics', authenticate, isAdmin, adminController.getAnalytics);
 router.get('/content-management/stats', authenticate, isAdmin, adminController.getContentManagementStats);
 
-// Post Management
+// Post Management (fixed paths before :postId)
+router.get('/posts/all', authenticate, isAdmin, adminController.getAdminAllPosts);
+router.get('/posts/analytics', authenticate, isAdmin, adminController.getAdminPosts);
+router.get('/posts/processing', authenticate, isAdmin, adminController.getPostsProcessing);
+router.get('/posts/:postId', authenticate, isAdmin, adminController.getAdminPostById);
 router.put('/posts/:postId/featured', authenticate, isAdmin, adminController.setPostFeatured);
 router.put('/posts/:postId/freeze', authenticate, isAdmin, adminController.freezePost);
 router.put('/posts/:postId/unfreeze', authenticate, isAdmin, adminController.unfreezePost);
 router.put('/posts/:postId/suspend', authenticate, isAdmin, adminController.suspendPost);
 router.delete('/posts/:postId', authenticate, isAdmin, adminController.adminDeletePost);
 router.get('/posts/:postId/reports', authenticate, isAdmin, adminController.getPostReports);
-router.get('/posts/analytics', authenticate, isAdmin, adminController.getAdminPosts);
 
 // Appeals Management
 router.get('/appeals', authenticate, isAdmin, adminController.getAllAppeals);
