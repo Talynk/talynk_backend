@@ -112,6 +112,7 @@ model Post {
   uploadDate            DateTime @default(now())
   type                  String   @default("text") @db.VarChar(50)
   content               String?  @db.Text
+  is_ad                 Boolean  @default(false)  // Admin-created ad; shown in feed interleave only
   createdAt             DateTime @default(now())
   updatedAt             DateTime @default(now())
 
@@ -540,6 +541,7 @@ model ChallengePost {
   user_id               String   @db.Uuid
   submitted_at          DateTime @default(now())
   likes_at_challenge_end Int?    // Snapshot of post likes when challenge ended (for ranking & transparency)
+  winner_rank           Int?    // Admin-defined winner position (1 = 1st); null = use like-based order
 
   // Relations
   challenge             Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)

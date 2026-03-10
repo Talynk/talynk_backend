@@ -5,6 +5,7 @@ const adminController = require('../controllers/adminController');
 const { authenticate } = require('../middleware/auth');
 const { isAdmin } = require('../middleware/isAdmin');
 const seedController = require('../controllers/seedController');
+const upload = require('../middleware/fileUpload');
 
 // Admin registration (no authentication required for initial setup)
 router.post('/register', adminController.registerAdmin);
@@ -69,6 +70,14 @@ router.get('/challenges/:challengeId/analytics', authenticate, isAdmin, adminCon
 router.put('/challenges/:challengeId/approve', authenticate, isAdmin, adminController.approveChallenge);
 router.put('/challenges/:challengeId/reject', authenticate, isAdmin, adminController.rejectChallenge);
 router.put('/challenges/:challengeId/stop', authenticate, isAdmin, adminController.stopChallenge);
+router.put('/challenges/:challengeId/winners/reorder', authenticate, isAdmin, adminController.reorderChallengeWinners);
+
+// Ads (admin-only; specific routes before :adId)
+router.post('/ads', authenticate, isAdmin, ...upload.single('file'), adminController.createAd);
+router.get('/ads', authenticate, isAdmin, adminController.listAds);
+router.get('/ads/:adId', authenticate, isAdmin, adminController.getAdById);
+router.put('/ads/:adId', authenticate, isAdmin, adminController.updateAd);
+router.delete('/ads/:adId', authenticate, isAdmin, adminController.deleteAd);
 
 
 

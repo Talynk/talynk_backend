@@ -7145,6 +7145,20 @@ exports.getChallengeById = async (req, res) => {
             });
         }
 
+        // For ended challenges, order posts by winner_rank (asc, nulls last), then likes_at_challenge_end desc, then submitted_at desc (same as public winners list)
+        const isEnded = challenge.status === 'ended';
+        const posts = isEnded
+            ? [...challenge.posts].sort((a, b) => {
+                const rankA = a.winner_rank ?? Infinity;
+                const rankB = b.winner_rank ?? Infinity;
+                if (rankA !== rankB) return rankA - rankB;
+                const likesA = a.likes_at_challenge_end ?? 0;
+                const likesB = b.likes_at_challenge_end ?? 0;
+                if (likesB !== likesA) return likesB - likesA;
+                return new Date(b.submitted_at) - new Date(a.submitted_at);
+            })
+            : challenge.posts;
+
         // Get post counts for each participant
         const participantsWithPostCounts = await Promise.all(
             challenge.participants.map(async (participant) => {
@@ -7198,6 +7212,7 @@ exports.getChallengeById = async (req, res) => {
             status: 'success',
             data: {
                 ...challenge,
+                posts,
                 participants: participantsWithPostCounts,
                 statistics: {
                     total_participants: totalParticipants,
@@ -7601,6 +7616,350 @@ exports.stopChallenge = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to stop challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Reorder challenge winners (admin only). Only for ended challenges. Body: { orderedChallengePostIds: string[] }.
+exports.reorderChallengeWinners = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { orderedChallengePostIds } = req.body || {};
+
+        if (!Array.isArray(orderedChallengePostIds)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'orderedChallengePostIds must be an array of challenge post IDs'
+            });
+        }
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status !== 'ended') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only ended challenges can have winners reordered'
+            });
+        }
+
+        const uniqueIds = [...new Set(orderedChallengePostIds)];
+        if (uniqueIds.length !== orderedChallengePostIds.length) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'orderedChallengePostIds must not contain duplicates'
+            });
+        }
+
+        if (uniqueIds.length === 0) {
+            await prisma.challengePost.updateMany({
+                where: { challenge_id: challengeId },
+                data: { winner_rank: null }
+            });
+            return res.json({
+                status: 'success',
+                message: 'Winner ranks cleared',
+                data: { orderedChallengePostIds: [] }
+            });
+        }
+
+        const found = await prisma.challengePost.findMany({
+            where: {
+                id: { in: uniqueIds },
+                challenge_id: challengeId
+            },
+            select: { id: true }
+        });
+
+        if (found.length !== uniqueIds.length) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'All provided IDs must be challenge post IDs belonging to this challenge'
+            });
+        }
+
+        await prisma.$transaction(async (tx) => {
+            await tx.challengePost.updateMany({
+                where: { challenge_id: challengeId },
+                data: { winner_rank: null }
+            });
+            for (let i = 0; i < orderedChallengePostIds.length; i++) {
+                await tx.challengePost.update({
+                    where: { id: orderedChallengePostIds[i] },
+                    data: { winner_rank: i + 1 }
+                });
+            }
+        });
+
+        const updated = await prisma.challengePost.findMany({
+            where: { challenge_id: challengeId },
+            orderBy: [{ winner_rank: 'asc' }, { likes_at_challenge_end: 'desc' }, { submitted_at: 'desc' }],
+            select: { id: true, winner_rank: true, likes_at_challenge_end: true, submitted_at: true }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Challenge winners reordered successfully',
+            data: { orderedChallengePostIds, winners: updated }
+        });
+    } catch (error) {
+        console.error('Error reordering challenge winners:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to reorder challenge winners',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Ads (admin-only; posts with is_ad=true, same video pipeline as normal posts)
+// ---------------------------------------------------------------------------
+
+exports.createAd = async (req, res) => {
+    try {
+        const adminId = await getAdminId(req.user.id, req.user.role);
+        if (!adminId) {
+            return res.status(403).json({ status: 'error', message: 'Admin ID could not be resolved' });
+        }
+        if (!req.file) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Video file is required',
+                details: 'Upload a video file with the field name "file".'
+            });
+        }
+        const video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
+        if (!video_url || !video_url.trim()) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Media upload failed',
+                details: 'The file upload was not successful.'
+            });
+        }
+        const isVideo = req.file.mimetype && req.file.mimetype.startsWith('video/');
+        if (!isVideo) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only video files are allowed for ads.'
+            });
+        }
+        const title = (req.body.title || 'Ad').trim().slice(0, 255);
+        const description = (req.body.description || '').trim() || null;
+
+        const post = await prisma.post.create({
+            data: {
+                user_id: null,
+                admin_id: adminId,
+                status: 'active',
+                type: 'video',
+                is_ad: true,
+                title: title || 'Ad',
+                description,
+                content: description,
+                video_url,
+                thumbnail_url: null,
+                processing_status: 'pending',
+                uploadDate: new Date()
+            }
+        });
+
+        const { addVideoJob } = require('../queues/videoQueue');
+        try {
+            await addVideoJob(post.id, video_url);
+        } catch (queueErr) {
+            const errMsg = queueErr?.message || 'Failed to queue video for processing';
+            await prisma.post.update({
+                where: { id: post.id },
+                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
+            });
+            return res.status(500).json({
+                status: 'error',
+                message: 'Ad created but processing queue failed. You can retry from ads list.',
+                data: { id: post.id }
+            });
+        }
+
+        const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+
+        loggers.audit('create_ad', { adminId, adId: post.id, title: post.title });
+
+        res.status(201).json({
+            status: 'success',
+            message: 'Ad created. Video is being processed.',
+            data: {
+                id: post.id,
+                title: post.title,
+                description: post.description,
+                processing_status: 'pending',
+                video_url: post.video_url
+            }
+        });
+    } catch (error) {
+        console.error('Error creating ad:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create ad',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.listAds = async (req, res) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 20));
+        const skip = (page - 1) * limit;
+
+        const [ads, total] = await Promise.all([
+            prisma.post.findMany({
+                where: { is_ad: true },
+                orderBy: { createdAt: 'desc' },
+                skip,
+                take: limit,
+                include: {
+                    admin: { select: { id: true, username: true, email: true } }
+                }
+            }),
+            prisma.post.count({ where: { is_ad: true } })
+        ]);
+
+        res.json({
+            status: 'success',
+            data: {
+                ads,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error listing ads:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to list ads',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.getAdById = async (req, res) => {
+    try {
+        const { adId } = req.params;
+        const ad = await prisma.post.findFirst({
+            where: { id: adId, is_ad: true },
+            include: {
+                admin: { select: { id: true, username: true, email: true } }
+            }
+        });
+        if (!ad) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Ad not found'
+            });
+        }
+        const { withVideoPlaybackUrl } = require('../utils/postVideoUtils');
+        const withUrl = withVideoPlaybackUrl(ad);
+        res.json({
+            status: 'success',
+            data: { ...withUrl, isAd: true }
+        });
+    } catch (error) {
+        console.error('Error getting ad:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to get ad',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.updateAd = async (req, res) => {
+    try {
+        const { adId } = req.params;
+        const { title, description, status: bodyStatus } = req.body;
+
+        const ad = await prisma.post.findFirst({
+            where: { id: adId, is_ad: true }
+        });
+        if (!ad) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Ad not found'
+            });
+        }
+
+        const data = {};
+        if (title !== undefined) data.title = String(title).trim().slice(0, 255) || ad.title;
+        if (description !== undefined) data.description = String(description).trim() || null;
+        if (description !== undefined) data.content = data.description;
+        if (bodyStatus !== undefined && ['active', 'suspended'].includes(bodyStatus)) {
+            data.status = bodyStatus;
+        }
+
+        const updated = await prisma.post.update({
+            where: { id: adId },
+            data
+        });
+
+        const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+
+        res.json({
+            status: 'success',
+            message: 'Ad updated successfully',
+            data: updated
+        });
+    } catch (error) {
+        console.error('Error updating ad:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to update ad',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+exports.deleteAd = async (req, res) => {
+    try {
+        const { adId } = req.params;
+        const ad = await prisma.post.findFirst({
+            where: { id: adId, is_ad: true }
+        });
+        if (!ad) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Ad not found'
+            });
+        }
+        await prisma.post.delete({
+            where: { id: adId }
+        });
+        const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+        loggers.audit('delete_ad', { adminId: req.user?.id, adId });
+        res.json({
+            status: 'success',
+            message: 'Ad deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting ad:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to delete ad',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

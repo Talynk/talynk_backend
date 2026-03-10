@@ -932,9 +932,10 @@ exports.getChallengePosts = async (req, res) => {
             challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
         }
 
-        // For ended challenges: order by likes at challenge end (desc), then submitted_at. For active: by submitted_at.
+        // For ended challenges: order by winner_rank (asc; nulls last in PostgreSQL), then likes at challenge end (desc), then submitted_at. For active: by submitted_at.
         const orderBy = isEnded
             ? [
+                { winner_rank: 'asc' },
                 { likes_at_challenge_end: 'desc' },
                 { submitted_at: 'desc' }
             ]
@@ -993,11 +994,13 @@ exports.getChallengePosts = async (req, res) => {
             })
         ]);
 
-        // Enrich each item with explicit like counts for transparency (during challenge vs total)
+        // Enrich each item with explicit like counts and winner_rank for transparency (during challenge vs total)
+        const hasWinnerRanks = isEnded && challengePosts.some(cp => cp.winner_rank != null);
         const data = challengePosts.map(cp => ({
             ...cp,
             likes_during_challenge: cp.likes_at_challenge_end ?? null,
-            total_likes: cp.post?.likes ?? cp.post?._count?.postLikes ?? 0
+            total_likes: cp.post?.likes ?? cp.post?._count?.postLikes ?? 0,
+            winner_rank: cp.winner_rank ?? null
         }));
 
         res.json({
@@ -1009,7 +1012,7 @@ exports.getChallengePosts = async (req, res) => {
                 total,
                 pages: Math.ceil(total / parseInt(limit))
             },
-            ...(isEnded && { ordered_by: 'likes_at_challenge_end' })
+            ...(isEnded && { ordered_by: hasWinnerRanks ? 'winner_rank' : 'likes_at_challenge_end' })
         });
     } catch (error) {
         console.error('Error fetching challenge posts:', error);
