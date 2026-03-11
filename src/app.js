@@ -88,7 +88,7 @@ const corsOptions = {
            'https://talynk.vercel.app', 'https://talentix.net', 'https://admin.talentix.net'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers', 'sentry-trace', 'baggage'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers', 'sentry-trace', 'baggage', 'X-Request-Id', 'X-Device-Fingerprint', 'X-Device-Metadata', 'X-Session-Id', 'X-Geo-Location'],
   preflightContinue: false,
   optionsSuccessStatus: 204
 };
@@ -163,6 +163,10 @@ app.use('/api/posts/all', cors(corsOptions));
 // Request-scoped Sentry context (request_id, path, method) for trace-connected logs
 const sentryContext = require('./middleware/sentryContext');
 app.use(sentryContext);
+
+// Activity logging: trace-level log of every API request (traceId, route, status, duration, IP, device fingerprint)
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

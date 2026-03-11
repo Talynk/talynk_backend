@@ -9,6 +9,9 @@ const {
     createConflictMessage 
 } = require('../utils/authUtils');
 const { createAndSendOTP, verifyOTP } = require('../services/otpService');
+const { writeAuditLog } = require('../logging/auditLogger');
+const { linkUserToDevice } = require('../logging/deviceFingerprintService');
+const { resolveDeviceFingerprintId } = require('../logging/activityLogger');
 
 /**
  * Step 1: Request OTP for email verification during registration
@@ -582,6 +585,11 @@ exports.login = async (req, res) => {
         console.log('User found:', user ? { id: user.id, email: user.email, username: user.username, role: user.role } : null); // Debug log
 
         if (!user) {
+            writeAuditLog({
+                actionType: 'LOGIN_FAILED',
+                details: { reason: 'user_not_found', loginType, role },
+                req,
+            }).catch(() => {});
             return res.status(401).json({
                 status: 'error',
                 message: 'Invalid credentials'
@@ -598,6 +606,12 @@ exports.login = async (req, res) => {
         console.log('Password comparison result:', isValid);
         
         if (!isValid) {
+            writeAuditLog({
+                actionType: 'LOGIN_FAILED',
+                actorUserId: user.id,
+                details: { reason: 'invalid_password', role },
+                req,
+            }).catch(() => {});
             return res.status(401).json({
                 status: 'error',
                 message: 'Invalid credentials'
@@ -643,6 +657,18 @@ exports.login = async (req, res) => {
             process.env.JWT_REFRESH_SECRET,
             { expiresIn: '30d' }
         );
+
+        writeAuditLog({
+            actionType: 'LOGIN_SUCCESS',
+            actorUserId: user.id,
+            details: { role: user.role },
+            req,
+        }).catch(() => {});
+        if (role === 'user') {
+            resolveDeviceFingerprintId(req).then((deviceId) => {
+                if (deviceId) linkUserToDevice(user.id, deviceId).catch(() => {});
+            }).catch(() => {});
+        }
 
         res.json({
             status: 'success',

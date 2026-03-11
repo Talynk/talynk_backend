@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const prisma = require('../lib/prisma');
 const adminController = require('../controllers/adminController');
+const adminLogsController = require('../controllers/adminLogsController');
 const { authenticate } = require('../middleware/auth');
 const { isAdmin } = require('../middleware/isAdmin');
 const seedController = require('../controllers/seedController');
@@ -46,6 +47,14 @@ router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
 // Analytics & Reports
 router.get('/analytics', authenticate, isAdmin, adminController.getAnalytics);
 router.get('/content-management/stats', authenticate, isAdmin, adminController.getContentManagementStats);
+
+// Logs, Audit & Device Tracking
+router.get('/logs/activity', authenticate, isAdmin, adminLogsController.getActivityLogs);
+router.get('/logs/activity/:id', authenticate, isAdmin, adminLogsController.getActivityLogById);
+router.get('/logs/traces/:traceId', authenticate, isAdmin, adminLogsController.getActivityLogsByTraceId);
+router.get('/logs/audit', authenticate, isAdmin, adminLogsController.getAuditLogs);
+router.get('/devices', authenticate, isAdmin, adminLogsController.getDevices);
+router.get('/devices/:deviceFingerprintId/activity', authenticate, isAdmin, adminLogsController.getDeviceActivity);
 
 // Post Management (fixed paths before :postId)
 router.get('/posts/all', authenticate, isAdmin, adminController.getAdminAllPosts);

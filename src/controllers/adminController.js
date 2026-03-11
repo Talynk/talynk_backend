@@ -71,6 +71,7 @@ const parseTimeFrame = (frame) => {
 const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
+const { writeAuditLog } = require('../logging/auditLogger');
 
 // Register a new admin
 exports.registerAdmin = async (req, res) => {
@@ -139,6 +140,14 @@ exports.registerAdmin = async (req, res) => {
                 createdAt: true
             }
         });
+
+        writeAuditLog({
+            actionType: 'ADMIN_REGISTER',
+            resourceType: 'admin',
+            resourceId: admin.id,
+            details: { username: admin.username, email: admin.email },
+            req,
+        }).catch(() => {});
 
         res.status(201).json({
             status: 'success',
@@ -1225,6 +1234,16 @@ exports.manageUserAccount = async (req, res) => {
             where: { id },
             data: updateData
         });
+
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: `ADMIN_${action.toUpperCase()}_USER`,
+            resourceType: 'user',
+            resourceId: id,
+            actorAdminId: adminId || req.user?.id,
+            details: { previousStatus: user.status, newStatus: newStatus, reason: reason || null },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -6062,6 +6081,14 @@ exports.suspendPost = async (req, res) => {
         }
 
         loggers.audit('admin_suspend_post', { adminId: req.user.id, postId, reason: reason || null });
+        writeAuditLog({
+            actionType: 'ADMIN_SUSPEND_POST',
+            resourceType: 'post',
+            resourceId: postId,
+            actorAdminId: adminId || req.user?.id,
+            details: { reason: reason || null },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -6121,6 +6148,15 @@ exports.adminDeletePost = async (req, res) => {
         await clearCacheByPattern('feed:');
 
         loggers.audit('admin_delete_post', { adminId: req.user.id, postId, reason: reason || null });
+        const deletePostAdminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: 'ADMIN_DELETE_POST',
+            resourceType: 'post',
+            resourceId: postId,
+            actorAdminId: deletePostAdminId || req.user?.id,
+            details: { reason: reason || null, ownerUserId: post.user_id },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -6555,6 +6591,13 @@ exports.sendBroadcastNotification = async (req, res) => {
             message: message,
             recipientCount: users.length
         });
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: 'ADMIN_BROADCAST_NOTIFICATION',
+            actorAdminId: adminId || req.user?.id,
+            details: { title, message, recipientCount: users.length, type },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -7376,6 +7419,14 @@ exports.approveChallenge = async (req, res) => {
             challengeId: challengeId,
             challengeName: challenge.name
         });
+        writeAuditLog({
+            actionType: 'ADMIN_APPROVE_CHALLENGE',
+            resourceType: 'challenge',
+            resourceId: challengeId,
+            actorAdminId: adminId,
+            details: { challengeName: challenge.name },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -7525,6 +7576,14 @@ exports.rejectChallenge = async (req, res) => {
             challengeName: challenge.name,
             reason: reason
         });
+        writeAuditLog({
+            actionType: 'ADMIN_REJECT_CHALLENGE',
+            resourceType: 'challenge',
+            resourceId: challengeId,
+            actorAdminId: adminId,
+            details: { challengeName: challenge.name, reason: reason || null },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -7630,6 +7689,14 @@ exports.stopChallenge = async (req, res) => {
             challengeId: challengeId,
             challengeName: challenge.name
         });
+        writeAuditLog({
+            actionType: 'ADMIN_STOP_CHALLENGE',
+            resourceType: 'challenge',
+            resourceId: challengeId,
+            actorAdminId: adminId,
+            details: { challengeName: challenge.name },
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -7731,6 +7798,16 @@ exports.reorderChallengeWinners = async (req, res) => {
             select: { id: true, winner_rank: true, likes_at_challenge_end: true, submitted_at: true }
         });
 
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: 'ADMIN_REORDER_CHALLENGE_WINNERS',
+            resourceType: 'challenge',
+            resourceId: challengeId,
+            actorAdminId: adminId || req.user?.id,
+            details: { orderedChallengePostIds },
+            req,
+        }).catch(() => {});
+
         res.json({
             status: 'success',
             message: 'Challenge winners reordered successfully',
@@ -7814,6 +7891,14 @@ exports.createAdUpload = async (req, res) => {
         await redis.setex(`${AD_UPLOAD_SESSION_PREFIX}${post.id}`, AD_UPLOAD_SESSION_TTL, r2Key);
 
         loggers.audit('create_ad_upload_session', { adminId, adId: post.id, title: post.title });
+        writeAuditLog({
+            actionType: 'ADMIN_CREATE_AD_UPLOAD',
+            resourceType: 'ad',
+            resourceId: post.id,
+            actorAdminId: adminId,
+            details: { title: post.title },
+            req,
+        }).catch(() => {});
 
         res.status(201).json({
             status: 'success',
@@ -7925,6 +8010,14 @@ exports.completeAdUpload = async (req, res) => {
         await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
 
         loggers.audit('complete_ad_upload', { adminId, adId: postId });
+        writeAuditLog({
+            actionType: 'ADMIN_COMPLETE_AD_UPLOAD',
+            resourceType: 'ad',
+            resourceId: postId,
+            actorAdminId: adminId,
+            details: {},
+            req,
+        }).catch(() => {});
 
         res.json({
             status: 'success',
@@ -8014,6 +8107,14 @@ exports.createAd = async (req, res) => {
         await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
 
         loggers.audit('create_ad', { adminId, adId: post.id, title: post.title });
+        writeAuditLog({
+            actionType: 'ADMIN_CREATE_AD',
+            resourceType: 'ad',
+            resourceId: post.id,
+            actorAdminId: adminId,
+            details: { title: post.title },
+            req,
+        }).catch(() => {});
 
         res.status(201).json({
             status: 'success',
@@ -8139,6 +8240,16 @@ exports.updateAd = async (req, res) => {
         const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
         await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
 
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: 'ADMIN_UPDATE_AD',
+            resourceType: 'ad',
+            resourceId: adId,
+            actorAdminId: adminId || req.user?.id,
+            details: { title: updated.title, status: updated.status },
+            req,
+        }).catch(() => {});
+
         res.json({
             status: 'success',
             message: 'Ad updated successfully',
@@ -8172,6 +8283,15 @@ exports.deleteAd = async (req, res) => {
         const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
         await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
         loggers.audit('delete_ad', { adminId: req.user?.id, adId });
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
+        writeAuditLog({
+            actionType: 'ADMIN_DELETE_AD',
+            resourceType: 'ad',
+            resourceId: adId,
+            actorAdminId: adminId || req.user?.id,
+            details: {},
+            req,
+        }).catch(() => {});
         res.json({
             status: 'success',
             message: 'Ad deleted successfully'
