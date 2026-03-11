@@ -1,3 +1,10 @@
+/**
+ * Legacy in-process video processing (FFmpeg/HLS).
+ * Do NOT use for queue-driven jobs. All transcoding for posts and ads is done by
+ * the external processing server (talynk-video-processor), which consumes from the
+ * 'video-processing' BullMQ queue. This module is kept only for non-queue use cases
+ * (e.g. one-off scripts or future non-queue flows). See src/queues/videoQueue.js.
+ */
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 const ffprobePath = require('@ffprobe-installer/ffprobe').path;

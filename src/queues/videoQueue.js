@@ -1,3 +1,17 @@
+/**
+ * Video processing queue (producer only).
+ *
+ * All video jobs — including ads and regular posts — are enqueued here and must be
+ * processed by the external processing server (talynk-video-processor). This API
+ * does not run FFmpeg or any in-repo video processor; it only adds jobs.
+ *
+ * Processor contract (for talynk-video-processor):
+ *   - Queue name: 'video-processing'
+ *   - Job name: 'transcode-hls'
+ *   - Payload: { postId, inputPath, createdAt }
+ *   - inputPath: public URL of the source video (e.g. R2); processor downloads, transcodes to HLS, uploads, then calls POST /api/internal/video-callback
+ *   - Same REDIS_URL must be used so the processor consumes from this queue.
+ */
 const { Queue, QueueEvents } = require('bullmq');
 const IORedis = require('ioredis');
 
