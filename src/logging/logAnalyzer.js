@@ -82,8 +82,22 @@ async function runAnomalyRulesForActivity(params) {
   try {
     const loginFlags = await checkSuspiciousLoginPattern(params);
     flags.push(...loginFlags);
-    const deviceFlags = await checkUnusualDevice(params);
-    flags.push(...deviceFlags);
+
+    // Only run UNUSUAL_DEVICE check for login-like events, not every request.
+    const route = params.route || '';
+    const actionType = params.actionType || '';
+    const isLoginLike =
+      (route.includes('/auth/login') ||
+        route.includes('/auth/otp') ||
+        route.includes('/auth')) ||
+      actionType === 'LOGIN_FAILED' ||
+      actionType === 'LOGIN_SUCCESS';
+
+    if (isLoginLike) {
+      const deviceFlags = await checkUnusualDevice(params);
+      flags.push(...deviceFlags);
+    }
+
     const hourFlags = checkAdminOutsideHours(params);
     flags.push(...hourFlags);
   } catch (e) {

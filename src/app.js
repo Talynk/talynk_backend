@@ -93,25 +93,37 @@ const corsOptions = {
   optionsSuccessStatus: 204
 };
 
+// Normalize origin (strip trailing slash) for consistent CORS matching
+function normalizeOrigin(origin) {
+    if (!origin || typeof origin !== 'string') return null;
+    return origin.replace(/\/+$/, '') || null;
+}
+function isOriginAllowed(origin) {
+    const normalized = normalizeOrigin(origin);
+    if (!normalized) return false;
+    return corsOptions.origin.some(allowed => normalizeOrigin(allowed) === normalized);
+}
+
 // Manual CORS headers middleware - runs FIRST to ensure headers are always set
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    
+    const allowed = isOriginAllowed(origin);
+
     // Debug logging (remove in production)
     if (process.env.NODE_ENV !== 'production') {
         console.log(`[CORS] ${req.method} ${req.path} - Origin: ${origin}`);
     }
-    
-    // For OPTIONS requests, always set CORS headers
+
+    // For OPTIONS requests, always set CORS headers; set Allow-Origin when origin is allowed
     if (req.method === 'OPTIONS') {
-        if (origin && corsOptions.origin.includes(origin)) {
+        if (origin && allowed) {
             res.setHeader('Access-Control-Allow-Origin', origin);
             res.setHeader('Access-Control-Allow-Credentials', 'true');
         }
         res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
         res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
         res.setHeader('Access-Control-Max-Age', '86400');
-        
+
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[CORS] OPTIONS response headers:`, {
                 'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
@@ -119,18 +131,18 @@ app.use((req, res, next) => {
                 'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
             });
         }
-        
+
         return res.status(204).end();
     }
-    
+
     // For non-OPTIONS requests, set CORS headers if origin is allowed
-    if (origin && corsOptions.origin.includes(origin)) {
+    if (origin && allowed) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
     res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
-    
+
     next();
 });
 
@@ -140,7 +152,7 @@ app.use(cors(corsOptions));
 // Explicit OPTIONS handler (backup)
 app.options('*', (req, res) => {
     const origin = req.headers.origin;
-    if (origin && corsOptions.origin.includes(origin)) {
+    if (origin && isOriginAllowed(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
