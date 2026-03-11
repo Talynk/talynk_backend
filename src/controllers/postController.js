@@ -945,7 +945,13 @@ exports.getAllPosts = async (req, res) => {
                 orderBy: { createdAt: 'desc' },
                 take: 200,
                 include: {
-                    user: { select: {} },
+                    user: {
+                        select: {
+                            id: true,
+                            username: true,
+                            profile_picture: true
+                        }
+                    },
                     category: {
                         select: {
                             id: true,

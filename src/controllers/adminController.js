@@ -8737,6 +8737,16 @@ exports.getChallengeAnalytics = async (req, res) => {
 exports.getAdminUserById = async (req, res) => {
     try {
         const { userId } = req.params;
+
+        // Validate that userId is a UUID to avoid Prisma P2023 errors on bad input
+        const uuidRegex = /^[0-9a-fA-F-]{36}$/;
+        if (!uuidRegex.test(userId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid userId. Expected a UUID.'
+            });
+        }
+
         const user = await prisma.user.findUnique({
             where: { id: userId },
             select: {

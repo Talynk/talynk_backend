@@ -14,6 +14,8 @@ router.post('/register', adminController.registerAdmin);
 // Admin routes (all require authentication and admin privileges)
 router.get('/users', authenticate, isAdmin, adminController.getAllUsers);
 router.get('/users/suspended', authenticate, isAdmin, adminController.getSuspendedUsers);
+// Place the aggregate stats route before the :userId route so /users/stats does not match :userId = "stats"
+router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);
 router.get('/users/:userId', authenticate, isAdmin, adminController.getAdminUserById);
 router.get('/users/:userId/activity', authenticate, isAdmin, adminController.getAdminUserActivity);
 router.get('/users/:userId/posts', authenticate, isAdmin, adminController.getAdminUserPosts);
@@ -38,7 +40,6 @@ router.get('/posts/rejected', authenticate, isAdmin, adminController.getRejected
 router.get('/posts/flagged', authenticate, isAdmin, adminController.getFlaggedPosts);
 router.get('/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
 router.get('/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
-router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);
 router.get('/search', authenticate, isAdmin, adminController.adminUnifiedSearch);
 router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
 
