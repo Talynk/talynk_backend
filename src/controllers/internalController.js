@@ -146,6 +146,7 @@ exports.videoProcessingCallback = async (req, res) => {
                 await clearCacheByPattern('single_post');
                 await clearCacheByPattern('search_posts');
                 await clearCacheByPattern('following_posts');
+                await clearCacheByPattern('feed:');
                 console.log('[VideoCallback] Caches cleared after video processing');
             } catch (cacheErr) {
                 console.warn('[VideoCallback] Failed to clear cache:', cacheErr.message);

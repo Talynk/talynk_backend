@@ -60,36 +60,6 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
-  # Dedicated worker for video processing (HLS transcoding)
-  video-worker:
-    image: ghcr.io/ihirwepatrick/talynk-backend:latest
-    container_name: talynk-video-worker
-    command: ["node", "src/queues/videoWorker.js"]
-    env_file:
-      - .env
-    environment:
-      # Database URL with lower connection limit for worker
-      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-talynk}?schema=public&connection_limit=5&pool_timeout=20
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      # Other settings inherited from .env via env_file
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - uploads_data:/app/uploads
-      - tmp_data:/app/tmp
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-    restart: unless-stopped
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
-
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower

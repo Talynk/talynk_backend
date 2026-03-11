@@ -26,6 +26,66 @@ const { applyFeedReadyFilter, getProcessingStatusLabel } = require('../utils/pos
 const UPLOAD_SESSION_TTL = 600; // 10 minutes
 const UPLOAD_SESSION_PREFIX = 'upload:';
 
+// Ads interleave pattern: 5 posts, 1 ad, 8 posts, 1 ad, repeat
+const AD_INTERLEAVE_PATTERN = [5, 8];
+
+/**
+ * For a segment [offset, offset+limit) in the interleaved stream (content + ads in 5-8-5-8 pattern),
+ * returns how many content items and ads to fetch and their skip counts.
+ */
+function getInterleaveCounts(offset, limit) {
+    let pos = 0, contentIdx = 0, adIdx = 0;
+    let p = 0;
+    while (pos < offset) {
+        for (let i = 0; i < AD_INTERLEAVE_PATTERN[p]; i++) {
+            if (pos >= offset) break;
+            contentIdx++;
+            pos++;
+        }
+        if (pos < offset) {
+            adIdx++;
+            pos++;
+        }
+        p = 1 - p;
+    }
+    const contentSkip = contentIdx;
+    const adSkip = adIdx;
+    let count = 0;
+    while (count < limit) {
+        for (let i = 0; i < AD_INTERLEAVE_PATTERN[p]; i++) {
+            if (count >= limit) break;
+            contentIdx++;
+            count++;
+        }
+        if (count < limit) {
+            adIdx++;
+            count++;
+        }
+        p = 1 - p;
+    }
+    return {
+        contentSkip,
+        contentTake: contentIdx - contentSkip,
+        adSkip,
+        adTake: adIdx - adSkip
+    };
+}
+
+/** Total number of items (content + ads) when we have contentCount content items in the interleaved stream */
+function totalInterleavedSize(contentCount) {
+    let contentLeft = contentCount;
+    let items = 0;
+    let p = 0;
+    while (contentLeft > 0) {
+        const take = Math.min(AD_INTERLEAVE_PATTERN[p], contentLeft);
+        items += take;
+        contentLeft -= take;
+        if (take === AD_INTERLEAVE_PATTERN[p]) items += 1;
+        p = 1 - p;
+    }
+    return items;
+}
+
 /**
  * Create video upload - returns signed URL for direct client upload to R2.
  * POST /api/posts/create-upload
@@ -195,17 +255,29 @@ exports.completeVideoUpload = async (req, res) => {
         });
 
         try {
-            await addVideoJob(postId, publicVideoUrl);
-            console.log(`[POST] Video queued (direct upload) for post ${postId}`);
+            const queueJob = await addVideoJob(postId, publicVideoUrl);
+            console.log('[POST] Video queued (direct upload)', {
+                postId,
+                jobId: queueJob?.id,
+                message: 'Processor should log this jobId when it picks up the job',
+            });
         } catch (queueErr) {
-            console.error('[POST] Failed to queue video job:', queueErr.message);
+            const errMsg = queueErr?.message || 'Failed to queue video for processing';
+            console.error('[POST] Failed to queue video job', {
+                postId,
+                error: errMsg,
+                code: queueErr?.code,
+            });
             await prisma.post.update({
                 where: { id: postId },
-                data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' },
+                data: {
+                    processing_status: 'failed',
+                    processing_error: errMsg.slice(0, 500),
+                },
             });
             return res.status(500).json({
                 status: 'error',
-                message: 'Upload complete but processing queue failed',
+                message: 'Upload complete but processing queue failed. Post left in failed state; you can retry from profile.',
             });
         }
 
@@ -386,16 +458,17 @@ exports.createPost = async (req, res) => {
         if (isVideo && video_url) {
             console.log("[POST] Adding video to processing queue for post:", post.id);
             try {
-                // Pass R2 URL to the queue instead of local temp path
-                // The remote video processor will download from R2
-                await addVideoJob(post.id, video_url);
-                console.log(`[POST] Video queued successfully for post ${post.id}`);
+                const queueJob = await addVideoJob(post.id, video_url);
+                console.log('[POST] Video queued', { postId: post.id, jobId: queueJob?.id });
             } catch (queueErr) {
-                console.error('[POST] Failed to queue video job:', queueErr.message);
-                // Update post status to indicate queue failure
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                console.error('[POST] Failed to queue video job', { postId: post.id, error: errMsg });
                 await prisma.post.update({
                     where: { id: post.id },
-                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                    data: {
+                        processing_status: 'failed',
+                        processing_error: errMsg.slice(0, 500),
+                    },
                 });
             }
         }
@@ -470,6 +543,7 @@ exports.createPost = async (req, res) => {
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('all_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:created', { postId: post.id, userId: userId });
 
@@ -621,14 +695,16 @@ exports.getAllPosts = async (req, res) => {
 
         // Only show video posts in feed when processing is complete
         const feedReadyBaseWhere = applyFeedReadyFilter(baseWhereClause);
+        // Exclude ads from featured and from regular content; ads are interleaved separately
+        const feedReadyNoAds = { ...feedReadyBaseWhere, is_ad: false };
 
-        // Get featured posts first (if featured_first is true)
+        // Get featured posts first (if featured_first is true) — never include ads as featured
         let featuredPosts = [];
         let featuredPostIds = [];
 
         if (shouldFeatureFirst) {
             // Get all active featured posts from FeaturedPost table that haven't expired
-            const postFilter = { ...feedReadyBaseWhere, is_frozen: false };
+            const postFilter = { ...feedReadyNoAds, is_frozen: false };
 
             const activeFeaturedPosts = await prisma.featuredPost.findMany({
                 where: {
@@ -707,7 +783,7 @@ exports.getAllPosts = async (req, res) => {
             // (posts featured via the alternative route)
             const postsWithFeaturedFlag = await prisma.post.findMany({
                 where: {
-                    ...feedReadyBaseWhere,
+                    ...feedReadyNoAds,
                     is_featured: true,
                     id: {
                         notIn: featuredPostIds // Exclude already found featured posts
@@ -771,9 +847,9 @@ exports.getAllPosts = async (req, res) => {
             featuredPostIds = featuredPosts.map(fp => fp.id);
         }
 
-        // Build where clause for regular posts (exclude featured if featured_first is true)
+        // Build where clause for regular posts (exclude featured and ads; ads interleaved separately)
         const regularWhereClause = {
-            ...feedReadyBaseWhere
+            ...feedReadyNoAds
         };
 
         if (shouldFeatureFirst && featuredPostIds.length > 0) {
@@ -810,24 +886,70 @@ exports.getAllPosts = async (req, res) => {
             }
         }
 
-        // Get regular posts
-        const [regularPosts, totalRegular] = await Promise.all([
-            regularLimit > 0 ? prisma.post.findMany({
-                where: regularWhereClause,
+        // Ads pool (feed-ready, for interleaving)
+        const adsWhere = applyFeedReadyFilter({ is_ad: true, status: 'active' });
+        const [regularPosts, totalRegular, adsList] = await Promise.all([
+            regularLimit > 0 ? (() => {
+                const { contentSkip, contentTake, adSkip, adTake } = getInterleaveCounts(regularOffset, regularLimit);
+                return prisma.post.findMany({
+                    where: regularWhereClause,
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                profile_picture: true,
+                                country: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        code: true,
+                                        flag_emoji: true
+                                    }
+                                }
+                            }
+                        },
+                        category: {
+                            select: {
+                                id: true,
+                                name: true,
+                                level: true,
+                                parent_id: true,
+                                parent: {
+                                    select: {
+                                        id: true,
+                                        name: true,
+                                        level: true
+                                    }
+                                }
+                            }
+                        },
+                        _count: {
+                            select: {
+                                comments: true,
+                                postLikes: true,
+                                postViews: true
+                            }
+                        }
+                    },
+                    orderBy: orderBy,
+                    take: contentTake,
+                    skip: contentSkip
+                });
+            })() : Promise.resolve([]),
+            prisma.post.count({
+                where: regularWhereClause
+            }),
+            prisma.post.findMany({
+                where: adsWhere,
+                orderBy: { createdAt: 'desc' },
+                take: 200,
                 include: {
                     user: {
                         select: {
                             id: true,
                             username: true,
-                            profile_picture: true,
-                            country: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    code: true,
-                                    flag_emoji: true
-                                }
-                            }
+                            profile_picture: true
                         }
                     },
                     category: {
@@ -836,45 +958,55 @@ exports.getAllPosts = async (req, res) => {
                             name: true,
                             level: true,
                             parent_id: true,
-                            parent: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    level: true
-                                }
-                            }
+                            parent: { select: { id: true, name: true, level: true } }
                         }
                     },
                     _count: {
-                        select: {
-                            comments: true,
-                            postLikes: true,
-                            postViews: true
-                        }
+                        select: { comments: true, postLikes: true, postViews: true }
                     }
-                },
-                orderBy: orderBy,
-                take: regularLimit,
-                skip: regularOffset
-            }) : Promise.resolve([]),
-            prisma.post.count({
-                where: regularWhereClause
+                }
             })
         ]);
 
-        // Combine featured and regular posts
+        // Build interleaved list (5 posts, 1 ad, 8 posts, 1 ad, ...) for this page's "rest" segment
+        let restSegment = [];
+        if (regularLimit > 0) {
+            const { contentSkip, contentTake, adSkip, adTake } = getInterleaveCounts(regularOffset, regularLimit);
+            const content = regularPosts;
+            const ads = adsList;
+            let c = 0, a = 0, k = 0;
+            let p = 0;
+            while (k < regularLimit) {
+                for (let i = 0; i < AD_INTERLEAVE_PATTERN[p] && c < content.length && k < regularLimit; i++) {
+                    restSegment.push(content[c]);
+                    c++;
+                    k++;
+                }
+                if (k < regularLimit && adTake > 0 && ads.length > 0) {
+                    const ad = ads[(adSkip + a) % ads.length];
+                    restSegment.push({ ...ad, isAd: true });
+                    a++;
+                    k++;
+                }
+                p = 1 - p;
+            }
+        }
+
+        // Combine featured and interleaved (content + ads) segment
         const allPosts = shouldFeatureFirst
-            ? [...featuredOnPage, ...regularPosts]
-            : regularPosts;
+            ? [...featuredOnPage, ...restSegment]
+            : restSegment;
 
-        // Calculate total count
+        // Total count: featured + interleaved size (content count -> item count via pattern)
+        const totalRestItems = totalInterleavedSize(totalRegular);
         const totalCount = shouldFeatureFirst
-            ? featuredCount + totalRegular
-            : totalRegular;
+            ? featuredCount + totalRestItems
+            : totalRestItems;
 
-        // Add full URLs for playback (HLS when ready, else raw) and enrich with category info
+        // Add full URLs for playback (HLS when ready, else raw), isAd flag, and enrich with category info
         const postsWithUrls = allPosts.map(post => {
             const p = withVideoPlaybackUrl(post);
+            p.isAd = !!post.isAd;
             // Enrich with main category and subcategory info
             if (post.category) {
                 if (post.category.level === 2 && post.category.parent) {
@@ -1025,6 +1157,20 @@ exports.getPostById = async (req, res) => {
                         comments: true,
                         postViews: true
                     }
+                },
+                challengePosts: {
+                    select: {
+                        likes_at_challenge_end: true,
+                        challenge_id: true,
+                        challenge: {
+                            select: {
+                                id: true,
+                                name: true,
+                                status: true,
+                                end_date: true
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -1147,6 +1293,7 @@ exports.updatePost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:updated', { postId, userId });
 
@@ -1217,6 +1364,7 @@ exports.deletePost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:deleted', { postId, userId: userID });
 
@@ -2300,6 +2448,7 @@ exports.publishDraftPost = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:published', { postId, userId });
 
@@ -2491,13 +2640,22 @@ exports.retryVideoProcessing = async (req, res) => {
             }
         });
 
-        // Re-queue for processing (Redis/BullMQ mode) - video processor worker will pick it up
-        // In polling mode, video processor will fetch via GET /api/internal/pending-videos
+        // Re-queue for processing (Redis/BullMQ) - video processor server must use same REDIS_URL
         try {
-            await addVideoJob(post.id, post.video_url);
-            console.log(`[POST] Video re-queued for retry, post ${post.id}`);
+            const queueJob = await addVideoJob(post.id, post.video_url);
+            console.log('[POST] Video re-queued for retry', { postId: post.id, jobId: queueJob?.id });
         } catch (queueErr) {
-            console.warn('[POST] Failed to re-queue video (polling mode may still pick it up):', queueErr.message);
+            const errMsg = queueErr?.message || 'Failed to re-queue video';
+            console.error('[POST] Retry queue failed', { postId: post.id, error: errMsg });
+            await prisma.post.update({
+                where: { id: postId },
+                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) },
+            });
+            return res.status(503).json({
+                status: 'error',
+                message: 'Retry failed: processing queue unavailable. Try again later.',
+                error: process.env.NODE_ENV === 'development' ? errMsg : undefined,
+            });
         }
 
         res.json({

@@ -18,13 +18,3 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       # Redis connection for local (already in base compose, but explicit here)
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-
-  video-worker:
-    # Override: Build locally for development
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      NODE_ENV: ${NODE_ENV:-development}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-

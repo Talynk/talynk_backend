@@ -1,6 +1,6 @@
 const prisma = require('../lib/prisma');
-const { updateFollowerCount } = require('./suggestionController');
 const { emitEvent } = require('../lib/realtime');
+const { clearCacheByPattern } = require('../utils/cache');
 
 /**
  * Create a notification for the followed user
@@ -130,9 +130,14 @@ const followUser = async (req, res) => {
     // Create a notification for the followed user
     await createFollowNotification(followerId, followingId);
 
+    // Invalidate feed caches so following posts reflect the new follow
+    await clearCacheByPattern('following_posts');
+    await clearCacheByPattern('feed:');
+
     res.status(200).json({
       status: 'success',
-      message: 'Successfully followed user'
+      message: 'Successfully followed user',
+      data: { isFollowing: true, followingId }
     });
   } catch (error) {
     console.error('Error following user:', error);
@@ -143,17 +148,25 @@ const followUser = async (req, res) => {
   }
 };
 
-// Unfollow a user with the userId in the request body
+// Unfollow a user (followingId from URL param; body.userId supported for backward compatibility)
 const unfollowUser = async (req, res) => {
   try {
     const followerId = req.user.id;
-    const { userId: followingId } = req.body;
+    const followingId = req.params.followingId || req.body?.userId;
 
     // Validate input
     if (!followingId) {
       return res.status(400).json({
         status: 'error',
-        message: 'User ID is required'
+        message: 'User ID is required (use URL path /follows/:followingId or body.userId)'
+      });
+    }
+
+    // Check if user is trying to unfollow themselves (no-op allowed but we still validate)
+    if (followerId === followingId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Cannot unfollow yourself'
       });
     }
 
@@ -193,9 +206,14 @@ const unfollowUser = async (req, res) => {
       });
     });
 
+    // Invalidate feed caches
+    await clearCacheByPattern('following_posts');
+    await clearCacheByPattern('feed:');
+
     res.status(200).json({
       status: 'success',
-      message: 'Successfully unfollowed user'
+      message: 'Successfully unfollowed user',
+      data: { isFollowing: false, followingId }
     });
   } catch (error) {
     console.error('Error unfollowing user:', error);
@@ -382,13 +400,31 @@ const getFollowing = async (req, res) => {
   }
 };
 
-// Check if following
+// Check if current user is following another user
 const checkFollowStatus = async (req, res) => {
   try {
     const followerId = req.user.id;
     const { followingId } = req.params;
 
-    // Check follow status
+    if (!followingId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'followingId is required'
+      });
+    }
+
+    // Optionally validate that the target user exists
+    const targetUser = await prisma.user.findFirst({
+      where: { id: followingId, status: 'active' },
+      select: { id: true }
+    });
+    if (!targetUser) {
+      return res.status(404).json({
+        status: 'error',
+        message: 'User not found'
+      });
+    }
+
     const follow = await prisma.follow.findFirst({
       where: {
         followerId: followerId,
@@ -398,8 +434,9 @@ const checkFollowStatus = async (req, res) => {
 
     res.status(200).json({
       status: 'success',
-      data: { 
-        isFollowing: !!follow
+      data: {
+        isFollowing: !!follow,
+        followingId
       }
     });
   } catch (error) {

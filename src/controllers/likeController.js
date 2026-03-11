@@ -264,6 +264,7 @@ exports.toggleLike = async (req, res) => {
         await clearCacheByPattern('following_posts');
         await clearCacheByPattern('featured_posts');
         await clearCacheByPattern('search_posts');
+        await clearCacheByPattern('feed:');
 
         emitEvent('post:likeToggled', { postId, userId, isLiked: result.isLiked, likeCount: result.likeCount });
 

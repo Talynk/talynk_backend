@@ -30,6 +30,8 @@ model User {
   subscribers           Int      @default(0)
   remember_me           Boolean  @default(false)
   status                String   @default("active") @db.VarChar(255)
+  suspended_at          DateTime?
+  suspension_reason      String?  @db.Text
   role                  String   @default("user") @db.VarChar(255)
   profile_picture       String?  @db.VarChar(255)
   bio                   String?  @db.Text // User biography/bio
@@ -61,6 +63,7 @@ model User {
   organizedChallenges   Challenge[] @relation("ChallengeOrganizer")
   challengeParticipants ChallengeParticipant[]
   challengePosts        ChallengePost[]
+  userDevices           UserDevice[]
 
   @@map("users")
 }
@@ -109,9 +112,13 @@ model Post {
   report_count          Int      @default(0)
   featured_at           DateTime?
   frozen_at             DateTime?
+  suspended_at          DateTime?
+  suspension_reason     String?  @db.Text
+  suspended_by          String?  @db.Uuid
   uploadDate            DateTime @default(now())
   type                  String   @default("text") @db.VarChar(50)
   content               String?  @db.Text
+  is_ad                 Boolean  @default(false)  // Admin-created ad; shown in feed interleave only
   createdAt             DateTime @default(now())
   updatedAt             DateTime @default(now())
 
@@ -119,6 +126,7 @@ model Post {
   user                  User?    @relation(fields: [user_id], references: [id])
   approver              Approver? @relation(fields: [approver_id], references: [id])
   admin                 Admin?   @relation(fields: [admin_id], references: [id])
+  suspendingAdmin       Admin?   @relation("PostSuspendedBy", fields: [suspended_by], references: [id])
   category              Category? @relation(fields: [category_id], references: [id])
   comments              Comment[]
   postLikes             PostLike[]
@@ -130,6 +138,10 @@ model Post {
   challengePosts        ChallengePost[]
   notifications         Notification[]
 
+  @@index([createdAt(sort: Desc)])
+  @@index([user_id])
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
   @@map("posts")
 }
 
@@ -164,6 +176,8 @@ model Comment {
   user             User     @relation(fields: [commentor_id], references: [id])
   post             Post     @relation(fields: [post_id], references: [id])
 
+  @@index([post_id])
+  @@index([commentor_id, comment_date(sort: Desc)])
   @@map("comments")
 }
 
@@ -179,6 +193,9 @@ model PostLike {
   post      Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, post_id], name: "unique_user_post_like")
+  @@index([post_id, user_id])
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([post_id, createdAt(sort: Desc)])
   @@map("post_likes")
 }
 
@@ -196,6 +213,7 @@ model View {
 
   @@unique([user_id, post_id], name: "unique_user_post_view")
   @@unique([ip_address, post_id], name: "unique_ip_post_view")
+  @@index([post_id, createdAt(sort: Desc)])
   @@map("views")
 }
 
@@ -211,6 +229,7 @@ model Follow {
   following    User     @relation("UserFollowers", fields: [followingId], references: [id])
 
   @@unique([followerId, followingId])
+  @@index([followingId, followerId])
   @@map("follows")
 }
 
@@ -287,6 +306,7 @@ model Admin {
 
   // Relations
   posts     Post[]
+  suspendedPosts Post[] @relation("PostSuspendedBy")
   reports   PostReport[]
   appeals   PostAppeal[]
   featuredPosts FeaturedPost[]
@@ -490,10 +510,13 @@ model Challenge {
   organizer_id          String   @db.Uuid
   organizer_name        String   @db.VarChar(255)
   organizer_contact     String   @db.VarChar(255)
+  contact_email        String?  @db.VarChar(255)   // Contact email for the challenge (used when main user email not available); required on create
   start_date            DateTime
   end_date              DateTime
   min_content_per_account Int    @default(1)
   scoring_criteria      String?  @db.Text
+  eligibility_criteria String?  @db.Text  // Who can participate (asked when creating challenge)
+  what_you_do           String?  @db.Text  // What participants do in the challenge (asked when creating)
   status                ChallengeStatus @default(pending)
   approved_by           String?  @db.Uuid
   approved_at           DateTime?
@@ -525,17 +548,116 @@ model ChallengeParticipant {
 }
 
 model ChallengePost {
-  id          String   @id @default(uuid()) @db.Uuid
-  challenge_id String  @db.Uuid
-  post_id     String   @db.Uuid
-  user_id     String   @db.Uuid
-  submitted_at DateTime @default(now())
+  id                    String   @id @default(uuid()) @db.Uuid
+  challenge_id          String   @db.Uuid
+  post_id               String   @db.Uuid
+  user_id               String   @db.Uuid
+  submitted_at          DateTime @default(now())
+  likes_at_challenge_end Int?    // Snapshot of post likes when challenge ended (for ranking & transparency)
+  winner_rank           Int?    // Admin-defined winner position (1 = 1st); null = use like-based order
 
   // Relations
-  challenge   Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
-  post        Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
-  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  challenge             Challenge @relation(fields: [challenge_id], references: [id], onDelete: Cascade)
+  post                  Post     @relation(fields: [post_id], references: [id], onDelete: Cascade)
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([challenge_id, post_id], name: "unique_challenge_post")
   @@map("challenge_posts")
+}
+
+// ---- Activity logging & audit ----
+
+model DeviceFingerprint {
+  id               String   @id @default(uuid()) @db.Uuid
+  fingerprint_hash String   @unique @db.VarChar(64)
+  first_seen_at    DateTime @default(now())
+  last_seen_at     DateTime @updatedAt
+  user_agent       String?  @db.Text
+  os               String?  @db.VarChar(100)
+  browser          String?  @db.VarChar(100)
+  locale           String?  @db.VarChar(20)
+  extra            Json?
+  activity_logs    ActivityLog[]
+  audit_logs       AuditLog[]
+  user_devices     UserDevice[]
+
+  @@index([fingerprint_hash])
+  @@index([last_seen_at(sort: Desc)])
+  @@map("device_fingerprints")
+}
+
+model UserDevice {
+  id                    String   @id @default(uuid()) @db.Uuid
+  user_id               String   @db.Uuid
+  device_fingerprint_id String   @db.Uuid
+  label                 String?  @db.VarChar(255)
+  trusted               Boolean  @default(false)
+  first_used_at         DateTime @default(now())
+  last_used_at         DateTime @updatedAt
+
+  user                  User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device_fingerprint    DeviceFingerprint @relation(fields: [device_fingerprint_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, device_fingerprint_id], name: "unique_user_device")
+  @@index([user_id])
+  @@index([device_fingerprint_id])
+  @@map("user_devices")
+}
+
+model ActivityLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  trace_id              String   @db.VarChar(64)
+  user_id               String?  @db.Uuid
+  session_id            String?  @db.VarChar(255)
+  device_fingerprint_id String?  @db.Uuid
+  route                 String   @db.VarChar(500)
+  method                String   @db.VarChar(10)
+  status_code           Int?
+  success               Boolean
+  error_code            String?  @db.VarChar(100)
+  error_message         String?  @db.Text
+  ip                    String?  @db.VarChar(45)
+  user_agent            String?  @db.Text
+  location              String?  @db.VarChar(255)
+  source                String   @default("api") @db.VarChar(50)
+  action_type           String?  @db.VarChar(100)
+  meta                  Json?
+  flags                 Json?
+  created_at            DateTime @default(now())
+
+  device_fingerprint    DeviceFingerprint? @relation(fields: [device_fingerprint_id], references: [id], onDelete: SetNull)
+
+  @@index([trace_id])
+  @@index([created_at(sort: Desc)])
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([device_fingerprint_id, created_at(sort: Desc)])
+  @@index([route, created_at(sort: Desc)])
+  @@index([ip, created_at(sort: Desc)])
+  @@index([success, created_at(sort: Desc)])
+  @@index([source])
+  @@index([action_type])
+  @@map("activity_logs")
+}
+
+model AuditLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  actor_admin_id        String?  @db.Uuid
+  actor_user_id         String?  @db.Uuid
+  action_type           String   @db.VarChar(100)
+  resource_type         String?  @db.VarChar(100)
+  resource_id           String?  @db.VarChar(255)
+  ip                    String?  @db.VarChar(45)
+  device_fingerprint_id String?  @db.Uuid
+  details               Json?
+  flags                 Json?
+  created_at            DateTime @default(now())
+
+  device_fingerprint    DeviceFingerprint? @relation(fields: [device_fingerprint_id], references: [id], onDelete: SetNull)
+
+  @@index([action_type])
+  @@index([actor_admin_id, created_at(sort: Desc)])
+  @@index([actor_user_id, created_at(sort: Desc)])
+  @@index([resource_type, resource_id])
+  @@index([created_at(sort: Desc)])
+  @@map("audit_logs")
 }

@@ -22,6 +22,10 @@ router.get('/stats/most-posts', challengeController.getChallengesWithMostPosts);
 router.get('/stats/most-rewarding', challengeController.getMostRewardingChallenges);
 router.get('/stats/top-organizers', challengeController.getUsersWithMostChallenges);
 
+// Fixed-path GET routes (must be before /:challengeId so "joined" and "my-challenges" are not treated as IDs)
+router.get('/my-challenges', authenticate, challengeController.getMyChallenges);
+router.get('/joined', authenticate, challengeController.getJoinedChallenges);
+
 // Get a single challenge by ID (public - accessible to unauthenticated users)
 router.get('/:challengeId', optionalAuthenticate, challengeController.getChallengeById);
 
@@ -36,11 +40,8 @@ router.get('/:challengeId/posts', challengeController.getChallengePosts);
 // Create a new challenge request
 router.post('/', authenticate, challengeController.createChallenge);
 
-// Get challenges organized by current user (must be before parameterized routes)
-router.get('/my-challenges', authenticate, challengeController.getMyChallenges);
-
-// Get challenges the user has joined (must be before parameterized routes)
-router.get('/joined', authenticate, challengeController.getJoinedChallenges);
+// Edit a challenge (only while pending, organizer only)
+router.put('/:challengeId', authenticate, challengeController.updateChallenge);
 
 // Join a challenge
 router.post('/:challengeId/join', authenticate, challengeController.joinChallenge);

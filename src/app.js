@@ -1,4 +1,6 @@
+require("./instrument.js");
 require('dotenv').config();
+const Sentry = require("@sentry/node");
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -86,30 +88,42 @@ const corsOptions = {
            'https://talynk.vercel.app', 'https://talentix.net', 'https://admin.talentix.net'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Access-Control-Allow-Headers', 'sentry-trace', 'baggage', 'X-Request-Id', 'X-Device-Fingerprint', 'X-Device-Metadata', 'X-Session-Id', 'X-Geo-Location'],
   preflightContinue: false,
   optionsSuccessStatus: 204
 };
 
+// Normalize origin (strip trailing slash) for consistent CORS matching
+function normalizeOrigin(origin) {
+    if (!origin || typeof origin !== 'string') return null;
+    return origin.replace(/\/+$/, '') || null;
+}
+function isOriginAllowed(origin) {
+    const normalized = normalizeOrigin(origin);
+    if (!normalized) return false;
+    return corsOptions.origin.some(allowed => normalizeOrigin(allowed) === normalized);
+}
+
 // Manual CORS headers middleware - runs FIRST to ensure headers are always set
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    
+    const allowed = isOriginAllowed(origin);
+
     // Debug logging (remove in production)
     if (process.env.NODE_ENV !== 'production') {
         console.log(`[CORS] ${req.method} ${req.path} - Origin: ${origin}`);
     }
-    
-    // For OPTIONS requests, always set CORS headers
+
+    // For OPTIONS requests, always set CORS headers; set Allow-Origin when origin is allowed
     if (req.method === 'OPTIONS') {
-        if (origin && corsOptions.origin.includes(origin)) {
+        if (origin && allowed) {
             res.setHeader('Access-Control-Allow-Origin', origin);
             res.setHeader('Access-Control-Allow-Credentials', 'true');
         }
         res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
         res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
         res.setHeader('Access-Control-Max-Age', '86400');
-        
+
         if (process.env.NODE_ENV !== 'production') {
             console.log(`[CORS] OPTIONS response headers:`, {
                 'Access-Control-Allow-Origin': res.getHeader('Access-Control-Allow-Origin'),
@@ -117,18 +131,18 @@ app.use((req, res, next) => {
                 'Access-Control-Allow-Methods': res.getHeader('Access-Control-Allow-Methods')
             });
         }
-        
+
         return res.status(204).end();
     }
-    
+
     // For non-OPTIONS requests, set CORS headers if origin is allowed
-    if (origin && corsOptions.origin.includes(origin)) {
+    if (origin && allowed) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Access-Control-Allow-Methods', corsOptions.methods.join(', '));
     res.setHeader('Access-Control-Allow-Headers', corsOptions.allowedHeaders.join(', '));
-    
+
     next();
 });
 
@@ -138,7 +152,7 @@ app.use(cors(corsOptions));
 // Explicit OPTIONS handler (backup)
 app.options('*', (req, res) => {
     const origin = req.headers.origin;
-    if (origin && corsOptions.origin.includes(origin)) {
+    if (origin && isOriginAllowed(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
@@ -158,6 +172,14 @@ app.use(helmet({
 // Add specific CORS handling for problematic routes (using same config)
 app.use('/api/posts/all', cors(corsOptions));
 
+// Request-scoped Sentry context (request_id, path, method) for trace-connected logs
+const sentryContext = require('./middleware/sentryContext');
+app.use(sentryContext);
+
+// Activity logging: trace-level log of every API request (traceId, route, status, duration, IP, device fingerprint)
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(compression());
@@ -170,7 +192,7 @@ app.use('/uploads', (req, res, next) => {
     // Set CORS headers specifically for media files
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range, sentry-trace, baggage');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     
@@ -205,6 +227,16 @@ app.get('/', (req, res) => {
         }
     });
 });
+
+// Sentry test route (disabled in production)
+if (process.env.NODE_ENV !== "production") {
+    app.get("/debug-sentry", (req, res) => {
+        throw new Error("My first Sentry error!");
+    });
+}
+
+// The error handler must be registered before any other error middleware and after all controllers
+Sentry.setupExpressErrorHandler(app);
 
 // Error Handling Middleware
 const notFoundHandler = (req, res) => {

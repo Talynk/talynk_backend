@@ -6,6 +6,29 @@ const { emitEvent } = require('../lib/realtime');
 const { addVideoJob } = require('../queues/videoQueue');
 const { applyFeedReadyFilter } = require('../utils/postFilters');
 
+/**
+ * Snapshot each challenge post's like count at challenge end (for ranking and transparency).
+ * Call this when a challenge is ended (e.g. admin stop or cron for end_date).
+ * @param {string} challengeId
+ */
+async function snapshotLikesAtChallengeEnd(challengeId) {
+    const challengePosts = await prisma.challengePost.findMany({
+        where: { challenge_id: challengeId },
+        include: {
+            post: {
+                select: { id: true, likes: true }
+            }
+        }
+    });
+    for (const cp of challengePosts) {
+        await prisma.challengePost.update({
+            where: { id: cp.id },
+            data: { likes_at_challenge_end: cp.post.likes ?? 0 }
+        });
+    }
+}
+exports.snapshotLikesAtChallengeEnd = snapshotLikesAtChallengeEnd;
+
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
     try {
@@ -16,10 +39,13 @@ exports.createChallenge = async (req, res) => {
             rewards,
             organizer_name,
             organizer_contact,
+            contact_email,
             start_date,
             end_date,
             min_content_per_account,
-            scoring_criteria
+            scoring_criteria,
+            eligibility_criteria,
+            what_you_do
         } = req.body;
 
         const userId = req.user.id;
@@ -46,10 +72,19 @@ exports.createChallenge = async (req, res) => {
         }
 
         // Validate required fields
-        if (!name || !organizer_name || !organizer_contact || !start_date || !end_date) {
+        if (!name || !organizer_name || !organizer_contact || !contact_email || !start_date || !end_date) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Missing required fields: name, organizer_name, organizer_contact, start_date, end_date'
+                message: 'Missing required fields: name, organizer_name, organizer_contact, contact_email, start_date, end_date'
+            });
+        }
+
+        // Validate contact email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(contact_email.trim())) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid contact email format'
             });
         }
 
@@ -97,10 +132,13 @@ exports.createChallenge = async (req, res) => {
                 organizer_id: userId,
                 organizer_name: organizer_name.trim(),
                 organizer_contact: organizer_contact.trim(),
+                contact_email: contact_email.trim().toLowerCase(),
                 start_date: startDate,
                 end_date: endDate,
                 min_content_per_account: min_content_per_account || 1,
                 scoring_criteria: scoring_criteria?.trim() || null,
+                eligibility_criteria: eligibility_criteria?.trim() || null,
+                what_you_do: what_you_do?.trim() || null,
                 status: 'pending'
             },
             include: {
@@ -124,6 +162,164 @@ exports.createChallenge = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to create challenge',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Edit a challenge (only while pending, organizer only)
+exports.updateChallenge = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const userId = req.user.id;
+        const {
+            name,
+            description,
+            has_rewards,
+            rewards,
+            organizer_name,
+            organizer_contact,
+            contact_email,
+            start_date,
+            end_date,
+            min_content_per_account,
+            scoring_criteria,
+            eligibility_criteria,
+            what_you_do
+        } = req.body;
+
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(challengeId)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid challenge ID format.'
+            });
+        }
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.organizer_id !== userId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Only the organizer can edit this challenge'
+            });
+        }
+
+        if (challenge.status !== 'pending') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only pending challenges can be edited. Once the challenge is under review or has been approved/rejected, edits are not allowed.'
+            });
+        }
+
+        // Build update object with only provided fields
+        const updateData = {};
+
+        if (name !== undefined) updateData.name = name.trim();
+        if (description !== undefined) updateData.description = description?.trim() || null;
+        if (has_rewards !== undefined) updateData.has_rewards = !!has_rewards;
+        if (has_rewards && rewards !== undefined) updateData.rewards = rewards.trim();
+        else if (has_rewards === false) updateData.rewards = null;
+        if (organizer_name !== undefined) updateData.organizer_name = organizer_name.trim();
+        if (organizer_contact !== undefined) updateData.organizer_contact = organizer_contact.trim();
+        if (contact_email !== undefined) {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(contact_email.trim())) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid contact email format'
+                });
+            }
+            updateData.contact_email = contact_email.trim().toLowerCase();
+        }
+        if (min_content_per_account !== undefined) updateData.min_content_per_account = min_content_per_account;
+        if (scoring_criteria !== undefined) updateData.scoring_criteria = scoring_criteria?.trim() || null;
+        if (eligibility_criteria !== undefined) updateData.eligibility_criteria = eligibility_criteria?.trim() || null;
+        if (what_you_do !== undefined) updateData.what_you_do = what_you_do?.trim() || null;
+
+        if (start_date !== undefined || end_date !== undefined) {
+            const startDate = start_date ? new Date(start_date) : new Date(challenge.start_date);
+            const endDate = end_date ? new Date(end_date) : new Date(challenge.end_date);
+            const now = new Date();
+
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Invalid date format'
+                });
+            }
+            if (startDate < now) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'Start date must be in the future'
+                });
+            }
+            if (endDate <= startDate) {
+                return res.status(400).json({
+                    status: 'error',
+                    message: 'End date must be after start date'
+                });
+            }
+            if (start_date !== undefined) updateData.start_date = startDate;
+            if (end_date !== undefined) updateData.end_date = endDate;
+        }
+
+        if (updateData.has_rewards && (updateData.rewards === undefined && !challenge.rewards)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Rewards description is required when has_rewards is true'
+            });
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'No valid fields to update'
+            });
+        }
+
+        const updated = await prisma.challenge.update({
+            where: { id: challengeId },
+            data: updateData,
+            include: {
+                organizer: {
+                    select: {
+                        id: true,
+                        username: true,
+                        email: true
+                    }
+                }
+            }
+        });
+
+        res.json({
+            status: 'success',
+            message: 'Challenge updated successfully. Waiting for admin approval.',
+            data: updated
+        });
+    } catch (error) {
+        console.error('Error updating challenge:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to update challenge',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -694,6 +890,8 @@ exports.getChallengeParticipants = async (req, res) => {
 };
 
 // Get posts for a challenge (public endpoint - accessible to unauthenticated users)
+// For ended challenges: orders by likes at challenge end (authenticity/transparency) and returns both
+// likes_at_challenge_end and current total likes per post.
 exports.getChallengePosts = async (req, res) => {
     try {
         const { challengeId } = req.params;
@@ -701,7 +899,7 @@ exports.getChallengePosts = async (req, res) => {
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         // Check if challenge exists
-        const challenge = await prisma.challenge.findUnique({
+        let challenge = await prisma.challenge.findUnique({
             where: { id: challengeId }
         });
 
@@ -720,6 +918,29 @@ exports.getChallengePosts = async (req, res) => {
             });
         }
 
+        const now = new Date();
+        const endDate = new Date(challenge.end_date);
+        const isEnded = challenge.status === 'ended' || endDate < now;
+
+        // If challenge ended by date but status wasn't updated, mark ended and snapshot likes once
+        if (challenge.status !== 'ended' && endDate < now) {
+            await prisma.challenge.update({
+                where: { id: challengeId },
+                data: { status: 'ended' }
+            });
+            await snapshotLikesAtChallengeEnd(challengeId);
+            challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
+        }
+
+        // For ended challenges: order by winner_rank (asc; nulls last in PostgreSQL), then likes at challenge end (desc), then submitted_at. For active: by submitted_at.
+        const orderBy = isEnded
+            ? [
+                { winner_rank: 'asc' },
+                { likes_at_challenge_end: 'desc' },
+                { submitted_at: 'desc' }
+            ]
+            : { submitted_at: 'desc' };
+
         const [challengePosts, total] = await Promise.all([
             prisma.challengePost.findMany({
                 where: {
@@ -728,9 +949,7 @@ exports.getChallengePosts = async (req, res) => {
                 },
                 skip,
                 take: parseInt(limit),
-                orderBy: {
-                    submitted_at: 'desc'
-                },
+                orderBy,
                 include: {
                     post: {
                         include: {
@@ -775,15 +994,25 @@ exports.getChallengePosts = async (req, res) => {
             })
         ]);
 
+        // Enrich each item with explicit like counts and winner_rank for transparency (during challenge vs total)
+        const hasWinnerRanks = isEnded && challengePosts.some(cp => cp.winner_rank != null);
+        const data = challengePosts.map(cp => ({
+            ...cp,
+            likes_during_challenge: cp.likes_at_challenge_end ?? null,
+            total_likes: cp.post?.likes ?? cp.post?._count?.postLikes ?? 0,
+            winner_rank: cp.winner_rank ?? null
+        }));
+
         res.json({
             status: 'success',
-            data: challengePosts,
+            data,
             pagination: {
                 page: parseInt(page),
                 limit: parseInt(limit),
                 total,
                 pages: Math.ceil(total / parseInt(limit))
-            }
+            },
+            ...(isEnded && { ordered_by: hasWinnerRanks ? 'winner_rank' : 'likes_at_challenge_end' })
         });
     } catch (error) {
         console.error('Error fetching challenge posts:', error);
@@ -1168,14 +1397,17 @@ exports.createPostInChallenge = async (req, res) => {
         if (isVideo && video_url) {
             console.log("[CHALLENGE] Adding video to processing queue for post:", post.id);
             try {
-                // Pass R2 URL to the queue instead of local temp path
-                await addVideoJob(post.id, video_url);
-                console.log(`[CHALLENGE] Video queued successfully for post ${post.id}`);
+                const queueJob = await addVideoJob(post.id, video_url);
+                console.log('[CHALLENGE] Video queued', { postId: post.id, jobId: queueJob?.id });
             } catch (queueErr) {
-                console.error('[CHALLENGE] Failed to queue video job:', queueErr.message);
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                console.error('[CHALLENGE] Failed to queue video job', { postId: post.id, error: errMsg });
                 await prisma.post.update({
                     where: { id: post.id },
-                    data: { processing_status: 'failed', processing_error: 'Failed to queue video for processing' }
+                    data: {
+                        processing_status: 'failed',
+                        processing_error: errMsg.slice(0, 500),
+                    },
                 });
             }
         }
