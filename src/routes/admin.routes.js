@@ -12,6 +12,11 @@ router.post('/register', adminController.registerAdmin);
 
 // Admin routes (all require authentication and admin privileges)
 router.get('/users', authenticate, isAdmin, adminController.getAllUsers);
+router.get('/users/suspended', authenticate, isAdmin, adminController.getSuspendedUsers);
+router.get('/users/:userId', authenticate, isAdmin, adminController.getAdminUserById);
+router.get('/users/:userId/activity', authenticate, isAdmin, adminController.getAdminUserActivity);
+router.get('/users/:userId/posts', authenticate, isAdmin, adminController.getAdminUserPosts);
+router.get('/users/:userId/posts/engagement', authenticate, isAdmin, adminController.getAdminUserPostsEngagement);
 router.post('/accounts/manage', authenticate, isAdmin, adminController.manageUserAccount);
 router.post('/approvers', authenticate, isAdmin, adminController.registerApprover);
 router.get('/approvers', authenticate, isAdmin, adminController.getApprovers);
@@ -33,6 +38,7 @@ router.get('/posts/flagged', authenticate, isAdmin, adminController.getFlaggedPo
 router.get('/approvers/:approverId/approved-posts', authenticate, isAdmin, adminController.getAllApprovedPostsByApprover);
 router.get('/dashboard/stats', authenticate, isAdmin, adminController.getDashboardStats);
 router.get('/users/stats', authenticate, isAdmin, adminController.getUserStats);
+router.get('/search', authenticate, isAdmin, adminController.adminUnifiedSearch);
 router.get('/posts/search', authenticate, isAdmin, adminController.searchPosts);
 
 // ===== NEW ADMIN ANALYTICS & MANAGEMENT ROUTES =====
@@ -46,6 +52,7 @@ router.get('/posts/all', authenticate, isAdmin, adminController.getAdminAllPosts
 router.get('/posts/analytics', authenticate, isAdmin, adminController.getAdminPosts);
 router.get('/posts/processing', authenticate, isAdmin, adminController.getPostsProcessing);
 router.get('/posts/:postId', authenticate, isAdmin, adminController.getAdminPostById);
+router.get('/posts/:postId/engagement', authenticate, isAdmin, adminController.getPostEngagement);
 router.put('/posts/:postId/featured', authenticate, isAdmin, adminController.setPostFeatured);
 router.put('/posts/:postId/freeze', authenticate, isAdmin, adminController.freezePost);
 router.put('/posts/:postId/unfreeze', authenticate, isAdmin, adminController.unfreezePost);
@@ -72,7 +79,9 @@ router.put('/challenges/:challengeId/reject', authenticate, isAdmin, adminContro
 router.put('/challenges/:challengeId/stop', authenticate, isAdmin, adminController.stopChallenge);
 router.put('/challenges/:challengeId/winners/reorder', authenticate, isAdmin, adminController.reorderChallengeWinners);
 
-// Ads (admin-only; specific routes before :adId)
+// Ads (admin-only; signed-URL flow first, then multipart legacy, then CRUD)
+router.post('/ads/create-upload', authenticate, isAdmin, adminController.createAdUpload);
+router.post('/ads/upload-complete', authenticate, isAdmin, adminController.completeAdUpload);
 router.post('/ads', authenticate, isAdmin, ...upload.single('file'), adminController.createAd);
 router.get('/ads', authenticate, isAdmin, adminController.listAds);
 router.get('/ads/:adId', authenticate, isAdmin, adminController.getAdById);

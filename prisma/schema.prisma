@@ -30,6 +30,8 @@ model User {
   subscribers           Int      @default(0)
   remember_me           Boolean  @default(false)
   status                String   @default("active") @db.VarChar(255)
+  suspended_at          DateTime?
+  suspension_reason      String?  @db.Text
   role                  String   @default("user") @db.VarChar(255)
   profile_picture       String?  @db.VarChar(255)
   bio                   String?  @db.Text // User biography/bio
@@ -109,6 +111,9 @@ model Post {
   report_count          Int      @default(0)
   featured_at           DateTime?
   frozen_at             DateTime?
+  suspended_at          DateTime?
+  suspension_reason     String?  @db.Text
+  suspended_by          String?  @db.Uuid
   uploadDate            DateTime @default(now())
   type                  String   @default("text") @db.VarChar(50)
   content               String?  @db.Text
@@ -120,6 +125,7 @@ model Post {
   user                  User?    @relation(fields: [user_id], references: [id])
   approver              Approver? @relation(fields: [approver_id], references: [id])
   admin                 Admin?   @relation(fields: [admin_id], references: [id])
+  suspendingAdmin       Admin?   @relation("PostSuspendedBy", fields: [suspended_by], references: [id])
   category              Category? @relation(fields: [category_id], references: [id])
   comments              Comment[]
   postLikes             PostLike[]
@@ -133,6 +139,7 @@ model Post {
 
   @@index([createdAt(sort: Desc)])
   @@index([user_id])
+  @@index([user_id, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
   @@map("posts")
 }
@@ -169,6 +176,7 @@ model Comment {
   post             Post     @relation(fields: [post_id], references: [id])
 
   @@index([post_id])
+  @@index([commentor_id, comment_date(sort: Desc)])
   @@map("comments")
 }
 
@@ -185,6 +193,8 @@ model PostLike {
 
   @@unique([user_id, post_id], name: "unique_user_post_like")
   @@index([post_id, user_id])
+  @@index([user_id, createdAt(sort: Desc)])
+  @@index([post_id, createdAt(sort: Desc)])
   @@map("post_likes")
 }
 
@@ -202,6 +212,7 @@ model View {
 
   @@unique([user_id, post_id], name: "unique_user_post_view")
   @@unique([ip_address, post_id], name: "unique_ip_post_view")
+  @@index([post_id, createdAt(sort: Desc)])
   @@map("views")
 }
 
@@ -294,6 +305,7 @@ model Admin {
 
   // Relations
   posts     Post[]
+  suspendedPosts Post[] @relation("PostSuspendedBy")
   reports   PostReport[]
   appeals   PostAppeal[]
   featuredPosts FeaturedPost[]

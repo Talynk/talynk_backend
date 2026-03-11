@@ -55,6 +55,19 @@ const getAdminId = async (userId, userRole) => {
     
     return adminRecord.id;
 };
+
+/** Parse time frame for activity/engagement queries. Returns { startDate, interval } for DB truncation. */
+const parseTimeFrame = (frame) => {
+    const now = new Date();
+    const validFrames = ['1h', '12h', '24h', '7d', '30d'];
+    const f = (frame || '24h').toLowerCase();
+    const frameHours = { '1h': 1, '12h': 12, '24h': 24, '7d': 168, '30d': 720 };
+    const hours = frameHours[f] != null ? frameHours[f] : 24;
+    const startDate = new Date(now.getTime() - hours * 60 * 60 * 1000);
+    const interval = hours <= 1 ? 'hour' : hours <= 24 ? 'hour' : 'day';
+    return { startDate, interval, hours };
+};
+
 const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
@@ -1199,10 +1212,18 @@ exports.manageUserAccount = async (req, res) => {
             });
         }
 
-        // Update the user status
+        // Build update payload: status and optional suspended_at / suspension_reason
+        const updateData = { status: newStatus };
+        if (action === 'suspend') {
+            updateData.suspended_at = new Date();
+            updateData.suspension_reason = reason || null;
+        } else if (action === 'unsuspend') {
+            updateData.suspended_at = null;
+            updateData.suspension_reason = null;
+        }
         await prisma.user.update({
             where: { id },
-            data: { status: newStatus }
+            data: updateData
         });
 
         res.json({
@@ -1211,7 +1232,9 @@ exports.manageUserAccount = async (req, res) => {
             data: {
                 userId: id,
                 previousStatus: user.status,
-                newStatus: newStatus
+                newStatus: newStatus,
+                ...(action === 'suspend' && { suspended_at: updateData.suspended_at, suspension_reason: updateData.suspension_reason }),
+                ...(action === 'unsuspend' && { suspended_at: null, suspension_reason: null })
             }
         });
     } catch (error) {
@@ -5987,7 +6010,7 @@ exports.unfreezePost = async (req, res) => {
     }
 };
 
-// Suspend a post (admin) – set status to suspended and notify owner
+// Suspend a post (admin) – set status to suspended, store reason and suspended_by, notify owner
 exports.suspendPost = async (req, res) => {
     try {
         const { postId } = req.params;
@@ -6009,12 +6032,16 @@ exports.suspendPost = async (req, res) => {
             });
         }
 
+        const adminId = await getAdminId(req.user?.id, req.user?.role);
         await prisma.post.update({
             where: { id: postId },
             data: {
                 status: 'suspended',
                 is_frozen: true,
-                frozen_at: new Date()
+                frozen_at: new Date(),
+                suspended_at: new Date(),
+                suspension_reason: reason || null,
+                suspended_by: adminId || null
             }
         });
 
@@ -6051,10 +6078,11 @@ exports.suspendPost = async (req, res) => {
     }
 };
 
-// Delete a post (admin) – permanent delete
+// Delete a post (admin) – permanent delete; optional reason in body for audit
 exports.adminDeletePost = async (req, res) => {
     try {
         const { postId } = req.params;
+        const { reason } = req.body || {};
 
         const post = await prisma.post.findUnique({
             where: { id: postId },
@@ -6072,6 +6100,8 @@ exports.adminDeletePost = async (req, res) => {
         await prisma.featuredPost.deleteMany({ where: { post_id: postId } });
         await prisma.challengePost.deleteMany({ where: { post_id: postId } });
         await prisma.share.deleteMany({ where: { post_id: postId } });
+        await prisma.postReport.deleteMany({ where: { post_id: postId } });
+        await prisma.postAppeal.deleteMany({ where: { post_id: postId } });
         await prisma.notification.updateMany({ where: { postId: postId }, data: { postId: null } });
         await prisma.post.delete({ where: { id: postId } });
 
@@ -6090,7 +6120,7 @@ exports.adminDeletePost = async (req, res) => {
         await clearCacheByPattern('search_posts');
         await clearCacheByPattern('feed:');
 
-        loggers.audit('admin_delete_post', { adminId: req.user.id, postId });
+        loggers.audit('admin_delete_post', { adminId: req.user.id, postId, reason: reason || null });
 
         res.json({
             status: 'success',
@@ -6358,18 +6388,28 @@ exports.getPostsProcessing = async (req, res) => {
     }
 };
 
-// Get post reports and reporters
+// Get post reports and reporters (full reporter info, reason, description, status, timestamps)
 exports.getPostReports = async (req, res) => {
     try {
         const { postId } = req.params;
 
         const reports = await prisma.postReport.findMany({
             where: { post_id: postId },
-            include: {
+            select: {
+                id: true,
+                post_id: true,
+                reason: true,
+                description: true,
+                status: true,
+                createdAt: true,
+                updatedAt: true,
+                reviewed_by: true,
+                reviewed_at: true,
                 user: {
                     select: {
                         id: true,
                         username: true,
+                        display_name: true,
                         email: true,
                         profile_picture: true,
                         bio: true
@@ -6489,36 +6529,21 @@ exports.sendBroadcastNotification = async (req, res) => {
             updatedAt: new Date()
         }));
 
-        const createdNotifications = await prisma.notification.createMany({
+        await prisma.notification.createMany({
             data: notifications
         });
 
-        // Emit real-time notification events for all users
-        // Note: createMany doesn't return the created records, so we'll fetch them
-        const notificationRecords = await prisma.notification.findMany({
-            where: {
-                userID: { in: users.map(u => u.username) },
-                type: type,
-                message: `${title}: ${message}`
-            },
-            orderBy: { createdAt: 'desc' },
-            take: users.length
-        });
-
-        // Emit events for each user
-        for (let i = 0; i < users.length && i < notificationRecords.length; i++) {
-            const user = users[i];
-            const notification = notificationRecords[i];
-            
+        const fullMessage = `${title}: ${message}`;
+        // Emit real-time notification events to each active user (no fetch needed; payload matches created rows)
+        for (const user of users) {
             emitEvent('notification:created', {
                 userId: user.id,
                 userID: user.username,
                 notification: {
-                    id: notification.id,
-                    type: notification.type,
-                    message: notification.message,
-                    isRead: notification.isRead,
-                    createdAt: notification.createdAt
+                    type,
+                    message: fullMessage,
+                    isRead: false,
+                    createdAt: new Date()
                 }
             });
         }
@@ -7723,8 +7748,204 @@ exports.reorderChallengeWinners = async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Ads (admin-only; posts with is_ad=true, same video pipeline as normal posts)
+// Signed-URL flow (recommended): create-upload -> client uploads to URL -> upload-complete.
 // ---------------------------------------------------------------------------
 
+const AD_UPLOAD_SESSION_TTL = 600; // 10 minutes
+const AD_UPLOAD_SESSION_PREFIX = 'upload:'; // same as posts; postId is unique
+
+/**
+ * Create ad upload session - returns signed URL for direct client upload to R2 (same as mobile app).
+ * POST /api/admin/ads/create-upload
+ * Body: { title?, description? }
+ * Client uploads video via PUT to uploadUrl, then calls upload-complete with postId.
+ */
+exports.createAdUpload = async (req, res) => {
+    try {
+        const adminId = await getAdminId(req.user.id, req.user.role);
+        if (!adminId) {
+            return res.status(403).json({ status: 'error', message: 'Admin ID could not be resolved' });
+        }
+
+        const { getSignedUploadUrl, isR2Configured } = require('../services/r2Storage');
+        const { getClient: getRedisClient } = require('../lib/redis');
+        const { v4: uuidv4 } = require('uuid');
+
+        if (!isR2Configured()) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Direct upload not available. R2 storage is not configured.',
+            });
+        }
+
+        const redis = getRedisClient();
+        if (!redis) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Direct upload not available. Redis is not configured.',
+            });
+        }
+
+        const title = (req.body.title || 'Ad').trim().slice(0, 255);
+        const description = (req.body.description || '').trim() || null;
+
+        const post = await prisma.post.create({
+            data: {
+                user_id: null,
+                admin_id: adminId,
+                status: 'active',
+                type: 'video',
+                is_ad: true,
+                title: title || 'Ad',
+                description,
+                content: description,
+                video_url: null,
+                thumbnail_url: null,
+                processing_status: 'uploading',
+                uploadDate: new Date(),
+            },
+        });
+
+        const fileExt = '.mp4';
+        const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
+        const r2Key = `media/ads/${fileName}`;
+
+        const { uploadUrl, publicUrl } = await getSignedUploadUrl(r2Key, 'video/mp4', AD_UPLOAD_SESSION_TTL);
+        await redis.setex(`${AD_UPLOAD_SESSION_PREFIX}${post.id}`, AD_UPLOAD_SESSION_TTL, r2Key);
+
+        loggers.audit('create_ad_upload_session', { adminId, adId: post.id, title: post.title });
+
+        res.status(201).json({
+            status: 'success',
+            data: {
+                postId: post.id,
+                uploadUrl,
+                videoUrl: publicUrl,
+                expiresIn: AD_UPLOAD_SESSION_TTL,
+            },
+        });
+    } catch (error) {
+        console.error('Error creating ad upload session:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to create ad upload session',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/**
+ * Complete ad upload - verify file in R2, update post, queue video processing.
+ * POST /api/admin/ads/upload-complete
+ * Body: { postId }
+ */
+exports.completeAdUpload = async (req, res) => {
+    try {
+        const adminId = await getAdminId(req.user.id, req.user.role);
+        if (!adminId) {
+            return res.status(403).json({ status: 'error', message: 'Admin ID could not be resolved' });
+        }
+
+        const { postId } = req.body;
+        if (!postId) {
+            return res.status(400).json({ status: 'error', message: 'postId is required' });
+        }
+
+        const { getClient: getRedisClient } = require('../lib/redis');
+        const { fileExistsInR2, R2_PUBLIC_DOMAIN } = require('../services/r2Storage');
+        const { addVideoJob } = require('../queues/videoQueue');
+
+        const redis = getRedisClient();
+        if (!redis) {
+            return res.status(503).json({
+                status: 'error',
+                message: 'Redis not configured',
+            });
+        }
+
+        const post = await prisma.post.findFirst({
+            where: { id: postId, is_ad: true },
+        });
+
+        if (!post) {
+            return res.status(404).json({ status: 'error', message: 'Ad not found' });
+        }
+        if (post.processing_status !== 'uploading') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Ad is not in uploading state',
+                processing_status: post.processing_status,
+            });
+        }
+
+        const r2Key = await redis.get(`${AD_UPLOAD_SESSION_PREFIX}${postId}`);
+        await redis.del(`${AD_UPLOAD_SESSION_PREFIX}${postId}`);
+
+        if (!r2Key) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Upload session expired or invalid. Please start a new upload.',
+            });
+        }
+
+        const exists = await fileExistsInR2(r2Key);
+        if (!exists) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Video file not found in storage. Please complete the upload first.',
+            });
+        }
+
+        const publicVideoUrl = `${R2_PUBLIC_DOMAIN}/${r2Key}`;
+
+        await prisma.post.update({
+            where: { id: postId },
+            data: {
+                video_url: publicVideoUrl,
+                processing_status: 'pending',
+            },
+        });
+
+        try {
+            await addVideoJob(postId, publicVideoUrl);
+        } catch (queueErr) {
+            const errMsg = queueErr?.message || 'Failed to queue video for processing';
+            await prisma.post.update({
+                where: { id: postId },
+                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
+            });
+            return res.status(500).json({
+                status: 'error',
+                message: 'Upload complete but processing queue failed. Ad left in failed state; you can retry from ads list.',
+                data: { postId }
+            });
+        }
+
+        const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
+        await clearCacheByPattern(CACHE_KEYS.ALL_POSTS);
+
+        loggers.audit('complete_ad_upload', { adminId, adId: postId });
+
+        res.json({
+            status: 'success',
+            message: 'Upload complete. Video is being processed.',
+            data: {
+                postId,
+                video_url: publicVideoUrl,
+                processing_status: 'pending',
+            },
+        });
+    } catch (error) {
+        console.error('Error completing ad upload:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to complete ad upload',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/** Legacy: create ad with multipart file (server handles upload). Prefer create-upload + upload-complete for FE. */
 exports.createAd = async (req, res) => {
     try {
         const adminId = await getAdminId(req.user.id, req.user.role);
@@ -8387,5 +8608,384 @@ exports.getChallengeAnalytics = async (req, res) => {
             message: 'Failed to fetch challenge analytics',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
+    }
+};
+
+// ========== Admin user details, activity, posts, search, suspended users ==========
+
+/** GET /admin/users/:userId - Full user details for admin */
+exports.getAdminUserById = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: {
+                id: true,
+                username: true,
+                display_name: true,
+                email: true,
+                email_verified: true,
+                phone1: true,
+                phone2: true,
+                date_of_birth: true,
+                posts_count: true,
+                total_profile_views: true,
+                profile_picture: true,
+                bio: true,
+                status: true,
+                suspended_at: true,
+                suspension_reason: true,
+                role: true,
+                last_login: true,
+                last_active_date: true,
+                follower_count: true,
+                interests: true,
+                createdAt: true,
+                updatedAt: true,
+                country_id: true,
+                country: {
+                    select: { id: true, name: true, code: true, flag_emoji: true }
+                }
+            }
+        });
+        if (!user) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+        const [postStats, reportCountOnPosts] = await Promise.all([
+            prisma.post.aggregate({
+                where: { user_id: userId },
+                _sum: { views: true },
+                _count: { id: true }
+            }),
+            prisma.postReport.count({
+                where: { post: { user_id: userId } }
+            })
+        ]);
+        const totalPostViews = postStats._sum.views || 0;
+        const totalPosts = postStats._count.id || 0;
+        res.json({
+            status: 'success',
+            data: {
+                ...user,
+                summary: {
+                    totalPosts,
+                    totalPostViews,
+                    totalReportsOnContent: reportCountOnPosts
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get admin user by ID error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/** GET /admin/users/:userId/activity - User activity in time buckets (frame: 1h|12h|24h|7d|30d) */
+exports.getAdminUserActivity = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { frame = '24h' } = req.query;
+        const { startDate, interval } = parseTimeFrame(frame);
+        const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+        if (!exists) {
+            return res.status(404).json({ status: 'error', message: 'User not found' });
+        }
+        const trunc = interval === 'hour' ? 'hour' : 'day';
+        const truncSql = trunc === 'hour' ? prisma.$queryRaw`SELECT date_trunc('hour', p."createdAt") AS period, COUNT(*)::int AS count FROM posts p WHERE p.user_id = ${userId}::uuid AND p."createdAt" >= ${startDate} GROUP BY date_trunc('hour', p."createdAt") ORDER BY period ASC`
+            : prisma.$queryRaw`SELECT date_trunc('day', p."createdAt") AS period, COUNT(*)::int AS count FROM posts p WHERE p.user_id = ${userId}::uuid AND p."createdAt" >= ${startDate} GROUP BY date_trunc('day', p."createdAt") ORDER BY period ASC`;
+        const postsRaw = await truncSql;
+        const likesSql = trunc === 'hour' ? prisma.$queryRaw`SELECT date_trunc('hour', pl."createdAt") AS period, COUNT(*)::int AS count FROM post_likes pl WHERE pl.user_id = ${userId}::uuid AND pl."createdAt" >= ${startDate} GROUP BY date_trunc('hour', pl."createdAt") ORDER BY period ASC`
+            : prisma.$queryRaw`SELECT date_trunc('day', pl."createdAt") AS period, COUNT(*)::int AS count FROM post_likes pl WHERE pl.user_id = ${userId}::uuid AND pl."createdAt" >= ${startDate} GROUP BY date_trunc('day', pl."createdAt") ORDER BY period ASC`;
+        const likesRaw = await likesSql;
+        const commentsSql = trunc === 'hour' ? prisma.$queryRaw`SELECT date_trunc('hour', c.comment_date) AS period, COUNT(*)::int AS count FROM comments c WHERE c.commentor_id = ${userId}::uuid AND c.comment_date >= ${startDate} GROUP BY date_trunc('hour', c.comment_date) ORDER BY period ASC`
+            : prisma.$queryRaw`SELECT date_trunc('day', c.comment_date) AS period, COUNT(*)::int AS count FROM comments c WHERE c.commentor_id = ${userId}::uuid AND c.comment_date >= ${startDate} GROUP BY date_trunc('day', c.comment_date) ORDER BY period ASC`;
+        const commentsRaw = await commentsSql;
+        const byPeriod = {};
+        const addPeriod = (period, postsCreated = 0, likesGiven = 0, commentsMade = 0) => {
+            const key = period ? new Date(period).toISOString() : '';
+            if (!byPeriod[key]) byPeriod[key] = { periodStart: period, periodEnd: null, postsCreated: 0, likesGiven: 0, commentsMade: 0 };
+            byPeriod[key].postsCreated += postsCreated;
+            byPeriod[key].likesGiven += likesGiven;
+            byPeriod[key].commentsMade += commentsMade;
+        };
+        postsRaw.forEach(row => addPeriod(row.period, row.count || 0, 0, 0));
+        likesRaw.forEach(row => addPeriod(row.period, 0, row.count || 0, 0));
+        commentsRaw.forEach(row => addPeriod(row.period, 0, 0, row.count || 0));
+        const buckets = Object.values(byPeriod).sort((a, b) => new Date(a.periodStart) - new Date(b.periodStart));
+        res.json({ status: 'success', data: { frame, buckets } });
+    } catch (error) {
+        console.error('Get admin user activity error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error fetching user activity',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+/** GET /admin/users/:userId/posts - User's posts with details, optional frame filter */
+exports.getAdminUserPosts = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { page = 1, limit = 20, status, sort = 'newest', frame } = req.query;
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const offset = (pageNum - 1) * limitNum;
+        const where = { user_id: userId, is_ad: false };
+        if (status && status !== 'all') {
+            where.status = status;
+        }
+        if (frame) {
+            const { startDate } = parseTimeFrame(frame);
+            where.createdAt = { gte: startDate };
+        }
+        let orderBy = { createdAt: 'desc' };
+        switch (sort) {
+            case 'oldest': orderBy = { createdAt: 'asc' }; break;
+            case 'most_liked': orderBy = [{ likes: 'desc' }, { createdAt: 'desc' }]; break;
+            case 'most_viewed': orderBy = [{ views: 'desc' }, { createdAt: 'desc' }]; break;
+            case 'most_reported': orderBy = [{ report_count: 'desc' }, { createdAt: 'desc' }]; break;
+            default: break;
+        }
+        const [posts, totalCount] = await Promise.all([
+            prisma.post.findMany({
+                where,
+                include: {
+                    category: { select: { id: true, name: true, description: true, level: true, parent: { select: { id: true, name: true } } } },
+                    _count: { select: { postLikes: true, comments: true, postViews: true, postShares: true, reports: true, appeals: true } },
+                    reports: { include: { user: { select: { id: true, username: true, display_name: true } } }, orderBy: { createdAt: 'desc' }, take: 5 },
+                    appeals: { include: { user: { select: { id: true, username: true } } }, orderBy: { createdAt: 'desc' }, take: 3 }
+                },
+                orderBy,
+                take: limitNum,
+                skip: offset
+            }),
+            prisma.post.count({ where })
+        ]);
+        res.json({
+            status: 'success',
+            data: {
+                posts,
+                pagination: { page: pageNum, limit: limitNum, total: totalCount, totalPages: Math.ceil(totalCount / limitNum), hasNext: offset + limitNum < totalCount, hasPrev: pageNum > 1 },
+                filters: { status: status || 'all', sort, frame: frame || null }
+            }
+        });
+    } catch (error) {
+        console.error('Get admin user posts error:', error);
+        res.status(500).json({ status: 'error', message: 'Error fetching user posts', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    }
+};
+
+/** GET /admin/users/:userId/posts/engagement - User-level posts engagement summary, optional frame */
+exports.getAdminUserPostsEngagement = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { frame = '30d' } = req.query;
+        const { startDate } = parseTimeFrame(frame);
+        const exists = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+        if (!exists) return res.status(404).json({ status: 'error', message: 'User not found' });
+        const postsInFrame = await prisma.post.findMany({
+            where: { user_id: userId, createdAt: { gte: startDate }, is_ad: false },
+            select: { id: true, views: true, likes: true, comment_count: true, shares: true, createdAt: true }
+        });
+        const totalPosts = postsInFrame.length;
+        const totalViews = postsInFrame.reduce((s, p) => s + (p.views || 0), 0);
+        const totalLikes = postsInFrame.reduce((s, p) => s + (p.likes || 0), 0);
+        const totalComments = postsInFrame.reduce((s, p) => s + (p.comment_count || 0), 0);
+        const totalShares = postsInFrame.reduce((s, p) => s + (p.shares || 0), 0);
+        res.json({
+            status: 'success',
+            data: {
+                frame,
+                summary: { totalPostsInFrame: totalPosts, totalViews, totalLikes, totalComments, totalShares },
+                engagementRate: totalViews > 0 ? Math.round(((totalLikes + totalComments + totalShares) / totalViews) * 10000) / 100 : 0
+            }
+        });
+    } catch (error) {
+        console.error('Get admin user posts engagement error:', error);
+        res.status(500).json({ status: 'error', message: 'Error fetching engagement', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    }
+};
+
+/** GET /admin/posts/:postId/engagement - Post engagement in time buckets (frame: 1h|12h|24h|7d|30d) */
+exports.getPostEngagement = async (req, res) => {
+    try {
+        const { postId } = req.params;
+        const { frame = '24h' } = req.query;
+        const { startDate, interval } = parseTimeFrame(frame);
+        const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true } });
+        if (!post) return res.status(404).json({ status: 'error', message: 'Post not found' });
+        const trunc = interval === 'hour' ? 'hour' : 'day';
+        const [likesRaw, commentsRaw, viewsRaw] = await Promise.all([
+            trunc === 'hour'
+                ? prisma.$queryRaw`SELECT date_trunc('hour', "createdAt") AS period, COUNT(*)::int AS count FROM post_likes WHERE post_id = ${postId}::uuid AND "createdAt" >= ${startDate} GROUP BY date_trunc('hour', "createdAt") ORDER BY period ASC`
+                : prisma.$queryRaw`SELECT date_trunc('day', "createdAt") AS period, COUNT(*)::int AS count FROM post_likes WHERE post_id = ${postId}::uuid AND "createdAt" >= ${startDate} GROUP BY date_trunc('day', "createdAt") ORDER BY period ASC`,
+            trunc === 'hour'
+                ? prisma.$queryRaw`SELECT date_trunc('hour', comment_date) AS period, COUNT(*)::int AS count FROM comments WHERE post_id = ${postId}::uuid AND comment_date >= ${startDate} GROUP BY date_trunc('hour', comment_date) ORDER BY period ASC`
+                : prisma.$queryRaw`SELECT date_trunc('day', comment_date) AS period, COUNT(*)::int AS count FROM comments WHERE post_id = ${postId}::uuid AND comment_date >= ${startDate} GROUP BY date_trunc('day', comment_date) ORDER BY period ASC`,
+            trunc === 'hour'
+                ? prisma.$queryRaw`SELECT date_trunc('hour', "createdAt") AS period, COUNT(*)::int AS count FROM views WHERE post_id = ${postId}::uuid AND "createdAt" >= ${startDate} GROUP BY date_trunc('hour', "createdAt") ORDER BY period ASC`
+                : prisma.$queryRaw`SELECT date_trunc('day', "createdAt") AS period, COUNT(*)::int AS count FROM views WHERE post_id = ${postId}::uuid AND "createdAt" >= ${startDate} GROUP BY date_trunc('day', "createdAt") ORDER BY period ASC`
+        ]);
+        const byPeriod = {};
+        const add = (period, likes = 0, comments = 0, views = 0) => {
+            const key = period ? new Date(period).toISOString() : '';
+            if (!byPeriod[key]) byPeriod[key] = { periodStart: period, periodEnd: null, likes: 0, comments: 0, views: 0 };
+            byPeriod[key].likes += likes;
+            byPeriod[key].comments += comments;
+            byPeriod[key].views += views;
+        };
+        likesRaw.forEach(r => add(r.period, r.count || 0, 0, 0));
+        commentsRaw.forEach(r => add(r.period, 0, r.count || 0, 0));
+        viewsRaw.forEach(r => add(r.period, 0, 0, r.count || 0));
+        const buckets = Object.values(byPeriod).sort((a, b) => new Date(a.periodStart) - new Date(b.periodStart));
+        res.json({ status: 'success', data: { frame, buckets } });
+    } catch (error) {
+        console.error('Get post engagement error:', error);
+        res.status(500).json({ status: 'error', message: 'Error fetching post engagement', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    }
+};
+
+/** GET /admin/search - Unified search (q, type=all|users|posts), optional filters */
+exports.adminUnifiedSearch = async (req, res) => {
+    try {
+        const { q, type = 'all', page = 1, limit = 20, status, dateFrom, dateTo, hasReports, suspended } = req.query;
+        if (!q || !String(q).trim()) {
+            return res.status(400).json({ status: 'error', message: 'Query parameter q is required' });
+        }
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const pageNum = Math.max(1, parseInt(page));
+        const offset = (pageNum - 1) * limitNum;
+        const term = `%${String(q).trim()}%`;
+        const results = { users: [], posts: [] };
+        if (type === 'all' || type === 'users') {
+            const userWhere = {
+                OR: [
+                    { username: { contains: String(q).trim(), mode: 'insensitive' } },
+                    { display_name: { contains: String(q).trim(), mode: 'insensitive' } },
+                    { email: { contains: String(q).trim(), mode: 'insensitive' } }
+                ]
+            };
+            if (suspended === 'true') userWhere.status = 'suspended';
+            const [users, userTotal] = await Promise.all([
+                prisma.user.findMany({
+                    where: userWhere,
+                    select: { id: true, username: true, display_name: true, email: true, profile_picture: true, status: true, posts_count: true, createdAt: true },
+                    orderBy: { createdAt: 'desc' },
+                    take: type === 'users' ? limitNum : 10,
+                    skip: type === 'users' ? offset : 0
+                }),
+                prisma.user.count({ where: userWhere })
+            ]);
+            results.users = users;
+            results.userTotal = userTotal;
+        }
+        if (type === 'all' || type === 'posts') {
+            const postWhere = {
+                is_ad: false,
+                OR: [
+                    { title: { contains: String(q).trim(), mode: 'insensitive' } },
+                    { description: { contains: String(q).trim(), mode: 'insensitive' } },
+                    { id: q.trim() }
+                ]
+            };
+            if (status) postWhere.status = status;
+            if (hasReports === 'true') postWhere.report_count = { gt: 0 };
+            if (suspended === 'true') postWhere.status = 'suspended';
+            if (dateFrom || dateTo) {
+                postWhere.createdAt = {};
+                if (dateFrom) postWhere.createdAt.gte = new Date(dateFrom);
+                if (dateTo) postWhere.createdAt.lte = new Date(dateTo);
+            }
+            const [posts, postTotal] = await Promise.all([
+                prisma.post.findMany({
+                    where: postWhere,
+                    include: {
+                        user: { select: { id: true, username: true, display_name: true, profile_picture: true, status: true } },
+                        category: { select: { id: true, name: true } },
+                        _count: { select: { reports: true } }
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: type === 'posts' ? limitNum : 10,
+                    skip: type === 'posts' ? offset : 0
+                }),
+                prisma.post.count({ where: postWhere })
+            ]);
+            results.posts = posts;
+            results.postTotal = postTotal;
+        }
+        res.json({
+            status: 'success',
+            data: {
+                ...results,
+                pagination: type !== 'all' ? { page: pageNum, limit: limitNum, total: type === 'users' ? results.userTotal : results.postTotal } : undefined
+            }
+        });
+    } catch (error) {
+        console.error('Admin unified search error:', error);
+        res.status(500).json({ status: 'error', message: 'Search failed', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
+    }
+};
+
+/** GET /admin/users/suspended - Suspended users with report context (reporters, times, reasons) */
+exports.getSuspendedUsers = async (req, res) => {
+    try {
+        const { page = 1, limit = 20, sort = 'suspended_at_desc' } = req.query;
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+        const offset = (pageNum - 1) * limitNum;
+        const [users, totalCount] = await Promise.all([
+            prisma.user.findMany({
+                where: { status: 'suspended' },
+                select: {
+                    id: true, username: true, display_name: true, email: true, profile_picture: true, status: true,
+                    suspended_at: true, suspension_reason: true, posts_count: true, createdAt: true,
+                    country: { select: { id: true, name: true, code: true, flag_emoji: true } }
+                },
+                orderBy: sort === 'created_at_desc' ? { createdAt: 'desc' } : { suspended_at: 'desc' },
+                take: limitNum,
+                skip: offset
+            }),
+            prisma.user.count({ where: { status: 'suspended' } })
+        ]);
+        const reportsByUserId = await prisma.postReport.findMany({
+            where: { post: { user_id: { in: users.map(u => u.id) } } },
+            include: {
+                user: { select: { id: true, username: true, display_name: true, email: true } },
+                post: { select: { id: true, user_id: true, title: true, status: true } }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+        const reportsByOwner = {};
+        reportsByUserId.forEach(r => {
+            const ownerId = r.post?.user_id;
+            if (!ownerId) return;
+            if (!reportsByOwner[ownerId]) reportsByOwner[ownerId] = [];
+            reportsByOwner[ownerId].push({
+                id: r.id, post_id: r.post_id, reason: r.reason, description: r.description, status: r.status, createdAt: r.createdAt,
+                reporter: r.user
+            });
+        });
+        const enriched = users.map(u => ({
+            ...u,
+            reportedPostsCount: (reportsByOwner[u.id] || []).length ? new Set((reportsByOwner[u.id] || []).map(x => x.post_id)).size : 0,
+            totalReportsCount: (reportsByOwner[u.id] || []).length || 0,
+            reportReasons: (reportsByOwner[u.id] || []).reduce((acc, r) => { acc[r.reason] = (acc[r.reason] || 0) + 1; return acc; }, {}),
+            reports: reportsByOwner[u.id] || []
+        }));
+        res.json({
+            status: 'success',
+            data: {
+                users: enriched,
+                pagination: { page: pageNum, limit: limitNum, total: totalCount, totalPages: Math.ceil(totalCount / limitNum), hasNext: offset + limitNum < totalCount, hasPrev: pageNum > 1 }
+            }
+        });
+    } catch (error) {
+        console.error('Get suspended users error:', error);
+        res.status(500).json({ status: 'error', message: 'Error fetching suspended users', error: process.env.NODE_ENV === 'development' ? error.message : undefined });
     }
 };
