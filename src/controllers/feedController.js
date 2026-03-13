@@ -108,7 +108,10 @@ exports.getPublicFeed = async (req, res) => {
             }
         }
 
-        const where = buildBaseWhere(cursor);
+        const where = {
+            ...buildBaseWhere(cursor),
+            is_ad: false
+        };
 
         const posts = await prisma.post.findMany({
             where,
@@ -130,7 +133,11 @@ exports.getPublicFeed = async (req, res) => {
                 createdAt: true,
                 user: { select: USER_SELECT }
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: [
+                { is_featured: 'desc' },
+                { likes: 'desc' },
+                { createdAt: 'desc' }
+            ],
             take: limit
         });
 
@@ -169,7 +176,10 @@ exports.getPersonalizedFeed = async (req, res) => {
             }
         }
 
-        const where = buildBaseWhere(cursor);
+        const where = {
+            ...buildBaseWhere(cursor),
+            is_ad: false
+        };
 
         const posts = await prisma.post.findMany({
             where,
@@ -205,7 +215,11 @@ exports.getPersonalizedFeed = async (req, res) => {
                     take: 1
                 }
             },
-            orderBy: { createdAt: 'desc' },
+            orderBy: [
+                { is_featured: 'desc' },
+                { likes: 'desc' },
+                { createdAt: 'desc' }
+            ],
             take: limit
         });
 

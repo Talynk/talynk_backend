@@ -498,6 +498,7 @@ enum ChallengeStatus {
   approved
   rejected
   active
+  stopped
   ended
 }
 
@@ -521,6 +522,8 @@ model Challenge {
   approved_by           String?  @db.Uuid
   approved_at           DateTime?
   rejection_reason      String?  @db.Text
+  winners_confirmed_at  DateTime?
+  winners_confirmed_by  String?  @db.Uuid
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

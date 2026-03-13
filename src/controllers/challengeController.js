@@ -1,7 +1,7 @@
 const prisma = require('../lib/prisma');
 const path = require('path');
 const fs = require('fs').promises;
-const { clearCacheByPattern } = require('../utils/cache');
+const { clearCacheByPattern, getUserCache, setUserCache } = require('../utils/cache');
 const { emitEvent } = require('../lib/realtime');
 const { addVideoJob } = require('../queues/videoQueue');
 const { applyFeedReadyFilter } = require('../utils/postFilters');
@@ -332,8 +332,8 @@ exports.getAllChallenges = async (req, res) => {
         const { status, page = 1, limit = 20 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
-        // Only allow approved, active, or ended status - never pending or rejected
-        const allowedStatuses = ['approved', 'active', 'ended'];
+        // Only allow approved, active, ended, or stopped status - never pending or rejected
+        const allowedStatuses = ['approved', 'active', 'ended', 'stopped'];
         let statusFilter = ['approved', 'active']; // Default to approved/active
 
         if (status) {
@@ -508,7 +508,9 @@ exports.getEndedChallenges = async (req, res) => {
                 where: {
                     OR: [
                         {
-                            status: 'ended'
+                            status: {
+                                in: ['ended', 'stopped']
+                            }
                         },
                         {
                             status: {
@@ -546,7 +548,9 @@ exports.getEndedChallenges = async (req, res) => {
                 where: {
                     OR: [
                         {
-                            status: 'ended'
+                            status: {
+                                in: ['ended', 'stopped']
+                            }
                         },
                         {
                             status: {
@@ -896,7 +900,9 @@ exports.getChallengePosts = async (req, res) => {
     try {
         const { challengeId } = req.params;
         const { page = 1, limit = 20 } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const skip = (pageNumber - 1) * pageLimit;
 
         // Check if challenge exists
         let challenge = await prisma.challenge.findUnique({
@@ -910,7 +916,7 @@ exports.getChallengePosts = async (req, res) => {
             });
         }
 
-        // Only return posts from active/approved/ended challenges (not pending or rejected)
+        // Only return posts from active/approved/ended/stopped challenges (not pending or rejected)
         if (challenge.status === 'pending' || challenge.status === 'rejected') {
             return res.status(404).json({
                 status: 'error',
@@ -920,10 +926,11 @@ exports.getChallengePosts = async (req, res) => {
 
         const now = new Date();
         const endDate = new Date(challenge.end_date);
-        const isEnded = challenge.status === 'ended' || endDate < now;
+        const isOverStatus = challenge.status === 'ended' || challenge.status === 'stopped';
+        const isEnded = isOverStatus || endDate < now;
 
         // If challenge ended by date but status wasn't updated, mark ended and snapshot likes once
-        if (challenge.status !== 'ended' && endDate < now) {
+        if (!isOverStatus && endDate < now) {
             await prisma.challenge.update({
                 where: { id: challengeId },
                 data: { status: 'ended' }
@@ -932,7 +939,28 @@ exports.getChallengePosts = async (req, res) => {
             challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
         }
 
-        // For ended challenges: order by winner_rank (asc; nulls last in PostgreSQL), then likes at challenge end (desc), then submitted_at. For active: by submitted_at.
+        const winnersConfirmedAt = challenge.winners_confirmed_at;
+        const winnersVisible = !!(isEnded && winnersConfirmedAt);
+
+        // If challenge is over but winners are not yet confirmed, hide winners from public/mobile.
+        if (isEnded && !winnersVisible) {
+            return res.json({
+                status: 'success',
+                data: [],
+                pagination: {
+                    page: pageNumber,
+                    limit: pageLimit,
+                    total: 0,
+                    pages: 0
+                },
+                winners_visible: false,
+                winners_confirmed_at: null,
+                challenge_status: challenge.status
+            });
+        }
+
+        // For ended/stopped challenges with confirmed winners: order by winner_rank (asc; nulls last), then likes at challenge end (desc), then submitted_at.
+        // For active/approved challenges: order by submitted_at.
         const orderBy = isEnded
             ? [
                 { winner_rank: 'asc' },
@@ -948,7 +976,7 @@ exports.getChallengePosts = async (req, res) => {
                     post: applyFeedReadyFilter({})
                 },
                 skip,
-                take: parseInt(limit),
+                take: pageLimit,
                 orderBy,
                 include: {
                     post: {
@@ -1007,11 +1035,13 @@ exports.getChallengePosts = async (req, res) => {
             status: 'success',
             data,
             pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
+                page: pageNumber,
+                limit: pageLimit,
                 total,
-                pages: Math.ceil(total / parseInt(limit))
+                pages: Math.ceil(total / pageLimit)
             },
+            winners_visible: winnersVisible,
+            winners_confirmed_at: winnersConfirmedAt,
             ...(isEnded && { ordered_by: hasWinnerRanks ? 'winner_rank' : 'likes_at_challenge_end' })
         });
     } catch (error) {
@@ -1019,6 +1049,444 @@ exports.getChallengePosts = async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch challenge posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Aggregated winners per user (public/mobile). One row per user, only visible after winners are confirmed.
+exports.getAggregatedChallengeWinners = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { page = 1, limit = 10 } = req.query;
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const offset = (pageNumber - 1) * pageLimit;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        const now = new Date();
+        const endDate = new Date(challenge.end_date);
+        const isOverStatus = challenge.status === 'ended' || challenge.status === 'stopped';
+        const isEnded = isOverStatus || endDate < now;
+        const winnersConfirmedAt = challenge.winners_confirmed_at;
+        const winnersVisible = !!(isEnded && winnersConfirmedAt);
+
+        // If winners are not yet confirmed, expose metadata but no winners.
+        if (!winnersVisible) {
+            return res.json({
+                status: 'success',
+                data: [],
+                pagination: {
+                    page: pageNumber,
+                    limit: pageLimit,
+                    total: 0,
+                    pages: 0
+                },
+                winners_visible: false,
+                winners_confirmed_at: null,
+                challenge_status: challenge.status
+            });
+        }
+
+        const challengePosts = await prisma.challengePost.findMany({
+            where: { challenge_id: challengeId },
+            orderBy: [
+                { winner_rank: 'asc' },
+                { likes_at_challenge_end: 'desc' },
+                { submitted_at: 'desc' }
+            ],
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                post: {
+                    select: {
+                        id: true,
+                        likes: true,
+                        createdAt: true,
+                        video_url: true,
+                        hls_url: true,
+                        thumbnail_url: true,
+                        type: true,
+                        title: true,
+                        description: true
+                    }
+                }
+            }
+        });
+
+        // Aggregate per user
+        const byUser = new Map();
+        for (const cp of challengePosts) {
+            const key = cp.user_id;
+            if (!byUser.has(key)) {
+                byUser.set(key, {
+                    user_id: cp.user_id,
+                    user: cp.user,
+                    total_winner_posts: 0,
+                    total_likes_during_challenge: 0,
+                    winner_rank: cp.winner_rank ?? null,
+                    latest_submission_at: cp.submitted_at,
+                    posts: []
+                });
+            }
+            const agg = byUser.get(key);
+            agg.total_winner_posts += 1;
+            const likesDuring = cp.likes_at_challenge_end ?? 0;
+            agg.total_likes_during_challenge += likesDuring;
+            if (cp.winner_rank != null) {
+                if (agg.winner_rank == null || cp.winner_rank < agg.winner_rank) {
+                    agg.winner_rank = cp.winner_rank;
+                }
+            }
+            if (new Date(cp.submitted_at) > new Date(agg.latest_submission_at)) {
+                agg.latest_submission_at = cp.submitted_at;
+            }
+            agg.posts.push({
+                challenge_post_id: cp.id,
+                post_id: cp.post?.id,
+                likes_during_challenge: likesDuring,
+                total_likes: cp.post?.likes ?? 0,
+                winner_rank: cp.winner_rank ?? null,
+                submitted_at: cp.submitted_at
+            });
+        }
+
+        let aggregated = Array.from(byUser.values());
+
+        // Sort: winner_rank (min, nulls last), then likes sum desc, then latest submission desc
+        aggregated.sort((a, b) => {
+            const rankA = a.winner_rank ?? Infinity;
+            const rankB = b.winner_rank ?? Infinity;
+            if (rankA !== rankB) return rankA - rankB;
+            if (b.total_likes_during_challenge !== a.total_likes_during_challenge) {
+                return b.total_likes_during_challenge - a.total_likes_during_challenge;
+            }
+            return new Date(b.latest_submission_at) - new Date(a.latest_submission_at);
+        });
+
+        const total = aggregated.length;
+        const pageItems = aggregated.slice(offset, offset + pageLimit);
+
+        res.json({
+            status: 'success',
+            data: pageItems,
+            pagination: {
+                page: pageNumber,
+                limit: pageLimit,
+                total,
+                pages: Math.ceil(total / pageLimit)
+            },
+            winners_visible: true,
+            winners_confirmed_at: winnersConfirmedAt
+        });
+    } catch (error) {
+        console.error('Error fetching aggregated challenge winners:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch aggregated challenge winners',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Drill-down: get all posts for a specific winner (user) in a challenge
+exports.getChallengeWinnerUserPosts = async (req, res) => {
+    try {
+        const { challengeId, userId } = req.params;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            select: {
+                id: true,
+                status: true,
+                winners_confirmed_at: true
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        const now = new Date();
+        const isOverStatus = challenge.status === 'ended' || challenge.status === 'stopped';
+        const isEnded = isOverStatus || challenge.winners_confirmed_at != null || now > new Date();
+        const winnersVisible = !!(isEnded && challenge.winners_confirmed_at);
+
+        if (!winnersVisible) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Winners have not been announced yet'
+            });
+        }
+
+        const challengePosts = await prisma.challengePost.findMany({
+            where: {
+                challenge_id: challengeId,
+                user_id: userId
+            },
+            orderBy: [
+                { winner_rank: 'asc' },
+                { likes_at_challenge_end: 'desc' },
+                { submitted_at: 'desc' }
+            ],
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                post: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                profile_picture: true
+                            }
+                        },
+                        category: {
+                            select: {
+                                id: true,
+                                name: true
+                            }
+                        },
+                        _count: {
+                            select: {
+                                postLikes: true,
+                                comments: true,
+                                postViews: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const data = challengePosts.map(cp => ({
+            ...cp,
+            likes_during_challenge: cp.likes_at_challenge_end ?? null,
+            total_likes: cp.post?.likes ?? cp.post?._count?.postLikes ?? 0,
+            winner_rank: cp.winner_rank ?? null
+        }));
+
+        res.json({
+            status: 'success',
+            data,
+            winners_visible: true,
+            winners_confirmed_at: challenge.winners_confirmed_at
+        });
+    } catch (error) {
+        console.error('Error fetching challenge winner user posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch winner posts for user',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Participants ranking by total likes across their posts in the challenge.
+exports.getChallengeParticipantsRanking = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { page = 1, limit = 10, search } = req.query;
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const offset = (pageNumber - 1) * pageLimit;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            select: {
+                id: true,
+                status: true,
+                end_date: true,
+                winners_confirmed_at: true
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        const cacheKeyBase = `challenge_participants_ranking:${challengeId}`;
+        const cacheKey = search
+            ? `${cacheKeyBase}:search:${String(search).toLowerCase()}`
+            : cacheKeyBase;
+
+        // Short-lived cache for rankings
+        const cached = await getUserCache(cacheKey);
+        if (cached) {
+            return res.json({
+                status: 'success',
+                data: cached.data,
+                pagination: cached.pagination,
+                cached: true
+            });
+        }
+
+        const participants = await prisma.challengeParticipant.findMany({
+            where: { challenge_id: challengeId },
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true,
+                        follower_count: true,
+                        posts_count: true
+                    }
+                }
+            }
+        });
+
+        const challengePosts = await prisma.challengePost.findMany({
+            where: { challenge_id: challengeId },
+            include: {
+                post: {
+                    select: {
+                        id: true,
+                        likes: true,
+                        createdAt: true
+                    }
+                }
+            }
+        });
+
+        const isOverStatus = challenge.status === 'ended' || challenge.status === 'stopped';
+        const now = new Date();
+        const isEndedByTime = new Date(challenge.end_date) < now;
+        const isEnded = isOverStatus || isEndedByTime;
+
+        const statsByUser = new Map();
+        for (const cp of challengePosts) {
+            const key = cp.user_id;
+            if (!statsByUser.has(key)) {
+                statsByUser.set(key, {
+                    user_id: cp.user_id,
+                    total_posts: 0,
+                    total_likes: 0,
+                    latest_submission_at: cp.submitted_at
+                });
+            }
+            const agg = statsByUser.get(key);
+            agg.total_posts += 1;
+            const likesSource = isEnded && cp.likes_at_challenge_end != null
+                ? cp.likes_at_challenge_end
+                : (cp.post?.likes ?? 0);
+            agg.total_likes += likesSource;
+            if (new Date(cp.submitted_at) > new Date(agg.latest_submission_at)) {
+                agg.latest_submission_at = cp.submitted_at;
+            }
+        }
+
+        let rows = participants.map(p => {
+            const stats = statsByUser.get(p.user_id) || {
+                user_id: p.user_id,
+                total_posts: 0,
+                total_likes: 0,
+                latest_submission_at: p.joined_at
+            };
+            return {
+                user_id: p.user_id,
+                user: p.user,
+                total_posts: stats.total_posts,
+                total_likes: stats.total_likes,
+                latest_submission_at: stats.latest_submission_at
+            };
+        });
+
+        if (search) {
+            const lower = String(search).toLowerCase();
+            rows = rows.filter(row => {
+                const username = row.user?.username || '';
+                const displayName = row.user?.display_name || '';
+                return (
+                    username.toLowerCase().includes(lower) ||
+                    displayName.toLowerCase().includes(lower)
+                );
+            });
+        }
+
+        rows.sort((a, b) => {
+            if (b.total_likes !== a.total_likes) {
+                return b.total_likes - a.total_likes;
+            }
+            return new Date(b.latest_submission_at) - new Date(a.latest_submission_at);
+        });
+
+        const total = rows.length;
+        const pageItems = rows.slice(offset, offset + pageLimit);
+
+        const responsePayload = {
+            data: pageItems,
+            pagination: {
+                page: pageNumber,
+                limit: pageLimit,
+                total,
+                pages: Math.ceil(total / pageLimit)
+            }
+        };
+
+        // Cache briefly (e.g. 15 seconds) to smooth bursts
+        await setUserCache(cacheKey, responsePayload, 15);
+
+        res.json({
+            status: 'success',
+            ...responsePayload
+        });
+    } catch (error) {
+        console.error('Error fetching challenge participants ranking:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenge participants ranking',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
@@ -1558,7 +2026,7 @@ exports.getUsersWithMostChallenges = async (req, res) => {
                 organizedChallenges: {
                     where: {
                         status: {
-                            in: ['approved', 'active', 'ended']
+                            in: ['approved', 'active', 'ended', 'stopped']
                         }
                     },
                     select: {
@@ -1759,7 +2227,9 @@ exports.getChallengeStatistics = async (req, res) => {
             }),
             prisma.challenge.count({
                 where: {
-                    status: 'ended'
+                    status: {
+                        in: ['ended', 'stopped']
+                    }
                 }
             }),
             prisma.challengeParticipant.count(),
@@ -1768,7 +2238,7 @@ exports.getChallengeStatistics = async (req, res) => {
                 where: {
                     has_rewards: true,
                     status: {
-                        in: ['approved', 'active', 'ended']
+                        in: ['approved', 'active', 'ended', 'stopped']
                     }
                 }
             }),

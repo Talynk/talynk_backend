@@ -2010,10 +2010,13 @@ exports.getFollowingPosts = async (req, res) => {
             });
         }
 
-        // Determine sort order
+        // Determine sort order. For feeds we prefer most liked, then newest.
         const orderBy = sort === 'oldest'
             ? { createdAt: 'asc' }
-            : { createdAt: 'desc' };
+            : [
+                { likes: 'desc' },
+                { createdAt: 'desc' }
+            ];
 
         // Get posts from users that the current user follows
         console.log('About to query database with userId:', userId);
@@ -2221,7 +2224,11 @@ exports.getOptimizedFeed = async (req, res) => {
                         }
                     }
                 },
-                orderBy: { createdAt: 'desc' },
+                orderBy: [
+                    { is_featured: 'desc' },
+                    { likes: 'desc' },
+                    { createdAt: 'desc' }
+                ],
                 take: Math.floor(parseInt(limit) * 0.3) // 30% featured posts
             });
 
@@ -2279,7 +2286,11 @@ exports.getOptimizedFeed = async (req, res) => {
                         }
                     }
                 },
-                orderBy: { createdAt: 'desc' },
+                orderBy: [
+                    { is_featured: 'desc' },
+                    { likes: 'desc' },
+                    { createdAt: 'desc' }
+                ],
                 take: Math.floor(parseInt(limit) * 0.7) // 70% following posts
             });
 

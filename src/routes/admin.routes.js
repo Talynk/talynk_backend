@@ -88,6 +88,9 @@ router.put('/challenges/:challengeId/approve', authenticate, isAdmin, adminContr
 router.put('/challenges/:challengeId/reject', authenticate, isAdmin, adminController.rejectChallenge);
 router.put('/challenges/:challengeId/stop', authenticate, isAdmin, adminController.stopChallenge);
 router.put('/challenges/:challengeId/winners/reorder', authenticate, isAdmin, adminController.reorderChallengeWinners);
+router.put('/challenges/:challengeId/winners/confirm', authenticate, isAdmin, adminController.confirmChallengeWinners);
+router.get('/challenges/:challengeId/winners/aggregated', authenticate, isAdmin, adminController.getAggregatedChallengeWinners);
+router.get('/challenges/:challengeId/participants/ranking', authenticate, isAdmin, adminController.getChallengeParticipantsRanking);
 
 // Ads (admin-only; signed-URL flow first, then multipart legacy, then CRUD)
 router.post('/ads/create-upload', authenticate, isAdmin, adminController.createAdUpload);

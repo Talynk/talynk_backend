@@ -32,8 +32,17 @@ router.get('/:challengeId', optionalAuthenticate, challengeController.getChallen
 // Get participants of a challenge (public - accessible to unauthenticated users)
 router.get('/:challengeId/participants', challengeController.getChallengeParticipants);
 
+// Participants ranking by total likes (public/mobile)
+router.get('/:challengeId/participants/ranking', challengeController.getChallengeParticipantsRanking);
+
 // Get posts for a challenge (public - accessible to unauthenticated users)
 router.get('/:challengeId/posts', challengeController.getChallengePosts);
+
+// Aggregated winners per user (public/mobile)
+router.get('/:challengeId/winners', challengeController.getAggregatedChallengeWinners);
+
+// Drill-down: posts for a specific winner (user) in a challenge
+router.get('/:challengeId/winners/:userId/posts', challengeController.getChallengeWinnerUserPosts);
 
 // ===== PROTECTED ROUTES (Authentication required) =====
 

@@ -72,6 +72,7 @@ const bcrypt = require('bcryptjs');
 const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
 const { writeAuditLog } = require('../logging/auditLogger');
+const challengeController = require('./challengeController');
 
 // Register a new admin
 exports.registerAdmin = async (req, res) => {
@@ -7214,7 +7215,7 @@ exports.getChallengeById = async (req, res) => {
         }
 
         // For ended challenges, order posts by winner_rank (asc, nulls last), then likes_at_challenge_end desc, then submitted_at desc (same as public winners list)
-        const isEnded = challenge.status === 'ended';
+        const isEnded = challenge.status === 'ended' || challenge.status === 'stopped';
         const posts = isEnded
             ? [...challenge.posts].sort((a, b) => {
                 const rankA = a.winner_rank ?? Infinity;
@@ -7600,6 +7601,167 @@ exports.rejectChallenge = async (req, res) => {
     }
 };
 
+// Confirm winners for an ended/stopped challenge (admin only)
+// After confirmation, winners become visible in mobile/public APIs.
+exports.confirmChallengeWinners = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const userId = req.user.id;
+        const userRole = req.user.role;
+
+        const adminId = await getAdminId(userId, userRole);
+        if (!adminId) {
+            return res.status(403).json({
+                status: 'error',
+                message: 'Admin ID could not be resolved'
+            });
+        }
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                notification: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status !== 'ended' && challenge.status !== 'stopped') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only ended or stopped challenges can have winners confirmed'
+            });
+        }
+
+        if (challenge.winners_confirmed_at) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Winners are already confirmed for this challenge'
+            });
+        }
+
+        const winnersCount = await prisma.challengePost.count({
+            where: { challenge_id: challengeId }
+        });
+
+        if (winnersCount === 0) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'No challenge posts found to confirm winners'
+            });
+        }
+
+        const now = new Date();
+        const updatedChallenge = await prisma.challenge.update({
+            where: { id: challengeId },
+            data: {
+                winners_confirmed_at: now,
+                winners_confirmed_by: adminId
+            }
+        });
+
+        // Notify all participants that winners have been announced
+        const notifications = [];
+        for (const participant of challenge.participants) {
+            const participantUser = participant.user;
+            if (!participantUser || !participantUser.username || !participantUser.notification) continue;
+
+            const notification = await prisma.notification.create({
+                data: {
+                    userID: participantUser.username,
+                    message: `Winners for "${challenge.name}" have been announced.`,
+                    type: 'challenge_winners_announced',
+                    isRead: false,
+                    challengeId: challenge.id
+                }
+            });
+
+            notifications.push({
+                db: notification,
+                user: participantUser
+            });
+        }
+
+        // Emit real-time notifications to participants
+        for (const item of notifications) {
+            const { db: notification, user } = item;
+            emitEvent('notification:created', {
+                userId: user.id,
+                userID: user.username,
+                notification: {
+                    id: notification.id,
+                    type: notification.type,
+                    message: notification.message,
+                    isRead: notification.isRead,
+                    createdAt: notification.createdAt,
+                    metadata: {
+                        challengeId: challenge.id,
+                        challengeName: challenge.name
+                    }
+                }
+            });
+        }
+
+        // Clear any challenge-related caches and emit winners-confirmed event
+        try {
+            const { clearCacheByPattern } = require('../utils/cache');
+            await clearCacheByPattern(`challenge:${challengeId}`);
+            await clearCacheByPattern('challenge_participants_ranking');
+            await clearCacheByPattern('challenge_winners');
+        } catch (cacheErr) {
+            console.warn('Failed to clear challenge caches after winners confirmation:', cacheErr);
+        }
+
+        emitEvent('challenge:winnersConfirmed', {
+            challengeId,
+            winnersConfirmedAt: updatedChallenge.winners_confirmed_at
+        });
+
+        // Log admin action
+        loggers.audit('confirm_challenge_winners', {
+            adminId,
+            challengeId,
+            challengeName: challenge.name
+        });
+        writeAuditLog({
+            actionType: 'ADMIN_CONFIRM_CHALLENGE_WINNERS',
+            resourceType: 'challenge',
+            resourceId: challengeId,
+            actorAdminId: adminId,
+            details: { challengeName: challenge.name },
+            req,
+        }).catch(() => {});
+
+        res.json({
+            status: 'success',
+            message: 'Challenge winners confirmed successfully',
+            data: updatedChallenge
+        });
+    } catch (error) {
+        console.error('Error confirming challenge winners:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to confirm challenge winners',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // Stop/End a challenge (admin only)
 exports.stopChallenge = async (req, res) => {
     try {
@@ -7625,10 +7787,10 @@ exports.stopChallenge = async (req, res) => {
             });
         }
 
-        if (challenge.status === 'ended') {
+        if (challenge.status === 'ended' || challenge.status === 'stopped') {
             return res.status(400).json({
                 status: 'error',
-                message: 'Challenge is already ended'
+                message: 'Challenge is already ended or stopped'
             });
         }
 
@@ -7642,7 +7804,7 @@ exports.stopChallenge = async (req, res) => {
         const updatedChallenge = await prisma.challenge.update({
             where: { id: challengeId },
             data: {
-                status: 'ended'
+                status: 'stopped'
             }
         });
 
@@ -7823,6 +7985,153 @@ exports.reorderChallengeWinners = async (req, res) => {
     }
 };
 
+// Aggregated winners per user (admin). One row per user with totals and min winner_rank.
+exports.getAggregatedChallengeWinners = async (req, res) => {
+    try {
+        const { challengeId } = req.params;
+        const { page = 1, limit = 10 } = req.query;
+        const pageNumber = parseInt(page);
+        const pageLimit = parseInt(limit);
+        const offset = (pageNumber - 1) * pageLimit;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Only approved/active/ended/stopped challenges have winners'
+            });
+        }
+
+        const challengePosts = await prisma.challengePost.findMany({
+            where: { challenge_id: challengeId },
+            orderBy: [
+                { winner_rank: 'asc' },
+                { likes_at_challenge_end: 'desc' },
+                { submitted_at: 'desc' }
+            ],
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true,
+                        follower_count: true,
+                        posts_count: true
+                    }
+                },
+                post: {
+                    select: {
+                        id: true,
+                        likes: true,
+                        createdAt: true,
+                        video_url: true,
+                        hls_url: true,
+                        thumbnail_url: true,
+                        type: true,
+                        title: true,
+                        description: true
+                    }
+                }
+            }
+        });
+
+        const byUser = new Map();
+        for (const cp of challengePosts) {
+            const key = cp.user_id;
+            if (!byUser.has(key)) {
+                byUser.set(key, {
+                    user_id: cp.user_id,
+                    user: cp.user,
+                    total_winner_posts: 0,
+                    total_likes_during_challenge: 0,
+                    winner_rank: cp.winner_rank ?? null,
+                    latest_submission_at: cp.submitted_at,
+                    posts: []
+                });
+            }
+            const agg = byUser.get(key);
+            agg.total_winner_posts += 1;
+            const likesDuring = cp.likes_at_challenge_end ?? 0;
+            agg.total_likes_during_challenge += likesDuring;
+            if (cp.winner_rank != null) {
+                if (agg.winner_rank == null || cp.winner_rank < agg.winner_rank) {
+                    agg.winner_rank = cp.winner_rank;
+                }
+            }
+            if (new Date(cp.submitted_at) > new Date(agg.latest_submission_at)) {
+                agg.latest_submission_at = cp.submitted_at;
+            }
+            agg.posts.push({
+                challenge_post_id: cp.id,
+                post_id: cp.post?.id,
+                likes_during_challenge: likesDuring,
+                total_likes: cp.post?.likes ?? 0,
+                winner_rank: cp.winner_rank ?? null,
+                submitted_at: cp.submitted_at
+            });
+        }
+
+        let aggregated = Array.from(byUser.values());
+
+        aggregated.sort((a, b) => {
+            const rankA = a.winner_rank ?? Infinity;
+            const rankB = b.winner_rank ?? Infinity;
+            if (rankA !== rankB) return rankA - rankB;
+            if (b.total_likes_during_challenge !== a.total_likes_during_challenge) {
+                return b.total_likes_during_challenge - a.total_likes_during_challenge;
+            }
+            return new Date(b.latest_submission_at) - new Date(a.latest_submission_at);
+        });
+
+        const total = aggregated.length;
+        const pageItems = aggregated.slice(offset, offset + pageLimit);
+
+        res.json({
+            status: 'success',
+            data: pageItems,
+            pagination: {
+                page: pageNumber,
+                limit: pageLimit,
+                total,
+                pages: Math.ceil(total / pageLimit)
+            },
+            winners_confirmed_at: challenge.winners_confirmed_at ?? null
+        });
+    } catch (error) {
+        console.error('Error fetching aggregated challenge winners (admin):', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch aggregated challenge winners',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Participants ranking for admin – delegates to public ranking implementation for shared behavior.
+exports.getChallengeParticipantsRanking = async (req, res) => {
+    try {
+        return await challengeController.getChallengeParticipantsRanking(req, res);
+    } catch (error) {
+        console.error('Error fetching challenge participants ranking (admin):', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch challenge participants ranking',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Ads (admin-only; posts with is_ad=true, same video pipeline as normal posts)
 // Signed-URL flow (recommended): create-upload -> client uploads to URL -> upload-complete.
@@ -7865,29 +8174,35 @@ exports.createAdUpload = async (req, res) => {
 
         const title = (req.body.title || 'Ad').trim().slice(0, 255);
         const description = (req.body.description || '').trim() || null;
+        const mimeTypeRaw = (req.body.mimeType || req.body.contentType || 'video/mp4').toString();
+        const mimeType = mimeTypeRaw.toLowerCase();
+
+        const isStaticImage = mimeType.startsWith('image/') && mimeType !== 'image/gif';
+        const postType = isStaticImage ? 'image' : 'video';
+        const initialProcessingStatus = postType === 'video' ? 'uploading' : null;
 
         const post = await prisma.post.create({
             data: {
                 user_id: null,
                 admin_id: adminId,
                 status: 'active',
-                type: 'video',
+                type: postType,
                 is_ad: true,
                 title: title || 'Ad',
                 description,
                 content: description,
                 video_url: null,
                 thumbnail_url: null,
-                processing_status: 'uploading',
+                processing_status: initialProcessingStatus,
                 uploadDate: new Date(),
             },
         });
 
-        const fileExt = '.mp4';
+        const fileExt = isStaticImage ? '.jpg' : '.mp4';
         const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
         const r2Key = `media/ads/${fileName}`;
 
-        const { uploadUrl, publicUrl } = await getSignedUploadUrl(r2Key, 'video/mp4', AD_UPLOAD_SESSION_TTL);
+        const { uploadUrl, publicUrl } = await getSignedUploadUrl(r2Key, mimeType, AD_UPLOAD_SESSION_TTL);
         await redis.setex(`${AD_UPLOAD_SESSION_PREFIX}${post.id}`, AD_UPLOAD_SESSION_TTL, r2Key);
 
         loggers.audit('create_ad_upload_session', { adminId, adId: post.id, title: post.title });
@@ -7955,7 +8270,7 @@ exports.completeAdUpload = async (req, res) => {
         if (!post) {
             return res.status(404).json({ status: 'error', message: 'Ad not found' });
         }
-        if (post.processing_status !== 'uploading') {
+        if (post.type === 'video' && post.processing_status !== 'uploading') {
             return res.status(400).json({
                 status: 'error',
                 message: 'Ad is not in uploading state',
@@ -7983,26 +8298,37 @@ exports.completeAdUpload = async (req, res) => {
 
         const publicVideoUrl = `${R2_PUBLIC_DOMAIN}/${r2Key}`;
 
-        await prisma.post.update({
-            where: { id: postId },
-            data: {
-                video_url: publicVideoUrl,
-                processing_status: 'pending',
-            },
-        });
-
-        try {
-            await addVideoJob(postId, publicVideoUrl);
-        } catch (queueErr) {
-            const errMsg = queueErr?.message || 'Failed to queue video for processing';
+        if (post.type === 'video') {
             await prisma.post.update({
                 where: { id: postId },
-                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
+                data: {
+                    video_url: publicVideoUrl,
+                    processing_status: 'pending',
+                },
             });
-            return res.status(500).json({
-                status: 'error',
-                message: 'Upload complete but processing queue failed. Ad left in failed state; you can retry from ads list.',
-                data: { postId }
+
+            try {
+                await addVideoJob(postId, publicVideoUrl);
+            } catch (queueErr) {
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                await prisma.post.update({
+                    where: { id: postId },
+                    data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
+                });
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Upload complete but processing queue failed. Ad left in failed state; you can retry from ads list.',
+                    data: { postId }
+                });
+            }
+        } else {
+            // Static image ad: no video processing pipeline required.
+            await prisma.post.update({
+                where: { id: postId },
+                data: {
+                    video_url: publicVideoUrl,
+                    processing_status: null
+                },
             });
         }
 
@@ -8021,11 +8347,13 @@ exports.completeAdUpload = async (req, res) => {
 
         res.json({
             status: 'success',
-            message: 'Upload complete. Video is being processed.',
+            message: post.type === 'video'
+                ? 'Upload complete. Video is being processed.'
+                : 'Upload complete. Image ad is ready.',
             data: {
                 postId,
                 video_url: publicVideoUrl,
-                processing_status: 'pending',
+                processing_status: post.type === 'video' ? 'pending' : null,
             },
         });
     } catch (error) {
@@ -8048,8 +8376,8 @@ exports.createAd = async (req, res) => {
         if (!req.file) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Video file is required',
-                details: 'Upload a video file with the field name "file".'
+                message: 'Media file is required',
+                details: 'Upload an image or video file with the field name "file".'
             });
         }
         const video_url = req.file.r2Url || req.file.localUrl || req.file.supabaseUrl || '';
@@ -8060,47 +8388,54 @@ exports.createAd = async (req, res) => {
                 details: 'The file upload was not successful.'
             });
         }
-        const isVideo = req.file.mimetype && req.file.mimetype.startsWith('video/');
-        if (!isVideo) {
+        const mimetype = req.file.mimetype || '';
+        const isVideo = mimetype.startsWith('video/') || mimetype === 'image/gif';
+        const isImage = mimetype.startsWith('image/') && mimetype !== 'image/gif';
+        if (!isVideo && !isImage) {
             return res.status(400).json({
                 status: 'error',
-                message: 'Only video files are allowed for ads.'
+                message: 'Only image and video files are allowed for ads.'
             });
         }
         const title = (req.body.title || 'Ad').trim().slice(0, 255);
         const description = (req.body.description || '').trim() || null;
+
+        const postType = isImage ? 'image' : 'video';
+        const initialProcessingStatus = postType === 'video' ? 'pending' : null;
 
         const post = await prisma.post.create({
             data: {
                 user_id: null,
                 admin_id: adminId,
                 status: 'active',
-                type: 'video',
+                type: postType,
                 is_ad: true,
                 title: title || 'Ad',
                 description,
                 content: description,
                 video_url,
                 thumbnail_url: null,
-                processing_status: 'pending',
+                processing_status: initialProcessingStatus,
                 uploadDate: new Date()
             }
         });
 
-        const { addVideoJob } = require('../queues/videoQueue');
-        try {
-            await addVideoJob(post.id, video_url);
-        } catch (queueErr) {
-            const errMsg = queueErr?.message || 'Failed to queue video for processing';
-            await prisma.post.update({
-                where: { id: post.id },
-                data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
-            });
-            return res.status(500).json({
-                status: 'error',
-                message: 'Ad created but processing queue failed. You can retry from ads list.',
-                data: { id: post.id }
-            });
+        if (postType === 'video') {
+            const { addVideoJob } = require('../queues/videoQueue');
+            try {
+                await addVideoJob(post.id, video_url);
+            } catch (queueErr) {
+                const errMsg = queueErr?.message || 'Failed to queue video for processing';
+                await prisma.post.update({
+                    where: { id: post.id },
+                    data: { processing_status: 'failed', processing_error: errMsg.slice(0, 500) }
+                });
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Ad created but processing queue failed. You can retry from ads list.',
+                    data: { id: post.id }
+                });
+            }
         }
 
         const { clearCacheByPattern, CACHE_KEYS } = require('../utils/cache');
@@ -8118,12 +8453,14 @@ exports.createAd = async (req, res) => {
 
         res.status(201).json({
             status: 'success',
-            message: 'Ad created. Video is being processed.',
+            message: postType === 'video'
+                ? 'Ad created. Video is being processed.'
+                : 'Image ad created successfully.',
             data: {
                 id: post.id,
                 title: post.title,
                 description: post.description,
-                processing_status: 'pending',
+                processing_status: post.processing_status,
                 video_url: post.video_url
             }
         });

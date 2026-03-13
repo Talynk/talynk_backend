@@ -268,6 +268,32 @@ exports.toggleLike = async (req, res) => {
 
         emitEvent('post:likeToggled', { postId, userId, isLiked: result.isLiked, likeCount: result.likeCount });
 
+        // If this post is part of any challenges, emit challenge like updates and clear participant ranking cache.
+        try {
+            const challengeLinks = await prisma.challengePost.findMany({
+                where: { post_id: postId },
+                select: {
+                    challenge_id: true,
+                    user_id: true
+                }
+            });
+
+            if (challengeLinks.length > 0) {
+                await clearCacheByPattern('challenge_participants_ranking');
+
+                for (const link of challengeLinks) {
+                    emitEvent('challenge:likesUpdated', {
+                        challengeId: link.challenge_id,
+                        postId,
+                        userIdOwner: link.user_id,
+                        likeCount: result.likeCount
+                    });
+                }
+            }
+        } catch (challengeLikeErr) {
+            console.warn('Failed to emit challenge like update:', challengeLikeErr);
+        }
+
         // Create notification if user liked the post (not if they unliked it)
         if (result.isLiked) {
             await createLikeNotification(userId, postId);
