@@ -1207,11 +1207,14 @@ exports.getAggregatedChallengeWinners = async (req, res) => {
 
         let aggregated = Array.from(byUser.values());
 
-        // Sort: winner_rank (min, nulls last), then likes sum desc, then latest submission desc
+        // Sort: when admin has set winner_rank on posts, use min winner_rank per user (asc, nulls last). Otherwise default to total likes per user (desc). Tie-break: total likes, then latest submission.
+        const hasAdminRank = aggregated.some(a => a.winner_rank != null);
         aggregated.sort((a, b) => {
-            const rankA = a.winner_rank ?? Infinity;
-            const rankB = b.winner_rank ?? Infinity;
-            if (rankA !== rankB) return rankA - rankB;
+            if (hasAdminRank) {
+                const rankA = a.winner_rank ?? Infinity;
+                const rankB = b.winner_rank ?? Infinity;
+                if (rankA !== rankB) return rankA - rankB;
+            }
             if (b.total_likes_during_challenge !== a.total_likes_during_challenge) {
                 return b.total_likes_during_challenge - a.total_likes_during_challenge;
             }
@@ -1231,7 +1234,8 @@ exports.getAggregatedChallengeWinners = async (req, res) => {
                 pages: Math.ceil(total / pageLimit)
             },
             winners_visible: true,
-            winners_confirmed_at: winnersConfirmedAt
+            winners_confirmed_at: winnersConfirmedAt,
+            ordered_by: hasAdminRank ? 'admin_rank' : 'total_likes_per_user'
         });
     } catch (error) {
         console.error('Error fetching aggregated challenge winners:', error);
