@@ -74,6 +74,7 @@ const { emitEvent } = require('../lib/realtime');
 const { writeAuditLog } = require('../logging/auditLogger');
 const challengeController = require('./challengeController');
 const { buildUserSearchWhere, parsePagination, normalizeQuery } = require('../utils/userSearch');
+const { buildPostSearchWhere, buildChallengeSearchWhere } = require('../utils/adminSearch');
 
 // Register a new admin
 exports.registerAdmin = async (req, res) => {
@@ -173,113 +174,57 @@ exports.registerAdmin = async (req, res) => {
 
 exports.searchPosts = async (req, res) => {
     try {
-        const { query, type, page = 1, limit = 10 } = req.query;
-
-        // Validate required parameters
-        if (!query || !type) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Query and type parameters are required'
-            });
-        }
-
-        // Validate search type
-        const validTypes = ['post_id', 'post_title', 'user_id', 'username', 'date', 'status'];
-        if (!validTypes.includes(type)) {
-            return res.status(400).json({
-                status: 'error',
-                message: `Invalid search type. Must be one of: ${validTypes.join(', ')}`
-            });
-        }
-
-        // Build where clause based on search type
+        const { q, search, query, type, page = 1, limit = 10, status, dateFrom, dateTo, hasReports } = req.query;
+        const searchQ = normalizeQuery(q) ?? normalizeQuery(search);
         let whereClause = {};
-        let includeClause = {
-            user: {
-                select: {
-                    id: true,
-                    username: true,
-                    email: true,
-                    status: true,
-                    profile_picture: true,
-                    bio: true
-                }
-            },
-            category: {
-                select: {
-                    id: true,
-                    name: true
-                }
+        if (searchQ) {
+            whereClause = buildPostSearchWhere(searchQ, { status, dateFrom, dateTo, hasReports, excludeAds: false });
+        } else if (query != null && type) {
+            const validTypes = ['post_id', 'post_title', 'user_id', 'username', 'date', 'status'];
+            if (!validTypes.includes(type)) {
+                return res.status(400).json({ status: 'error', message: `Invalid search type. Must be one of: ${validTypes.join(', ')}` });
             }
+            const qStr = String(query).trim();
+            switch (type) {
+                case 'post_id': whereClause.id = qStr; break;
+                case 'post_title': whereClause.title = { contains: qStr, mode: 'insensitive' }; break;
+                case 'user_id': whereClause.user_id = qStr; break;
+                case 'username': whereClause.user = { username: { contains: qStr, mode: 'insensitive' } }; break;
+                case 'date': {
+                    const d = new Date(qStr);
+                    if (Number.isNaN(d.getTime())) return res.status(400).json({ status: 'error', message: 'Invalid date format. Use YYYY-MM-DD' });
+                    const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+                    whereClause.createdAt = { gte: d, lt: nextDay };
+                    break;
+                }
+                case 'status':
+                    if (!['pending', 'approved', 'rejected', 'frozen', 'active', 'draft', 'suspended'].includes(qStr.toLowerCase())) {
+                        return res.status(400).json({ status: 'error', message: 'Invalid status' });
+                    }
+                    whereClause.status = qStr.toLowerCase();
+                    break;
+            }
+        } else {
+            return res.status(400).json({ status: 'error', message: 'Provide q (or search) for aggressive search, or query and type for legacy search' });
+        }
+
+        const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
+        const includeClause = {
+            user: { select: { id: true, username: true, email: true, status: true, profile_picture: true, bio: true } },
+            category: { select: { id: true, name: true } }
         };
 
-        switch (type) {
-            case 'post_id':
-                whereClause.id = query;
-                break;
-            case 'post_title':
-                whereClause.title = {
-                    contains: query,
-                    mode: 'insensitive'
-                };
-                break;
-            case 'user_id':
-                whereClause.user_id = query;
-                break;
-            case 'username':
-                whereClause.user = {
-                    username: {
-                        contains: query,
-                        mode: 'insensitive'
-                    }
-                };
-                break;
-            case 'date':
-                const searchDate = new Date(query);
-                if (isNaN(searchDate.getTime())) {
-                    return res.status(400).json({
-                        status: 'error',
-                        message: 'Invalid date format. Use YYYY-MM-DD'
-                    });
-                }
-                const nextDay = new Date(searchDate.getTime() + 24 * 60 * 60 * 1000);
-                whereClause.createdAt = {
-                    gte: searchDate,
-                    lt: nextDay
-                };
-                break;
-            case 'status':
-                const validStatuses = ['pending', 'approved', 'rejected', 'frozen'];
-                if (!validStatuses.includes(query.toLowerCase())) {
-                    return res.status(400).json({
-                        status: 'error',
-                        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
-                    });
-                }
-                whereClause.status = query.toLowerCase();
-                break;
-        }
-
-        // Calculate pagination
-        const offset = (parseInt(page) - 1) * parseInt(limit);
-
-        // Perform the search with pagination using Prisma
         const [posts, totalCount] = await Promise.all([
             prisma.post.findMany({
                 where: whereClause,
                 include: includeClause,
-                orderBy: {
-                    createdAt: 'desc'
-                },
-                take: parseInt(limit),
+                orderBy: { createdAt: 'desc' },
+                take: limitNum,
                 skip: offset
             }),
-            prisma.post.count({
-                where: whereClause
-            })
+            prisma.post.count({ where: whereClause })
         ]);
 
-        // Format the response
         const formattedPosts = posts.map(post => ({
             id: post.id,
             title: post.title,
@@ -304,20 +249,19 @@ exports.searchPosts = async (req, res) => {
                 posts: formattedPosts,
                 pagination: {
                     total: totalCount,
-                    page: parseInt(page),
-                    limit: parseInt(limit),
-                    totalPages: Math.ceil(totalCount / limit),
-                    hasNext: page * limit < totalCount,
-                    hasPrev: page > 1
+                    page: pageNum,
+                    limit: limitNum,
+                    totalPages: Math.ceil(totalCount / limitNum),
+                    hasNext: pageNum * limitNum < totalCount,
+                    hasPrev: pageNum > 1
                 },
                 searchInfo: {
-                    query,
-                    type,
+                    query: searchQ || query,
+                    type: searchQ ? 'aggressive' : type,
                     resultsCount: formattedPosts.length
                 }
             }
         });
-
     } catch (error) {
         console.error('Error searching posts:', error);
         res.status(500).json({
@@ -6681,18 +6625,17 @@ exports.sendNotificationToUser = async (req, res) => {
     }
 };
 
-// Get all posts with full detail for admin (list view with everything needed for moderation)
+// Get all posts with full detail for admin (list view with everything needed for moderation). Optional q/search for aggressive multi-field search.
 exports.getAdminAllPosts = async (req, res) => {
     try {
-        const { page = 1, limit = 20, status, sort = 'newest' } = req.query;
-        const pageNum = Math.max(1, parseInt(page));
-        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
-        const offset = (pageNum - 1) * limitNum;
+        const { page = 1, limit = 20, status, sort = 'newest', q, search } = req.query;
+        const searchQ = normalizeQuery(q) ?? normalizeQuery(search);
+        const postWhere = buildPostSearchWhere(searchQ ?? '', {
+            status: status && status !== 'all' ? status : undefined
+        });
+        const whereClause = Object.keys(postWhere).length > 0 ? postWhere : (status && status !== 'all' ? { status } : {});
 
-        const whereClause = {};
-        if (status && status !== 'all') {
-            whereClause.status = status;
-        }
+        const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
 
         let orderBy = {};
         switch (sort) {
@@ -7002,22 +6945,22 @@ exports.getAdminPosts = async (req, res) => {
 
 // ===== CHALLENGE MANAGEMENT =====
 
-// Get all challenge requests (pending, approved, rejected, active, ended)
+// Get all challenge requests (pending, approved, rejected, active, ended). Optional q/search for aggressive multi-field search.
 exports.getAllChallenges = async (req, res) => {
     try {
-        const { status, page = 1, limit = 20 } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const { status, page = 1, limit = 20, q, search } = req.query;
+        const searchQ = normalizeQuery(q) ?? normalizeQuery(search);
+        const challengeWhere = buildChallengeSearchWhere(searchQ ?? '', { status });
+        const where = Object.keys(challengeWhere).length > 0 ? challengeWhere : (status ? { status } : {});
 
-        const where = status ? { status } : {};
+        const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
 
         const [challenges, total] = await Promise.all([
             prisma.challenge.findMany({
                 where,
-                skip,
-                take: parseInt(limit),
-                orderBy: {
-                    createdAt: 'desc'
-                },
+                skip: offset,
+                take: limitNum,
+                orderBy: { createdAt: 'desc' },
                 include: {
                     organizer: {
                         select: {
@@ -7050,10 +6993,10 @@ exports.getAllChallenges = async (req, res) => {
             status: 'success',
             data: challenges,
             pagination: {
-                page: parseInt(page),
-                limit: parseInt(limit),
+                page: pageNum,
+                limit: limitNum,
                 total,
-                pages: Math.ceil(total / parseInt(limit))
+                pages: Math.ceil(total / limitNum)
             }
         });
     } catch (error) {
@@ -9315,41 +9258,33 @@ exports.adminUnifiedSearch = async (req, res) => {
             return res.status(400).json({ status: 'error', message: 'Query parameter q is required and must be non-empty' });
         }
         const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
-        const results = { users: [], posts: [] };
-        if (type === 'all' || type === 'users') {
+        const validTypes = ['all', 'users', 'posts', 'challenges'];
+        const searchType = validTypes.includes(type) ? type : 'all';
+        const results = { users: [], posts: [], challenges: [] };
+
+        if (searchType === 'all' || searchType === 'users') {
             const userWhere = buildUserSearchWhere(q, { status, role, dateFrom, dateTo, suspended });
             const [users, userTotal] = await Promise.all([
                 prisma.user.findMany({
                     where: userWhere,
                     select: { id: true, username: true, display_name: true, email: true, profile_picture: true, status: true, posts_count: true, createdAt: true },
                     orderBy: { createdAt: 'desc' },
-                    take: type === 'users' ? limitNum : 10,
-                    skip: type === 'users' ? offset : 0
+                    take: searchType === 'users' ? limitNum : 10,
+                    skip: searchType === 'users' ? offset : 0
                 }),
                 prisma.user.count({ where: userWhere })
             ]);
             results.users = users;
             results.userTotal = userTotal;
         }
-        if (type === 'all' || type === 'posts') {
-            const postQuery = queryNorm;
-            const postWhere = {
-                is_ad: false,
-                OR: [
-                    { title: { contains: postQuery, mode: 'insensitive' } },
-                    { description: { contains: postQuery, mode: 'insensitive' } },
-                    { id: postQuery }
-                ]
-            };
-            if (status != null && String(status).trim()) postWhere.status = String(status).trim();
-            if (hasReports === true || String(hasReports).toLowerCase() === 'true') postWhere.report_count = { gt: 0 };
-            if (suspended === 'true') postWhere.status = 'suspended';
-            if (dateFrom != null || dateTo != null) {
-                postWhere.createdAt = {};
-                if (dateFrom != null) { const d = new Date(dateFrom); if (!Number.isNaN(d.getTime())) postWhere.createdAt.gte = d; }
-                if (dateTo != null) { const d = new Date(dateTo); if (!Number.isNaN(d.getTime())) postWhere.createdAt.lte = d; }
-                if (Object.keys(postWhere.createdAt).length === 0) delete postWhere.createdAt;
-            }
+        if (searchType === 'all' || searchType === 'posts') {
+            const postWhere = buildPostSearchWhere(queryNorm, {
+                status: suspended === 'true' ? 'suspended' : status,
+                hasReports,
+                dateFrom,
+                dateTo,
+                excludeAds: true
+            });
             const [posts, postTotal] = await Promise.all([
                 prisma.post.findMany({
                     where: postWhere,
@@ -9359,19 +9294,39 @@ exports.adminUnifiedSearch = async (req, res) => {
                         _count: { select: { reports: true } }
                     },
                     orderBy: { createdAt: 'desc' },
-                    take: type === 'posts' ? limitNum : 10,
-                    skip: type === 'posts' ? offset : 0
+                    take: searchType === 'posts' ? limitNum : 10,
+                    skip: searchType === 'posts' ? offset : 0
                 }),
                 prisma.post.count({ where: postWhere })
             ]);
             results.posts = posts;
             results.postTotal = postTotal;
         }
+        if (searchType === 'all' || searchType === 'challenges') {
+            const challengeWhere = buildChallengeSearchWhere(queryNorm, { status, dateFrom, dateTo });
+            const [challenges, challengeTotal] = await Promise.all([
+                prisma.challenge.findMany({
+                    where: challengeWhere,
+                    include: {
+                        organizer: { select: { id: true, username: true, display_name: true, email: true, profile_picture: true } },
+                        _count: { select: { participants: true, posts: true } }
+                    },
+                    orderBy: { createdAt: 'desc' },
+                    take: searchType === 'challenges' ? limitNum : 10,
+                    skip: searchType === 'challenges' ? offset : 0
+                }),
+                prisma.challenge.count({ where: challengeWhere })
+            ]);
+            results.challenges = challenges;
+            results.challengeTotal = challengeTotal;
+        }
+
+        const totalForType = searchType === 'users' ? results.userTotal : searchType === 'posts' ? results.postTotal : searchType === 'challenges' ? results.challengeTotal : undefined;
         res.json({
             status: 'success',
             data: {
                 ...results,
-                pagination: type !== 'all' ? { page: pageNum, limit: limitNum, total: type === 'users' ? results.userTotal : results.postTotal } : undefined
+                pagination: searchType !== 'all' ? { page: pageNum, limit: limitNum, total: totalForType } : undefined
             }
         });
     } catch (error) {
