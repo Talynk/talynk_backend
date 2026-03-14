@@ -5,6 +5,7 @@ const { clearCacheByPattern, getUserCache, setUserCache } = require('../utils/ca
 const { emitEvent } = require('../lib/realtime');
 const { addVideoJob } = require('../queues/videoQueue');
 const { applyFeedReadyFilter } = require('../utils/postFilters');
+const { buildUserSearchWhere, normalizeQuery } = require('../utils/userSearch');
 
 /**
  * Snapshot each challenge post's like count at challenge end (for ranking and transparency).
@@ -1490,9 +1491,10 @@ exports.getChallengeParticipantsRanking = async (req, res) => {
             });
         }
 
+        const searchNorm = normalizeQuery(search);
         const cacheKeyBase = `challenge_participants_ranking:${challengeId}`;
-        const cacheKey = search
-            ? `${cacheKeyBase}:search:${String(search).toLowerCase()}`
+        const cacheKey = searchNorm
+            ? `${cacheKeyBase}:search:${searchNorm.toLowerCase()}`
             : cacheKeyBase;
 
         // Short-lived cache for rankings
@@ -1506,8 +1508,16 @@ exports.getChallengeParticipantsRanking = async (req, res) => {
             });
         }
 
+        const participantWhere = { challenge_id: challengeId };
+        if (searchNorm) {
+            const userWhere = buildUserSearchWhere(searchNorm);
+            if (Object.keys(userWhere).length > 0) {
+                participantWhere.user = userWhere;
+            }
+        }
+
         const participants = await prisma.challengeParticipant.findMany({
-            where: { challenge_id: challengeId },
+            where: participantWhere,
             include: {
                 user: {
                     select: {
@@ -1578,17 +1588,7 @@ exports.getChallengeParticipantsRanking = async (req, res) => {
             };
         });
 
-        if (search) {
-            const lower = String(search).toLowerCase();
-            rows = rows.filter(row => {
-                const username = row.user?.username || '';
-                const displayName = row.user?.display_name || '';
-                return (
-                    username.toLowerCase().includes(lower) ||
-                    displayName.toLowerCase().includes(lower)
-                );
-            });
-        }
+        // Search is applied at DB level via participantWhere.user; no extra in-memory filter needed
 
         rows.sort((a, b) => {
             if (b.total_likes !== a.total_likes) {

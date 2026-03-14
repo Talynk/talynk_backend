@@ -73,6 +73,7 @@ const { loggers } = require('../middleware/extendedLogger');
 const { emitEvent } = require('../lib/realtime');
 const { writeAuditLog } = require('../logging/auditLogger');
 const challengeController = require('./challengeController');
+const { buildUserSearchWhere, parsePagination, normalizeQuery } = require('../utils/userSearch');
 
 // Register a new admin
 exports.registerAdmin = async (req, res) => {
@@ -3134,87 +3135,58 @@ exports.getFlaggedPosts = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
     try {
-        // Get users with basic information
-        const users = await prisma.user.findMany({
-            select: {
-                id: true,
-                username: true,
-                email: true,
-                createdAt: true,
-                status: true,
-                posts_count: true,
-                phone1: true,
-                phone2: true,
-                last_active_date: true,
-                profile_picture: true,
-                bio: true,
-                last_login: true,
-                date_of_birth: true,
-                country_id: true,
-                follower_count: true,
-                total_profile_views: true,
-                interests: true,
-                role: true
-            }
-        });
+        const { q, search, page = 1, limit = 50, status, role, dateFrom, dateTo, suspended, country_id } = req.query;
+        const searchQuery = normalizeQuery(q) ?? normalizeQuery(search);
+        const userWhere = buildUserSearchWhere(searchQuery ?? '', { status, role, dateFrom, dateTo, suspended, country_id });
+        const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
 
-        // Get approved and pending post counts for all users
-        const approvedCounts = await prisma.post.groupBy({
-            by: ['user_id'],
-            where: { status: 'active' },
-            _count: {
-                id: true
-            }
-        });
+        const [users, total] = await Promise.all([
+            prisma.user.findMany({
+                where: userWhere,
+                select: {
+                    id: true,
+                    username: true,
+                    display_name: true,
+                    email: true,
+                    createdAt: true,
+                    status: true,
+                    posts_count: true,
+                    phone1: true,
+                    phone2: true,
+                    last_active_date: true,
+                    profile_picture: true,
+                    bio: true,
+                    last_login: true,
+                    date_of_birth: true,
+                    country_id: true,
+                    follower_count: true,
+                    total_profile_views: true,
+                    interests: true,
+                    role: true
+                },
+                orderBy: { createdAt: 'desc' },
+                take: limitNum,
+                skip: offset
+            }),
+            prisma.user.count({ where: userWhere })
+        ]);
 
-        const pendingCounts = await prisma.post.groupBy({
-            by: ['user_id'],
-            where: { status: 'draft' },
-            _count: {
-                id: true
-            }
-        });
+        const userIds = users.map(u => u.id);
+        let approvedCountMap = {}; let pendingCountMap = {}; let totalViewsMap = {}; let suspendedCountMap = {};
+        if (userIds.length > 0) {
+            const basePostWhere = { user_id: { in: userIds } };
+            const [approvedCounts, pendingCounts, userViews, suspendedCounts] = await Promise.all([
+                prisma.post.groupBy({ by: ['user_id'], where: { ...basePostWhere, status: 'active' }, _count: { id: true } }),
+                prisma.post.groupBy({ by: ['user_id'], where: { ...basePostWhere, status: 'draft' }, _count: { id: true } }),
+                prisma.post.groupBy({ by: ['user_id'], where: basePostWhere, _sum: { views: true } }),
+                prisma.post.groupBy({ by: ['user_id'], where: { ...basePostWhere, status: 'suspended' }, _count: { id: true } })
+            ]);
+            approvedCounts.forEach(c => { approvedCountMap[c.user_id] = c._count.id; });
+            pendingCounts.forEach(c => { pendingCountMap[c.user_id] = c._count.id; });
+            userViews.forEach(v => { totalViewsMap[v.user_id] = v._sum.views || 0; });
+            suspendedCounts.forEach(c => { suspendedCountMap[c.user_id] = c._count.id; });
+        }
 
-        // Get total views for all users' posts
-        const userViews = await prisma.post.groupBy({
-            by: ['user_id'],
-            _sum: {
-                views: true
-            }
-        });
-
-        // Create lookup maps for quick access
-        const approvedCountMap = {};
-        const pendingCountMap = {};
-        const totalViewsMap = {};
-            
-        approvedCounts.forEach(count => {
-            approvedCountMap[count.user_id] = count._count.id;
-        });
-            
-        pendingCounts.forEach(count => {
-            pendingCountMap[count.user_id] = count._count.id;
-        });
-
-        userViews.forEach(view => {
-            totalViewsMap[view.user_id] = view._sum.views || 0;
-        });
-
-        // Get suspended posts count for all users
-        const suspendedCounts = await prisma.post.groupBy({
-            by: ['user_id'],
-            where: { status: 'suspended' },
-            _count: {
-                id: true
-            }
-        });
-
-        const suspendedCountMap = {};
-        suspendedCounts.forEach(count => {
-            suspendedCountMap[count.user_id] = count._count.id;
-        });
-
-        // Enhance user objects with post counts, total views, and suspended posts count
         const enhancedUsers = users.map(user => {
             const suspendedPostsCount = suspendedCountMap[user.id] || 0;
             return {
@@ -3222,15 +3194,18 @@ exports.getAllUsers = async (req, res) => {
                 postsApproved: approvedCountMap[user.id] || 0,
                 postsPending: pendingCountMap[user.id] || 0,
                 totalPostViews: totalViewsMap[user.id] || 0,
-                suspendedPostsCount: suspendedPostsCount,
+                suspendedPostsCount,
                 isAtSuspensionThreshold: suspendedPostsCount >= 3 && user.status === 'active'
             };
         });
 
         res.json({
-            message:'Users fetched successfully',
+            message: 'Users fetched successfully',
             status: 'success',
-            data: { users: enhancedUsers }
+            data: {
+                users: enhancedUsers,
+                pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) }
+            }
         });
     } catch (error) {
         console.log(error);
@@ -9331,27 +9306,18 @@ exports.getPostEngagement = async (req, res) => {
     }
 };
 
-/** GET /admin/search - Unified search (q, type=all|users|posts), optional filters */
+/** GET /admin/search - Unified search (q, type=all|users|posts), optional filters. User search is aggressive and type-tolerant. */
 exports.adminUnifiedSearch = async (req, res) => {
     try {
-        const { q, type = 'all', page = 1, limit = 20, status, dateFrom, dateTo, hasReports, suspended } = req.query;
-        if (!q || !String(q).trim()) {
-            return res.status(400).json({ status: 'error', message: 'Query parameter q is required' });
+        const { q, type = 'all', page = 1, limit = 20, status, dateFrom, dateTo, hasReports, suspended, role } = req.query;
+        const queryNorm = normalizeQuery(q);
+        if (!queryNorm) {
+            return res.status(400).json({ status: 'error', message: 'Query parameter q is required and must be non-empty' });
         }
-        const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
-        const pageNum = Math.max(1, parseInt(page));
-        const offset = (pageNum - 1) * limitNum;
-        const term = `%${String(q).trim()}%`;
+        const { pageNum, limitNum, offset } = parsePagination(page, limit, { maxLimit: 100 });
         const results = { users: [], posts: [] };
         if (type === 'all' || type === 'users') {
-            const userWhere = {
-                OR: [
-                    { username: { contains: String(q).trim(), mode: 'insensitive' } },
-                    { display_name: { contains: String(q).trim(), mode: 'insensitive' } },
-                    { email: { contains: String(q).trim(), mode: 'insensitive' } }
-                ]
-            };
-            if (suspended === 'true') userWhere.status = 'suspended';
+            const userWhere = buildUserSearchWhere(q, { status, role, dateFrom, dateTo, suspended });
             const [users, userTotal] = await Promise.all([
                 prisma.user.findMany({
                     where: userWhere,
@@ -9366,21 +9332,23 @@ exports.adminUnifiedSearch = async (req, res) => {
             results.userTotal = userTotal;
         }
         if (type === 'all' || type === 'posts') {
+            const postQuery = queryNorm;
             const postWhere = {
                 is_ad: false,
                 OR: [
-                    { title: { contains: String(q).trim(), mode: 'insensitive' } },
-                    { description: { contains: String(q).trim(), mode: 'insensitive' } },
-                    { id: q.trim() }
+                    { title: { contains: postQuery, mode: 'insensitive' } },
+                    { description: { contains: postQuery, mode: 'insensitive' } },
+                    { id: postQuery }
                 ]
             };
-            if (status) postWhere.status = status;
-            if (hasReports === 'true') postWhere.report_count = { gt: 0 };
+            if (status != null && String(status).trim()) postWhere.status = String(status).trim();
+            if (hasReports === true || String(hasReports).toLowerCase() === 'true') postWhere.report_count = { gt: 0 };
             if (suspended === 'true') postWhere.status = 'suspended';
-            if (dateFrom || dateTo) {
+            if (dateFrom != null || dateTo != null) {
                 postWhere.createdAt = {};
-                if (dateFrom) postWhere.createdAt.gte = new Date(dateFrom);
-                if (dateTo) postWhere.createdAt.lte = new Date(dateTo);
+                if (dateFrom != null) { const d = new Date(dateFrom); if (!Number.isNaN(d.getTime())) postWhere.createdAt.gte = d; }
+                if (dateTo != null) { const d = new Date(dateTo); if (!Number.isNaN(d.getTime())) postWhere.createdAt.lte = d; }
+                if (Object.keys(postWhere.createdAt).length === 0) delete postWhere.createdAt;
             }
             const [posts, postTotal] = await Promise.all([
                 prisma.post.findMany({
