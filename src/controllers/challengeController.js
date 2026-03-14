@@ -29,6 +29,36 @@ async function snapshotLikesAtChallengeEnd(challengeId) {
 }
 exports.snapshotLikesAtChallengeEnd = snapshotLikesAtChallengeEnd;
 
+/**
+ * Assign initial winner ranks 1..10 to the top 10 ChallengePosts by likes_at_challenge_end (desc), then submitted_at (desc).
+ * Call after snapshotLikesAtChallengeEnd when a challenge becomes ended or stopped.
+ * @param {string} challengeId
+ */
+async function assignInitialWinnerRanks(challengeId) {
+    const top = await prisma.challengePost.findMany({
+        where: { challenge_id: challengeId },
+        orderBy: [
+            { likes_at_challenge_end: 'desc' },
+            { submitted_at: 'desc' }
+        ],
+        select: { id: true },
+        take: 10
+    });
+    await prisma.$transaction(async (tx) => {
+        await tx.challengePost.updateMany({
+            where: { challenge_id: challengeId },
+            data: { winner_rank: null }
+        });
+        for (let i = 0; i < top.length; i++) {
+            await tx.challengePost.update({
+                where: { id: top[i].id },
+                data: { winner_rank: i + 1 }
+            });
+        }
+    });
+}
+exports.assignInitialWinnerRanks = assignInitialWinnerRanks;
+
 // Create a new challenge request
 exports.createChallenge = async (req, res) => {
     try {
@@ -936,6 +966,7 @@ exports.getChallengePosts = async (req, res) => {
                 data: { status: 'ended' }
             });
             await snapshotLikesAtChallengeEnd(challengeId);
+            await assignInitialWinnerRanks(challengeId);
             challenge = await prisma.challenge.findUnique({ where: { id: challengeId } });
         }
 
@@ -1212,7 +1243,107 @@ exports.getAggregatedChallengeWinners = async (req, res) => {
     }
 };
 
-// Drill-down: get all posts for a specific winner (user) in a challenge
+// Get all posts a given user (participant) submitted to a challenge. Works for any participant, before or after winners confirmation.
+exports.getChallengeParticipantPosts = async (req, res) => {
+    try {
+        const { challengeId, userId } = req.params;
+
+        const challenge = await prisma.challenge.findUnique({
+            where: { id: challengeId },
+            select: {
+                id: true,
+                status: true,
+                winners_confirmed_at: true
+            }
+        });
+
+        if (!challenge) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        if (challenge.status === 'pending' || challenge.status === 'rejected') {
+            return res.status(404).json({
+                status: 'error',
+                message: 'Challenge not found'
+            });
+        }
+
+        const challengePosts = await prisma.challengePost.findMany({
+            where: {
+                challenge_id: challengeId,
+                user_id: userId
+            },
+            orderBy: [
+                { winner_rank: 'asc' },
+                { likes_at_challenge_end: 'desc' },
+                { submitted_at: 'desc' }
+            ],
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        username: true,
+                        display_name: true,
+                        profile_picture: true
+                    }
+                },
+                post: {
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                username: true,
+                                display_name: true,
+                                profile_picture: true
+                            }
+                        },
+                        category: {
+                            select: {
+                                id: true,
+                                name: true
+                            }
+                        },
+                        _count: {
+                            select: {
+                                postLikes: true,
+                                comments: true,
+                                postViews: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const data = challengePosts.map(cp => ({
+            ...cp,
+            likes_during_challenge: cp.likes_at_challenge_end ?? null,
+            total_likes: cp.post?.likes ?? cp.post?._count?.postLikes ?? 0,
+            winner_rank: cp.winner_rank ?? null
+        }));
+
+        const winnersVisible = !!(challenge.winners_confirmed_at);
+
+        res.json({
+            status: 'success',
+            data,
+            winners_visible: winnersVisible,
+            winners_confirmed_at: challenge.winners_confirmed_at
+        });
+    } catch (error) {
+        console.error('Error fetching challenge participant posts:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to fetch participant posts',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Drill-down: get all posts for a specific winner (user) in a challenge. Only when winners are confirmed.
 exports.getChallengeWinnerUserPosts = async (req, res) => {
     try {
         const { challengeId, userId } = req.params;

@@ -1236,6 +1236,14 @@ exports.manageUserAccount = async (req, res) => {
             data: updateData
         });
 
+        if (action === 'suspend') {
+            emitEvent('user:account_suspended', {
+                userId: id,
+                reason: reason || null,
+                suspended_at: updateData.suspended_at
+            });
+        }
+
         const adminId = await getAdminId(req.user?.id, req.user?.role);
         writeAuditLog({
             actionType: `ADMIN_${action.toUpperCase()}_USER`,
@@ -7809,8 +7817,9 @@ exports.stopChallenge = async (req, res) => {
         });
 
         // Snapshot like counts for each challenge post (for ranking and transparency after challenge ends)
-        const { snapshotLikesAtChallengeEnd } = require('./challengeController');
+        const { snapshotLikesAtChallengeEnd, assignInitialWinnerRanks } = require('./challengeController');
         await snapshotLikesAtChallengeEnd(challengeId);
+        await assignInitialWinnerRanks(challengeId);
 
         // Notify organizer
         await prisma.notification.create({

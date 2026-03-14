@@ -1,6 +1,35 @@
 const jwt = require('jsonwebtoken');
+const prisma = require('../lib/prisma');
 
-const authenticate = (req, res, next) => {
+/**
+ * If the token belongs to a user (role === 'user'), check current status in DB.
+ * Suspended users: tokens are invalid, return 403 so client can log out and show reason.
+ * Frozen users: same behavior for consistency.
+ */
+async function assertUserNotSuspendedOrFrozen(decoded) {
+    if (decoded.role !== 'user' || !decoded.id) return null;
+    const user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: { status: true, suspension_reason: true }
+    });
+    if (!user) return null;
+    if (user.status === 'suspended') {
+        return {
+            code: 'account_suspended',
+            message: 'Your account has been suspended. Please contact support for assistance.',
+            reason: user.suspension_reason || undefined
+        };
+    }
+    if (user.status === 'frozen') {
+        return {
+            code: 'account_frozen',
+            message: 'Your account has been frozen. Please contact support for assistance.'
+        };
+    }
+    return null;
+}
+
+const authenticate = async (req, res, next) => {
     try {
         // Get token from header
         const authHeader = req.headers.authorization;
@@ -28,11 +57,14 @@ const authenticate = (req, res, next) => {
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
-            // Check if account is frozen
-            if (decoded.status === 'frozen') {
+            // For users, enforce current status from DB: suspended/frozen = token invalid, log out
+            const block = await assertUserNotSuspendedOrFrozen(decoded);
+            if (block) {
                 return res.status(403).json({
                     status: 'error',
-                    message: 'Your account has been frozen. Please contact support for assistance.'
+                    code: block.code,
+                    message: block.message,
+                    ...(block.reason != null && { reason: block.reason })
                 });
             }
             
@@ -116,7 +148,7 @@ const isApprover = (req, res, next) => {
  * Sets req.user if token is valid, but doesn't fail if token is missing or invalid
  * Used for endpoints that should work for both authenticated and unauthenticated users
  */
-const optionalAuthenticate = (req, res, next) => {
+const optionalAuthenticate = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
         
@@ -136,11 +168,14 @@ const optionalAuthenticate = (req, res, next) => {
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
             
-            // Check if account is frozen - this should still fail
-            if (decoded.status === 'frozen') {
+            // For users, enforce current status from DB: suspended/frozen = token invalid
+            const block = await assertUserNotSuspendedOrFrozen(decoded);
+            if (block) {
                 return res.status(403).json({
                     status: 'error',
-                    message: 'Your account has been frozen. Please contact support for assistance.'
+                    code: block.code,
+                    message: block.message,
+                    ...(block.reason != null && { reason: block.reason })
                 });
             }
             

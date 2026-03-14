@@ -47,12 +47,21 @@ const checkAndSuspendUser = async (userId, postId = null) => {
 
         // Check if user should be suspended
         if (suspendedPostsCount >= SUSPENDED_POSTS_THRESHOLD && user.status === 'active') {
+            const autoReason = `Automatically suspended due to ${suspendedPostsCount} suspended posts. Please contact support for review.`;
             // Suspend the user
             await prisma.user.update({
                 where: { id: userId },
                 data: {
-                    status: 'suspended'
+                    status: 'suspended',
+                    suspended_at: new Date(),
+                    suspension_reason: autoReason
                 }
+            });
+
+            emitEvent('user:account_suspended', {
+                userId,
+                reason: autoReason,
+                suspended_at: new Date()
             });
 
             // Create notification for the user

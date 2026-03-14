@@ -107,6 +107,18 @@ const emitEvent = (event, payload) => {
       }
       break;
 
+    case 'user:account_suspended':
+      if (payload.userId) {
+        websocketServer.broadcastToUser(payload.userId, {
+          type: 'account_suspended',
+          code: 'account_suspended',
+          message: 'Your account has been suspended. Please contact support for assistance.',
+          reason: payload.reason || undefined,
+          suspended_at: payload.suspended_at
+        });
+      }
+      break;
+
     default:
       // For other events, try to broadcast if it has a postId
       if (payload.postId) {

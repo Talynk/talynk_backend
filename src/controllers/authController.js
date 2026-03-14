@@ -978,7 +978,7 @@ exports.refreshToken = async (req, res) => {
                 user.role = 'approver';
             }
         } else if (decoded.role === 'user') {
-            user = await prisma.user.findFirst({ 
+            const dbUser = await prisma.user.findFirst({ 
                 where: { 
                     id: decoded.id,
                     role: 'user'
@@ -987,9 +987,27 @@ exports.refreshToken = async (req, res) => {
                     id: true,
                     email: true,
                     username: true,
-                    role: true
+                    role: true,
+                    status: true,
+                    suspension_reason: true
                 }
             });
+            if (dbUser && dbUser.status === 'suspended') {
+                return res.status(403).json({
+                    status: 'error',
+                    code: 'account_suspended',
+                    message: 'Your account has been suspended. Please contact support for assistance.',
+                    ...(dbUser.suspension_reason && { reason: dbUser.suspension_reason })
+                });
+            }
+            if (dbUser && dbUser.status === 'frozen') {
+                return res.status(403).json({
+                    status: 'error',
+                    code: 'account_frozen',
+                    message: 'Your account has been frozen. Please contact support for assistance.'
+                });
+            }
+            user = dbUser;
         }
 
         if (!user) {

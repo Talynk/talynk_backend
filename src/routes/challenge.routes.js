@@ -34,6 +34,8 @@ router.get('/:challengeId/participants', challengeController.getChallengePartici
 
 // Participants ranking by total likes (public/mobile)
 router.get('/:challengeId/participants/ranking', challengeController.getChallengeParticipantsRanking);
+// Posts submitted by a participant in a challenge (any participant, before or after winners confirmation)
+router.get('/:challengeId/participants/:userId/posts', challengeController.getChallengeParticipantPosts);
 
 // Get posts for a challenge (public - accessible to unauthenticated users)
 router.get('/:challengeId/posts', challengeController.getChallengePosts);
